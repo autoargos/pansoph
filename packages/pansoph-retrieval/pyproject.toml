@@ -11,6 +11,7 @@ dependencies = ["pansoph-types>=0.0.1", "pansoph-authz>=0.0.1", "pydantic>=2.7",
 [project.optional-dependencies]
 qdrant = ["qdrant-client>=1.12"]
 pgvectorscale = ["psycopg[binary]>=3.2"]
+eval = ["ragas>=0.2", "deepeval>=1.0"]
 
 [project.entry-points."pansoph.vectorstores"]
 qdrant = "pansoph_retrieval.adapters_vector:QdrantStore"
