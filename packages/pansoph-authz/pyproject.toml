@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Yash Karande" }]
-dependencies = ["pansoph-types>=0.0.1", "pydantic>=2.7"]
+dependencies = ["pansoph-types>=0.0.1", "pydantic>=2.7", "httpx>=0.27"]
 
 [project.optional-dependencies]
 spicedb = ["authzed>=1.0"]
@@ -16,6 +16,7 @@ openfga = ["openfga-sdk>=0.9"]
 [project.entry-points."pansoph.authz"]
 spicedb = "pansoph_authz.adapters.spicedb:SpiceDBAuthz"
 openfga = "pansoph_authz.adapters.openfga:OpenFGAAuthz"
+none = "pansoph_authz.adapters.noop:NoOpAuthz"
 
 [build-system]
 requires = ["hatchling"]

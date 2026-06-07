@@ -2217,6 +2217,7 @@ name = "pansoph-authz"
 version = "0.0.1"
 source = { editable = "packages/pansoph-authz" }
 dependencies = [
+    { name = "httpx" },
     { name = "pansoph-types" },
     { name = "pydantic" },
 ]
@@ -2232,6 +2233,7 @@ spicedb = [
 [package.metadata]
 requires-dist = [
     { name = "authzed", marker = "extra == 'spicedb'", specifier = ">=1.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "openfga-sdk", marker = "extra == 'openfga'", specifier = ">=0.9" },
     { name = "pansoph-types", editable = "packages/pansoph-types" },
     { name = "pydantic", specifier = ">=2.7" },

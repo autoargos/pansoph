@@ -43,6 +43,13 @@ def _ns_id(principal: Principal) -> str:
     return f"{principal.ns}_{principal.id}" if principal.ns else principal.id
 
 
+def _safe_obj(object_id: str) -> str:
+    """SpiceDB object ids may not contain ':'. Document ids do ("conn:inst:src"),
+    so map ':' to '/', which SpiceDB allows. Applied symmetrically on write and
+    check, and reversed when reading results, so callers keep their original ids."""
+    return object_id.replace(":", "/")
+
+
 class SpiceDBAuthz(AuthzPort):
     def __init__(self, endpoint: str, preshared_key: str) -> None:
         self._endpoint = endpoint
@@ -66,7 +73,7 @@ class SpiceDBAuthz(AuthzPort):
     def _relationship(self, tup: Tuple) -> Any:
         from authzed.api.v1 import ObjectReference, Relationship, SubjectReference
 
-        resource = ObjectReference(object_type=tup.object_type, object_id=tup.object_id)
+        resource = ObjectReference(object_type=tup.object_type, object_id=_safe_obj(tup.object_id))
         subject_type = "group" if tup.subject.type == "group" else "user"
         subject = SubjectReference(
             object=ObjectReference(object_type=subject_type, object_id=_ns_id(tup.subject)),
@@ -124,13 +131,15 @@ class SpiceDBAuthz(AuthzPort):
         subj = SubjectReference(
             object=ObjectReference(object_type="user", object_id=_ns_id(subject))
         )
+        # Map the SpiceDB-safe object id back to the caller's original id.
+        safe_to_original = {_safe_obj(oid): oid for oid in object_ids}
         items = [
             CheckBulkPermissionsRequestItem(
-                resource=ObjectReference(object_type="document", object_id=oid),
+                resource=ObjectReference(object_type="document", object_id=safe),
                 permission=permission,
                 subject=subj,
             )
-            for oid in object_ids
+            for safe in safe_to_original
         ]
         resp = await self._client().CheckBulkPermissions(
             CheckBulkPermissionsRequest(consistency=consistency, items=items)
@@ -139,5 +148,5 @@ class SpiceDBAuthz(AuthzPort):
         allowed: set[str] = set()
         for pair in resp.pairs:
             if pair.HasField("item") and pair.item.permissionship == has:
-                allowed.add(pair.request.resource.object_id)
+                allowed.add(safe_to_original[pair.request.resource.object_id])
         return allowed
