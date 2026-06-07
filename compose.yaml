@@ -1,0 +1,207 @@
+# pansoph self host stack.
+#
+# Profiles let you bring up only what you need:
+#   docker compose --profile core up                         # postgres, valkey, object store, spicedb, agora, lens
+#   docker compose --profile core,workers,models up          # + scribe workers + local models (full demo)
+#   docker compose --profile core,observability up            # + otel collector
+#   docker compose --profile core,secrets up                  # + openbao
+#
+# Everything reads .env (copy from .env.example). The default network is internal
+# leaning: only the model and source egress should leave the host. For a hardened
+# deployment add an egress allowlist proxy (see deploy/README.md and task #20).
+
+name: pansoph
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  # ---------------- core ----------------
+  postgres:
+    <<: *restart
+    image: timescale/timescaledb-ha:pg17
+    profiles: ["core"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pansoph}
+      POSTGRES_USER: ${POSTGRES_USER:-pansoph}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pansoph_local_dev}
+    # pgvector + pgvectorscale ship in this image. The init script enables them
+    # (and attempts pgmq; see the script for the note).
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+      - ./deploy/initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pansoph} -d ${POSTGRES_DB:-pansoph}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  valkey:
+    <<: *restart
+    image: valkey/valkey:8-alpine
+    profiles: ["core"]
+    command: ["valkey-server", "--save", "60", "1", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # Object store (S3 API). SeaweedFS gives a clean one command S3 for the local
+  # demo. The ADR default for the demo is Garage; it is equivalent behind the
+  # ObjectStore port but needs a post start `garage layout` step, so SeaweedFS is
+  # used here for a frictionless `compose up`. Swap freely, the adapter is the same.
+  objectstore:
+    <<: *restart
+    image: chrislusf/seaweedfs:3.80
+    profiles: ["core"]
+    command: ["server", "-s3", "-dir=/data", "-s3.port=3900"]
+    ports:
+      - "3900:3900"
+      - "8333:8333"
+    volumes:
+      - objectdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9333/cluster/status >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  spicedb:
+    <<: *restart
+    image: authzed/spicedb:latest
+    profiles: ["core"]
+    # Memory datastore for the demo (state is lost on restart). For persistence
+    # switch to: serve --datastore-engine postgres --datastore-conn-uri postgres://...
+    command:
+      - "serve"
+      - "--grpc-preshared-key"
+      - "${SPICEDB_PRESHARED_KEY:-pansoph_local_dev}"
+      - "--datastore-engine"
+      - "memory"
+    ports:
+      - "50051:50051"
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=127.0.0.1:50051"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  agora:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.agora
+    image: cyproto/pansoph-agora:dev
+    profiles: ["core"]
+    env_file: [.env]
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      spicedb: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz').status==200 else 1)\""]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  lens:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.lens
+    image: cyproto/pansoph-lens:dev
+    profiles: ["core"]
+    ports:
+      - "3000:8080"
+    depends_on:
+      agora: { condition: service_healthy }
+
+  # ---------------- workers ----------------
+  scribe:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.scribe
+    image: cyproto/pansoph-scribe:dev
+    profiles: ["workers"]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ---------------- models (BYOM, local) ----------------
+  ollama:
+    <<: *restart
+    image: ollama/ollama:latest
+    profiles: ["models"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  tei-embed:
+    <<: *restart
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    profiles: ["models"]
+    command: ["--model-id", "${PANSOPH_EMBEDDER_MODEL:-BAAI/bge-m3}"]
+    ports:
+      - "8081:80"
+    volumes:
+      - tei:/data
+
+  tei-rerank:
+    <<: *restart
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    profiles: ["models"]
+    command: ["--model-id", "${PANSOPH_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}"]
+    ports:
+      - "8082:80"
+    volumes:
+      - tei:/data
+
+  # ---------------- observability (off by default) ----------------
+  otel-collector:
+    <<: *restart
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
+  # ---------------- secrets (off by default) ----------------
+  openbao:
+    <<: *restart
+    image: openbao/openbao:latest
+    profiles: ["secrets"]
+    cap_add: ["IPC_LOCK"]
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${OPENBAO_TOKEN:-pansoph_local_dev}
+      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    ports:
+      - "8200:8200"
+
+volumes:
+  pgdata:
+  objectdata:
+  ollama:
+  tei:

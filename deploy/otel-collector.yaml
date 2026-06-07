@@ -1,0 +1,32 @@
+# Minimal OpenTelemetry collector for the observability profile.
+# Receives OTLP from agora and scribe. By default it just logs; point the
+# exporter at SigNoz (or a Grafana LGTM stack) for real dashboards.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

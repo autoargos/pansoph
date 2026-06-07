@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.x"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync workspace
+        run: uv sync --all-packages --dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy (informational until adapters land, then made blocking)
+        run: uv run mypy packages || true
+
+      - name: Pytest (unit)
+        run: uv run pytest -m "not integration" -q
+
+  # The document level access control red team. Once task #21 lands these become
+  # the release gate. Runs separately so a green checkmark here means "permissions
+  # are enforced", visibly and on its own.
+  permission-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.x"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --dev
+      - name: Permission red team
+        run: uv run pytest -m permission -q

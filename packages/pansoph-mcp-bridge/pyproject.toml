@@ -1,0 +1,21 @@
+[project]
+name = "pansoph-mcp-bridge"
+version = "0.0.1"
+description = "Turn any MCP server into a pansoph connector, and expose pansoph itself as an MCP server. Usable standalone."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Yash Karande" }]
+dependencies = ["pansoph-types>=0.0.1", "pansoph-connector-sdk>=0.0.1", "mcp>=1.2"]
+
+# The bridge registers itself as a connector adapter so any configured MCP server
+# becomes an instance.
+[project.entry-points."pansoph.connectors"]
+mcp = "pansoph_mcp_bridge.bridge:MCPConnector"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pansoph_mcp_bridge"]

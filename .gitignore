@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.uv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+age.key
+
+# Node / web / extension
+node_modules/
+apps/lens/dist/
+apps/scout/.output/
+apps/scout/.wxt/
+
+# Data and local state
+data/
+*.sqlite
+*.db
+.DS_Store
+
+# Editor
+.idea/
+.vscode/

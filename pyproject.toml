@@ -1,0 +1,57 @@
+# pansoph workspace root.
+# This is a uv workspace. Each member under packages/ is an independently
+# publishable distribution. The root itself is not published.
+
+[project]
+name = "pansoph-workspace"
+version = "0.0.0"
+description = "Workspace root for pansoph, a modular knowledge platform with ground up RBAC."
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+# The root has no runtime deps. It depends on the members for local development.
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+pansoph-types = { workspace = true }
+pansoph-connector-sdk = { workspace = true }
+pansoph-authz = { workspace = true }
+pansoph-retrieval = { workspace = true }
+pansoph-ingestion = { workspace = true }
+pansoph-mcp-bridge = { workspace = true }
+pansoph-core = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
+# S101 assert is fine in tests; configured per directory below.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"**/tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages", "tests"]
+markers = [
+  "permission: document level access control red team tests that gate releases",
+  "integration: tests that need live services (postgres, spicedb, ...)",
+]

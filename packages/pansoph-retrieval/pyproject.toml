@@ -1,0 +1,31 @@
+[project]
+name = "pansoph-retrieval"
+version = "0.0.1"
+description = "ACL aware hybrid retrieval: VectorStore, Embedder, and Reranker ports, RRF fusion, and the overfetch then bulk check enforcement pipeline. Usable standalone."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Yash Karande" }]
+dependencies = ["pansoph-types>=0.0.1", "pansoph-authz>=0.0.1", "pydantic>=2.7"]
+
+[project.optional-dependencies]
+qdrant = ["qdrant-client>=1.12"]
+pgvectorscale = ["psycopg[binary]>=3.2"]
+
+[project.entry-points."pansoph.vectorstores"]
+qdrant = "pansoph_retrieval.adapters_vector:QdrantStore"
+pgvectorscale = "pansoph_retrieval.adapters_vector:PgVectorScaleStore"
+
+[project.entry-points."pansoph.embedders"]
+tei = "pansoph_retrieval.adapters_model:TEIEmbedder"
+openai_compatible = "pansoph_retrieval.adapters_model:OpenAICompatibleEmbedder"
+
+[project.entry-points."pansoph.rerankers"]
+tei = "pansoph_retrieval.adapters_model:TEIReranker"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pansoph_retrieval"]
