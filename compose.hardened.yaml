@@ -1,0 +1,34 @@
+# Hardening overlay. Apply on top of compose.yaml:
+#
+#   docker compose -f compose.yaml -f compose.hardened.yaml --profile core,workers,hardened up
+#
+# It drops capabilities, forbids privilege escalation, and routes worker egress
+# through an allowlist proxy so workers reach only providers and configured sources.
+# This is illustrative hardening; production should also use a microVM or gVisor
+# runtime class for untrusted connector and MCP code (see deploy/SECURITY.md).
+
+services:
+  agora:
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+
+  scribe:
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    environment:
+      HTTP_PROXY: http://egress:3128
+      HTTPS_PROXY: http://egress:3128
+      NO_PROXY: postgres,valkey,spicedb,qdrant,objectstore,tei-embed,tei-rerank
+    depends_on:
+      egress:
+        condition: service_started
+
+  egress:
+    image: ubuntu/squid:latest
+    profiles: ["hardened"]
+    volumes:
+      - ./deploy/security/squid-egress.conf:/etc/squid/squid.conf:ro
+    expose:
+      - "3128"

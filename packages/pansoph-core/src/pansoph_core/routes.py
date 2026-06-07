@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from . import assembly
+from .audit import audit
 from .registry import list_adapters
 
 router = APIRouter(prefix="/api")
@@ -69,6 +70,7 @@ async def _retrieve(req: Query) -> list[Any]:
 @router.post("/search")
 async def search(req: Query) -> dict[str, Any]:
     hits = await _retrieve(req)
+    audit("search", actor=req.user, tenant=req.tenant_id, results=len(hits))
     return {
         "results": [
             {"doc_id": h.doc_id, "chunk_id": h.chunk_id, "score": h.score, "text": h.text}
@@ -80,6 +82,7 @@ async def search(req: Query) -> dict[str, Any]:
 @router.post("/chat")
 async def chat(req: Query) -> EventSourceResponse:
     hits = await _retrieve(req)
+    audit("chat", actor=req.user, tenant=req.tenant_id, sources=len(hits))
     llm = assembly.build_llm()
 
     if hits:
@@ -160,6 +163,7 @@ async def grab(req: GrabRequest) -> dict[str, Any]:
     ]
     await vector.upsert(hits, vectors)
     await authz.write_tuples(tuples_for_acl(doc_id, req.instance_id, acl))
+    audit("grab", actor=req.instance_id, tenant=req.tenant_id, url=req.url, chunks=len(chunks))
     return {"indexed": len(chunks), "doc_id": doc_id}
 
 
