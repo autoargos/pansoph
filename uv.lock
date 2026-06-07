@@ -2261,6 +2261,7 @@ version = "0.0.1"
 source = { editable = "packages/pansoph-core" }
 dependencies = [
     { name = "fastapi" },
+    { name = "mcp" },
     { name = "pansoph-authz" },
     { name = "pansoph-connector-sdk" },
     { name = "pansoph-ingestion" },
@@ -2275,6 +2276,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "mcp", specifier = ">=1.2" },
     { name = "pansoph-authz", editable = "packages/pansoph-authz" },
     { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
     { name = "pansoph-ingestion", editable = "packages/pansoph-ingestion" },

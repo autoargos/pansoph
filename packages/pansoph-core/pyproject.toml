@@ -17,10 +17,12 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "pydantic-settings>=2.4",
   "sse-starlette>=2.1",
+  "mcp>=1.2",
 ]
 
 [project.scripts]
 pansoph = "pansoph_core.__main__:main"
+pansoph-mcp = "pansoph_core.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
