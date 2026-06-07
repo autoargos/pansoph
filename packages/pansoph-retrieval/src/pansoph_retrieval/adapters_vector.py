@@ -93,9 +93,11 @@ class PgVectorScaleStore:
     ) -> list[SearchHit]:
         conn = await self._connect()
         try:
+            # Cast the bound array to text[] so Postgres applies the overlap operator;
+            # an untyped array parameter does not match.
             where = (
                 "tenant_id = %(tenant)s AND "
-                "(cardinality(allow_groups) = 0 OR allow_groups && %(groups)s)"
+                "(cardinality(allow_groups) = 0 OR allow_groups && %(groups)s::text[])"
             )
             params: dict[str, Any] = {
                 "tenant": flt.tenant_id,

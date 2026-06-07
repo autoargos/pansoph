@@ -20,6 +20,17 @@ dependencies = [
   "mcp>=1.2",
 ]
 
+# The runtime deps of the default adapters agora ships with, so a container running
+# the default stack (pgvectorscale + SpiceDB + S3) has what it needs. Individual
+# adapters remain optional on their own packages; this bundles the defaults.
+[project.optional-dependencies]
+stack = [
+  "psycopg[binary]>=3.2",
+  "authzed>=1.0",
+  "qdrant-client>=1.12",
+  "aioboto3>=13",
+]
+
 [project.scripts]
 pansoph = "pansoph_core.__main__:main"
 pansoph-mcp = "pansoph_core.mcp_server:main"

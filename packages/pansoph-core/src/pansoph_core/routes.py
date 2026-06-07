@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter
-from pansoph_authz import Principal, tuples_for_acl
+from pansoph_authz import Principal, membership_tuples, tuples_for_acl
 from pansoph_ingestion.chunking import chunk_sections
 from pansoph_retrieval.pipeline import retrieve
 from pansoph_retrieval.ports import SearchHit
@@ -54,6 +54,12 @@ class Query(BaseModel):
 
 
 async def _retrieve(req: Query) -> list[Any]:
+    authz = assembly.build_authz()
+    # Sync the subject's identity groups into the authz graph so the engine can
+    # resolve nested-group document access. Idempotent. In a full deployment this is
+    # done by the Identity port on login or SCIM sync; here it is per request.
+    if req.groups:
+        await authz.write_tuples(membership_tuples(req.user, req.groups, req.tenant_id))
     return await retrieve(
         query=req.query,
         subject=Principal(type="user", id=req.user),
@@ -62,7 +68,7 @@ async def _retrieve(req: Query) -> list[Any]:
         final_k=req.final_k,
         vector_store=assembly.build_vector_store(),
         embedder=assembly.build_embedder(),
-        authz=assembly.build_authz(),
+        authz=authz,
         reranker=assembly.build_reranker(),
     )
 
@@ -146,8 +152,10 @@ async def grab(req: GrabRequest) -> dict[str, Any]:
 
     doc_id = Document.make_id("scout", req.instance_id, req.url)
     vectors = await embedder.embed(chunks)
+    # Group the captured doc under the tenant namespace, so identity groups (also
+    # tenant-namespaced) resolve against it.
     acl = AccessControl(
-        public=req.public, allow_groups=req.allow_groups, principal_ns=req.instance_id
+        public=req.public, allow_groups=req.allow_groups, principal_ns=req.tenant_id
     )
     hits = [
         SearchHit(

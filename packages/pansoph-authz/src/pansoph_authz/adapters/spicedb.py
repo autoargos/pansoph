@@ -55,12 +55,45 @@ class SpiceDBAuthz(AuthzPort):
         self._endpoint = endpoint
         self._preshared_key = preshared_key
         self._schema_written = False
+        self._cached_client: Any = None
+        self._channel: Any = None
+        self._last_token: str | None = None
 
     def _client(self) -> Any:
-        from authzed.api.v1 import AsyncClient
-        from grpcutil import insecure_bearer_token_credentials
+        # gRPC refuses call credentials over a non-loopback insecure channel, which
+        # is exactly the Docker case (agora -> spicedb:50051 over plaintext). So we
+        # build an insecure channel and inject the bearer token as metadata via an
+        # interceptor instead of using grpcutil's loopback-only credentials.
+        if self._cached_client is not None:
+            return self._cached_client
 
-        return AsyncClient(self._endpoint, insecure_bearer_token_credentials(self._preshared_key))
+        import grpc
+        from authzed.api.v1 import AsyncClient
+
+        token = self._preshared_key
+
+        class _BearerAuth(grpc.aio.UnaryUnaryClientInterceptor):  # type: ignore[misc]
+            async def intercept_unary_unary(
+                self, continuation: Any, details: Any, request: Any
+            ) -> Any:
+                metadata = grpc.aio.Metadata()
+                for key, value in details.metadata or ():
+                    metadata.add(key, value)
+                metadata.add("authorization", f"Bearer {token}")
+                new_details = grpc.aio.ClientCallDetails(
+                    details.method,
+                    details.timeout,
+                    metadata,
+                    details.credentials,
+                    details.wait_for_ready,
+                )
+                return await continuation(new_details, request)
+
+        self._channel = grpc.aio.insecure_channel(self._endpoint, interceptors=[_BearerAuth()])
+        client = AsyncClient.__new__(AsyncClient)
+        client.init_stubs(self._channel)
+        self._cached_client = client
+        return client
 
     async def ensure_schema(self) -> None:
         from authzed.api.v1 import WriteSchemaRequest
@@ -91,7 +124,10 @@ class SpiceDBAuthz(AuthzPort):
             for t in tuples
         ]
         resp = await self._client().WriteRelationships(WriteRelationshipsRequest(updates=updates))
-        return ConsistencyToken(resp.written_at.token)
+        # Remember the write token so a following check reads at_least_as_fresh,
+        # guaranteeing read-after-write (this is the ZedToken consistency guarantee).
+        self._last_token = resp.written_at.token
+        return ConsistencyToken(self._last_token)
 
     async def write_tuples(self, tuples: list[Tuple]) -> ConsistencyToken:
         from authzed.api.v1 import RelationshipUpdate
@@ -123,8 +159,9 @@ class SpiceDBAuthz(AuthzPort):
         if not object_ids:
             return set()
 
-        if at_least_as_fresh:
-            consistency = Consistency(at_least_as_fresh=ZedToken(token=str(at_least_as_fresh)))
+        token = str(at_least_as_fresh) if at_least_as_fresh else self._last_token
+        if token:
+            consistency = Consistency(at_least_as_fresh=ZedToken(token=token))
         else:
             consistency = Consistency(minimize_latency=True)
 

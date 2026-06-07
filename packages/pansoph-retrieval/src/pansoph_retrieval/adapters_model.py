@@ -35,13 +35,16 @@ class OpenAICompatibleEmbedder:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
+        # Request the configured dimension. Matryoshka-capable models (gemini-embedding,
+        # OpenAI text-embedding-3) honor it; others ignore it.
+        body = {"model": self.model, "input": texts, "dimensions": self.dim}
         async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
-            resp = await client.post(
-                f"{self._base}/embeddings", json={"model": self.model, "input": texts}
-            )
+            resp = await client.post(f"{self._base}/embeddings", json=body)
             resp.raise_for_status()
             data = resp.json()["data"]
-            return [item["embedding"] for item in sorted(data, key=lambda x: x["index"])]
+            # OpenAI includes an "index" per item; some compatible servers (Gemini)
+            # do not, so fall back to input order.
+            return [item["embedding"] for item in sorted(data, key=lambda x: x.get("index", 0))]
 
 
 class TEIReranker:

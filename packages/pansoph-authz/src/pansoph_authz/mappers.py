@@ -39,6 +39,23 @@ def tuples_for_document(doc: Document) -> list[Tuple]:
     return tuples_for_acl(doc.id, doc.instance_id, doc.acl)
 
 
+def membership_tuples(user_id: str, groups: list[str], ns: str) -> list[Tuple]:
+    """Group membership tuples for a user, mapping identity groups into the ReBAC
+    graph so the engine can resolve nested-group document access. The group object
+    id is namespaced the same way the document reader tuples namespace their groups,
+    so a user's membership matches the documents shared with that group.
+    """
+    return [
+        Tuple(
+            subject=Principal(type="user", id=user_id),
+            relation="member",
+            object_type="group",
+            object_id=f"{ns}_{group}",
+        )
+        for group in groups
+    ]
+
+
 def diff_acls(
     object_id: str, instance_id: str, old: AccessControl, new: AccessControl
 ) -> tuple[list[Tuple], list[Tuple]]:
