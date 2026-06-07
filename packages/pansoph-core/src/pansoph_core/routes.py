@@ -17,8 +17,11 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter
-from pansoph_authz import Principal
+from pansoph_authz import Principal, tuples_for_acl
+from pansoph_ingestion.chunking import chunk_sections
 from pansoph_retrieval.pipeline import retrieve
+from pansoph_retrieval.ports import SearchHit
+from pansoph_types import AccessControl, Document, RawDoc
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -103,6 +106,61 @@ async def chat(req: Query) -> EventSourceResponse:
         yield {"data": json.dumps({"type": "finish"})}
 
     return EventSourceResponse(gen())
+
+
+class GrabRequest(BaseModel):
+    url: str
+    title: str | None = None
+    text: str
+    tenant_id: str = "default"
+    instance_id: str = "grabber"
+    public: bool = False
+    allow_groups: list[str] = []
+
+
+@router.post("/grab")
+async def grab(req: GrabRequest) -> dict[str, Any]:
+    """Ingest content captured by the scout extension: what the signed in user can
+    already see, with consent. Same indexing path as a connector sync, so the
+    captured page is immediately retrievable under the ACL the request sets."""
+    parser = assembly.build_parser()
+    embedder = assembly.build_embedder()
+    vector = assembly.build_vector_store()
+    authz = assembly.build_authz()
+
+    raw = RawDoc(
+        source_doc_id=req.url,
+        instance_id=req.instance_id,
+        mime="text/html",
+        text=req.text,
+        title=req.title,
+        source_url=req.url,
+    )
+    parsed = await parser.parse(raw)
+    chunks = chunk_sections(list(parsed.sections))
+    if not chunks:
+        return {"indexed": 0}
+
+    doc_id = Document.make_id("scout", req.instance_id, req.url)
+    vectors = await embedder.embed(chunks)
+    acl = AccessControl(
+        public=req.public, allow_groups=req.allow_groups, principal_ns=req.instance_id
+    )
+    hits = [
+        SearchHit(
+            doc_id=doc_id,
+            chunk_id=f"{doc_id}#{i}",
+            score=0.0,
+            tenant_id=req.tenant_id,
+            allow_groups=list(acl.allow_groups),
+            acl_version=1,
+            text=chunk,
+        )
+        for i, chunk in enumerate(chunks)
+    ]
+    await vector.upsert(hits, vectors)
+    await authz.write_tuples(tuples_for_acl(doc_id, req.instance_id, acl))
+    return {"indexed": len(chunks), "doc_id": doc_id}
 
 
 @router.get("/connectors")

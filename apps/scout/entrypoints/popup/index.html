@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>pansoph scout</title>
+    <style>
+      body { width: 320px; font-family: system-ui, sans-serif; font-size: 13px; margin: 0; padding: 12px; }
+      input[type="text"] { width: 100%; margin-bottom: 8px; box-sizing: border-box; }
+      button { width: 100%; padding: 8px; }
+      label { display: block; }
+      h3 { margin: 0 0 8px; }
+    </style>
+  </head>
+  <body>
+    <h3>pansoph scout</h3>
+    <p style="color: #666; margin: 0 0 12px">
+      Capture this page, with consent, into pansoph. Only what you can already see.
+    </p>
+    <label>agora URL</label>
+    <input type="text" id="agora" value="http://localhost:8080" />
+    <label>tenant</label>
+    <input type="text" id="tenant" value="default" />
+    <label>share with groups (comma separated)</label>
+    <input type="text" id="groups" />
+    <label style="margin-bottom: 12px">
+      <input type="checkbox" id="isPublic" /> public to the tenant
+    </label>
+    <button id="capture">Capture this page</button>
+    <p id="status" style="margin-top: 10px; color: #333"></p>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

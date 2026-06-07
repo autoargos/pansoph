@@ -13,9 +13,11 @@ scout ingests only what the signed in user can already see, with explicit consen
 
 This line is informed by current case law, which protects public data access but treats gated content and fake accounts as the red line.
 
-## Stack (scaffolded in task #12)
+## Stack (implemented)
 
-- WXT, Manifest V3, React.
-- Readability based content extraction.
-- A consent first capture UX.
-- Posts captured content to agora's ingestion endpoint, tagged to a connector instance.
+- WXT, Manifest V3, vanilla TypeScript (no framework, smallest surface).
+- Readability based content extraction in a content script that only acts on an explicit capture message.
+- A consent first popup: the user sets the agora URL, tenant, groups to share with, and public flag, then clicks Capture.
+- Posts the captured page to agora's `POST /api/grab`, which runs the same indexing path as a connector sync, so the page is immediately retrievable under the ACL the popup set.
+
+Build with `pnpm build` (output in `.output/chrome-mv3`), load unpacked in the browser.
