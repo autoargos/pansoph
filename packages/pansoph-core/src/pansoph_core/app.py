@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from . import __version__
+from .routes import router
 from .settings import Settings
 
 
@@ -38,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         }
 
-    # POST /api/chat (SSE), /api/search, /api/connectors, /api/access land with the
-    # core assembly phase. See ADR-0002.
+    # Search, chat (SSE), and discovery routes. They enforce permissions through the
+    # authz bulk check inside the retrieval pipeline.
+    app.include_router(router)
     return app
