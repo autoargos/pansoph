@@ -1,0 +1,16 @@
+# Keep build contexts small and never ship local artifacts or secrets into images.
+**/node_modules
+**/.venv
+**/dist
+**/.output
+**/.wxt
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+.git
+.env
+.env.*
+!.env.example
+**/*.log
