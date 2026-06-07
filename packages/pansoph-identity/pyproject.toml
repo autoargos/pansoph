@@ -1,0 +1,23 @@
+[project]
+name = "pansoph-identity"
+version = "0.0.1"
+description = "Identity port for pansoph: a built-in user and group store, and an OIDC adapter. Resolves nested groups. Usable standalone."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Yash Karande" }]
+dependencies = ["pansoph-types>=0.0.1", "pydantic>=2.7"]
+
+[project.optional-dependencies]
+oidc = ["pyjwt[crypto]>=2.9", "httpx>=0.27"]
+
+[project.entry-points."pansoph.identity"]
+builtin = "pansoph_identity.adapters.builtin:BuiltinIdentity"
+oidc = "pansoph_identity.adapters.oidc:OIDCIdentity"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pansoph_identity"]

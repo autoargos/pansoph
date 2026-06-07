@@ -29,6 +29,8 @@ pansoph-authz = { workspace = true }
 pansoph-retrieval = { workspace = true }
 pansoph-ingestion = { workspace = true }
 pansoph-mcp-bridge = { workspace = true }
+pansoph-identity = { workspace = true }
+pansoph-infra = { workspace = true }
 pansoph-core = { workspace = true }
 
 [tool.ruff]

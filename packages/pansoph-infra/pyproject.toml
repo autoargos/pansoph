@@ -1,0 +1,28 @@
+[project]
+name = "pansoph-infra"
+version = "0.0.1"
+description = "Infrastructure ports for pansoph: ObjectStore (S3) and SecretStore (envelope encryption or OpenBao). Usable standalone."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Yash Karande" }]
+dependencies = ["pydantic>=2.7", "cryptography>=43"]
+
+[project.optional-dependencies]
+s3 = ["aioboto3>=13"]
+openbao = ["httpx>=0.27"]
+
+[project.entry-points."pansoph.objectstores"]
+s3 = "pansoph_infra.adapters.s3:S3ObjectStore"
+memory = "pansoph_infra.adapters.memory:MemoryObjectStore"
+
+[project.entry-points."pansoph.secretstores"]
+envelope = "pansoph_infra.adapters.envelope:EnvelopeSecretStore"
+openbao = "pansoph_infra.adapters.openbao:OpenBaoSecretStore"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pansoph_infra"]
