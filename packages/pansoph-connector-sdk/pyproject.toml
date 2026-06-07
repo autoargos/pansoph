@@ -8,10 +8,14 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Yash Karande" }]
 dependencies = ["pansoph-types>=0.0.1", "pydantic>=2.7"]
 
+# The connector scaffolding CLI: `pansoph-connector new <name>`.
+[project.scripts]
+pansoph-connector = "pansoph_connector_sdk.cli:main"
+
 # Community connectors register themselves under this entry point group so the
 # runtime can discover them as plugins. One group, many connectors.
 [project.entry-points."pansoph.connectors"]
-# example = "my_pkg.module:MyConnector"
+memory = "pansoph_connector_sdk.memory:InMemoryConnector"
 
 [build-system]
 requires = ["hatchling"]

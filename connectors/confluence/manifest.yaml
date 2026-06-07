@@ -1,0 +1,20 @@
+# Declarative manifest for the confluence connector.
+# Use this instead of connector.py for simple REST sources. The runtime compiles
+# it into a Connector. Verify every path, scope, and JSONPath against the latest
+# official confluence API docs before relying on it.
+connector: confluence
+# base_url: https://api.example.com
+auth: { type: oauth2, scopes: [] }
+capabilities: { incremental: true, permission_sync: true, deletions: true }
+streams:
+  - name: items
+    list:
+      path: /items
+      since: "$.items[*].updated_at"
+      cursor: updated_at
+    fetch:
+      path: /items/{id}
+    acl:
+      from: permissions
+      groups: "$.permissions.groups[*].id"
+      users: "$.permissions.users[*].id"
