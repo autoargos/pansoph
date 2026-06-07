@@ -91,3 +91,80 @@ export async function meta(): Promise<Meta> {
   if (!res.ok) throw new Error(`meta failed: ${res.status}`);
   return (await res.json()) as Meta;
 }
+
+// --- connectors + health ---
+
+export interface RunInfo {
+  started_at: string | null;
+  finished_at: string | null;
+  status: string;
+  docs_indexed: number;
+  error: string | null;
+  duration_seconds: number | null;
+}
+
+export interface Instance {
+  id: string;
+  connector: string;
+  name: string;
+  tenant_id: string;
+  config: Record<string, unknown>;
+  schedule_seconds: number;
+  enabled: boolean;
+  cursor: string | null;
+  created_at: string | null;
+  last_run: RunInfo | null;
+}
+
+async function jget<T>(path: string): Promise<T> {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
+  return (await res.json()) as T;
+}
+
+export async function connectorTypes(): Promise<string[]> {
+  return (await jget<{ available: string[] }>("/api/connectors")).available;
+}
+
+export async function listInstances(): Promise<Instance[]> {
+  return (await jget<{ instances: Instance[] }>("/api/connectors/instances")).instances;
+}
+
+export async function instanceRuns(id: string): Promise<RunInfo[]> {
+  return (await jget<{ runs: RunInfo[] }>(`/api/connectors/instances/${id}/runs`)).runs;
+}
+
+export async function createInstance(payload: {
+  connector: string;
+  name: string;
+  instance_id: string;
+  tenant_id: string;
+  config: Record<string, unknown>;
+  schedule_seconds: number;
+}): Promise<Instance> {
+  const res = await fetch("/api/connectors/instances", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`create failed: ${res.status}`);
+  return (await res.json()) as Instance;
+}
+
+export async function deleteInstance(id: string): Promise<void> {
+  await fetch(`/api/connectors/instances/${id}`, { method: "DELETE" });
+}
+
+export async function syncInstance(id: string): Promise<{ status: string; docs_indexed: number; error?: string }> {
+  const res = await fetch(`/api/connectors/instances/${id}/sync`, { method: "POST" });
+  return (await res.json()) as { status: string; docs_indexed: number; error?: string };
+}
+
+export interface Health {
+  ok: boolean;
+  checks: Record<string, { ok: boolean; latency_ms?: number; error?: string }>;
+}
+
+export async function health(): Promise<Health> {
+  return jget<Health>("/api/health");
+}

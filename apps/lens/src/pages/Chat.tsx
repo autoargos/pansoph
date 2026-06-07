@@ -1,7 +1,7 @@
-import type { FormEvent } from "react";
-import { useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 
 import { chat, type Identity } from "../api.ts";
+import { Button, Card, Spinner } from "../ui.tsx";
 
 interface Source {
   id: number;
@@ -9,108 +9,133 @@ interface Source {
   chunk_id: string;
 }
 
-// Verification first: the answer streams in, citation markers [n] become pills that
-// link to the sources rail, and a user only ever sees sources they are permitted to
-// retrieve (the backend enforces that).
+interface Msg {
+  role: "user" | "assistant";
+  text: string;
+  sources: Source[];
+}
+
+function renderWithCitations(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /\[(\d+)\]/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(
+      <sup
+        key={`c${key++}`}
+        className="mx-0.5 rounded bg-accent-soft px-1 py-0.5 text-[10px] font-semibold text-accent-ink"
+      >
+        {m[1]}
+      </sup>,
+    );
+    last = re.lastIndex;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
 export default function Chat({ identity }: { identity: Identity }) {
   const [q, setQ] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [sources, setSources] = useState<Source[]>([]);
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function ask(e: FormEvent) {
     e.preventDefault();
-    if (!q.trim() || busy) return;
+    const query = q.trim();
+    if (!query || busy) return;
+    setQ("");
     setBusy(true);
-    setAnswer("");
-    setSources([]);
-    setError(null);
+    setMessages((m) => [
+      ...m,
+      { role: "user", text: query, sources: [] },
+      { role: "assistant", text: "", sources: [] },
+    ]);
+    const update = (fn: (msg: Msg) => Msg) =>
+      setMessages((m) => {
+        const copy = m.slice();
+        copy[copy.length - 1] = fn(copy[copy.length - 1]);
+        return copy;
+      });
     try {
-      for await (const ev of chat(q, identity)) {
+      for await (const ev of chat(query, identity)) {
         if (ev.type === "source" && ev.id != null) {
-          const id = ev.id;
-          setSources((s) => [...s, { id, doc_id: ev.doc_id ?? "", chunk_id: ev.chunk_id ?? "" }]);
+          update((msg) => ({
+            ...msg,
+            sources: [
+              ...msg.sources,
+              { id: ev.id!, doc_id: ev.doc_id ?? "", chunk_id: ev.chunk_id ?? "" },
+            ],
+          }));
         } else if (ev.type === "text-delta" && ev.delta) {
-          setAnswer((a) => a + ev.delta);
+          update((msg) => ({ ...msg, text: msg.text + ev.delta }));
         }
       }
     } catch (err) {
-      setError(String(err));
+      update((msg) => ({ ...msg, text: `Could not reach agora: ${String(err)}` }));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-[1fr_18rem]">
-      <div>
-        <form onSubmit={ask} className="flex gap-2">
-          <input
-            className="flex-1 rounded border px-3 py-2"
-            placeholder="Ask across your connected knowledge..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <button
-            className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
-            disabled={busy}
-          >
-            {busy ? "..." : "Ask"}
-          </button>
-        </form>
-
-        {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-
-        {answer && (
-          <div className="mt-6 whitespace-pre-wrap rounded border bg-white p-4 leading-relaxed">
-            {renderWithCitations(answer)}
-          </div>
+    <div className="mx-auto flex h-full max-w-3xl flex-col">
+      <div className="flex-1 space-y-5 pb-4">
+        {messages.length === 0 && (
+          <Card className="p-8 text-center">
+            <p className="text-sm text-muted">
+              Ask about your connected knowledge. Answers cite their sources, and you only ever see
+              what <span className="font-medium text-ink">{identity.user}</span> is permitted to.
+            </p>
+          </Card>
         )}
-        {!answer && !busy && !error && (
-          <p className="mt-6 text-sm text-neutral-500">
-            Answers cite their sources. When the answer comes from world knowledge, no
-            citation is shown.
-          </p>
+        {messages.map((msg, i) =>
+          msg.role === "user" ? (
+            <div key={i} className="flex justify-end">
+              <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-ink px-4 py-2.5 text-sm text-white">
+                {msg.text}
+              </div>
+            </div>
+          ) : (
+            <div key={i} className="space-y-2">
+              <Card className="px-5 py-4">
+                <div className="text-[15px] leading-relaxed text-ink-soft">
+                  {msg.text ? renderWithCitations(msg.text) : <Spinner />}
+                </div>
+              </Card>
+              {msg.sources.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-1">
+                  {msg.sources.map((s) => (
+                    <span
+                      key={s.chunk_id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted"
+                    >
+                      <span className="rounded bg-accent-soft px-1 text-[10px] font-semibold text-accent-ink">
+                        {s.id}
+                      </span>
+                      <span className="font-mono text-[11px]">{s.doc_id}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ),
         )}
       </div>
 
-      <aside>
-        <h2 className="mb-2 text-sm font-semibold text-neutral-700">Sources</h2>
-        {sources.length === 0 ? (
-          <p className="text-xs text-neutral-500">Permitted sources appear here.</p>
-        ) : (
-          <ul className="space-y-2">
-            {sources.map((s) => (
-              <li key={s.id} className="rounded border bg-white p-2 text-xs">
-                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-blue-100 text-blue-700">
-                  {s.id}
-                </span>
-                <span className="font-mono">{s.doc_id}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </aside>
+      <form onSubmit={ask} className="sticky bottom-0 flex gap-2 bg-canvas py-3">
+        <input
+          className="flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none focus:border-accent"
+          placeholder="Ask a question..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <Button type="submit" disabled={busy} className="px-5">
+          {busy ? <Spinner className="border-white/40 border-t-white" /> : "Ask"}
+        </Button>
+      </form>
     </div>
   );
-}
-
-function renderWithCitations(text: string) {
-  // Turn [n] markers into small pills.
-  const parts = text.split(/(\[\d+\])/g);
-  return parts.map((part, i) => {
-    const m = part.match(/^\[(\d+)\]$/);
-    if (m) {
-      return (
-        <sup
-          key={i}
-          className="mx-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-blue-100 text-[10px] text-blue-700"
-        >
-          {m[1]}
-        </sup>
-      );
-    }
-    return <span key={i}>{part}</span>;
-  });
 }

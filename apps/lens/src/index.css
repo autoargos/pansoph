@@ -1,10 +1,56 @@
 @import "tailwindcss";
 
+/* pansoph lens design tokens. A calm, knowledge-tool palette: warm off-white
+   canvas, deep indigo ink, a single violet accent, and clear status colors. */
+@theme {
+  --color-canvas: #f6f5fa;
+  --color-surface: #ffffff;
+  --color-ink: #1b1726;
+  --color-ink-soft: #2b2640;
+  --color-muted: #6c6982;
+  --color-faint: #9b98ac;
+  --color-line: #e7e4f0;
+  --color-accent: #6d28d9;
+  --color-accent-ink: #5b21b6;
+  --color-accent-soft: #f1ebfd;
+  --color-ok: #15803d;
+  --color-ok-soft: #e7f6ec;
+  --color-warn: #b45309;
+  --color-warn-soft: #fbf0e0;
+  --color-err: #b91c1c;
+  --color-err-soft: #fbe9e9;
+  --radius-card: 14px;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, quiet scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+@keyframes pansoph-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pulse {
+  animation: pansoph-pulse 1.4s ease-in-out infinite;
 }

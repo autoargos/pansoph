@@ -1,16 +1,14 @@
-import type { FormEvent } from "react";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 
-import { search, type Identity, type SearchResult } from "../api.ts";
+import { type Identity, search, type SearchResult } from "../api.ts";
+import { Badge, Button, Card, PageHeader, Spinner } from "../ui.tsx";
 
-// Search is distinct from chat: an answer-first list of permitted chunks with their
-// scores. The results are already filtered by the authz bulk check.
 export default function Search({ identity }: { identity: Identity }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [ran, setRan] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function run(e: FormEvent) {
     e.preventDefault();
@@ -28,38 +26,41 @@ export default function Search({ identity }: { identity: Identity }) {
   }
 
   return (
-    <div>
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title="Search"
+        subtitle="Permission-aware. Results are filtered by what the acting user may read, before you ever see them."
+      />
       <form onSubmit={run} className="flex gap-2">
         <input
-          className="flex-1 rounded border px-3 py-2"
+          className="flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none focus:border-accent"
           placeholder="Search permitted documents..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <button
-          className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
-          disabled={busy}
-        >
-          {busy ? "..." : "Search"}
-        </button>
+        <Button type="submit" disabled={busy} className="px-5">
+          {busy ? <Spinner className="border-white/40 border-t-white" /> : "Search"}
+        </Button>
       </form>
 
-      {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-4 text-sm text-err">{error}</p>}
 
       <ul className="mt-6 space-y-3">
         {results.map((r) => (
-          <li key={r.chunk_id} className="rounded border bg-white p-4">
-            <div className="mb-1 flex items-center justify-between">
-              <span className="font-mono text-xs text-neutral-500">{r.doc_id}</span>
-              <span className="text-xs text-neutral-400">score {r.score.toFixed(3)}</span>
+          <Card key={r.chunk_id} className="px-5 py-4">
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <span className="truncate font-mono text-xs text-muted">{r.doc_id}</span>
+              <Badge kind="neutral">score {r.score.toFixed(2)}</Badge>
             </div>
-            <p className="text-sm">{r.text}</p>
-          </li>
+            <p className="text-sm leading-relaxed text-ink-soft">{r.text}</p>
+          </Card>
         ))}
       </ul>
 
       {ran && results.length === 0 && !busy && (
-        <p className="mt-6 text-sm text-neutral-500">No permitted results.</p>
+        <Card className="mt-6 p-8 text-center text-sm text-muted">
+          No permitted results for <span className="font-medium text-ink">{identity.user}</span>.
+        </Card>
       )}
     </div>
   );
