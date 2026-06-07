@@ -46,6 +46,9 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
 "**/tests/**" = ["S101"]
 # The conformance harness uses assert as its public contract check.
 "**/conformance.py" = ["S101"]
+# Vector queries interpolate only an internal constant WHERE clause; all values
+# are bound parameters, so the S608 string-query warning is a false positive here.
+"**/adapters_vector.py" = ["S608"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -2337,6 +2337,7 @@ name = "pansoph-ingestion"
 version = "0.0.1"
 source = { editable = "packages/pansoph-ingestion" }
 dependencies = [
+    { name = "httpx" },
     { name = "pansoph-authz" },
     { name = "pansoph-connector-sdk" },
     { name = "pansoph-retrieval" },
@@ -2356,6 +2357,7 @@ docling = [
 requires-dist = [
     { name = "dbos", marker = "extra == 'dbos'", specifier = ">=0.20" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pansoph-authz", editable = "packages/pansoph-authz" },
     { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
     { name = "pansoph-retrieval", editable = "packages/pansoph-retrieval" },
@@ -2386,6 +2388,7 @@ name = "pansoph-retrieval"
 version = "0.0.1"
 source = { editable = "packages/pansoph-retrieval" }
 dependencies = [
+    { name = "httpx" },
     { name = "pansoph-authz" },
     { name = "pansoph-types" },
     { name = "pydantic" },
@@ -2401,6 +2404,7 @@ qdrant = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pansoph-authz", editable = "packages/pansoph-authz" },
     { name = "pansoph-types", editable = "packages/pansoph-types" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'pgvectorscale'", specifier = ">=3.2" },
