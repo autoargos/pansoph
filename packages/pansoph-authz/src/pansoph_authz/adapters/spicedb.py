@@ -43,11 +43,24 @@ def _ns_id(principal: Principal) -> str:
     return f"{principal.ns}_{principal.id}" if principal.ns else principal.id
 
 
+# SpiceDB object ids only allow [a-zA-Z0-9/_|=+-]. Document ids carry ':' and '.'
+# (e.g. "github:inst:README.md"), so encode any disallowed character as "=XX" hex,
+# which is injective (no two distinct ids collide) and uses only legal characters.
+_SAFE_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_|-+"
+)
+
+
 def _safe_obj(object_id: str) -> str:
-    """SpiceDB object ids may not contain ':'. Document ids do ("conn:inst:src"),
-    so map ':' to '/', which SpiceDB allows. Applied symmetrically on write and
-    check, and reversed when reading results, so callers keep their original ids."""
-    return object_id.replace(":", "/")
+    """Encode a document id into a valid SpiceDB object id. Reversed via a lookup
+    map on the way back, so callers keep their original ids."""
+    parts: list[str] = []
+    for ch in object_id:
+        if ch in _SAFE_CHARS:
+            parts.append(ch)
+        else:
+            parts.append("".join(f"={byte:02x}" for byte in ch.encode("utf-8")))
+    return "".join(parts)
 
 
 class SpiceDBAuthz(AuthzPort):

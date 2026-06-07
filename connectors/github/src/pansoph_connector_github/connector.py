@@ -100,7 +100,9 @@ class GithubConnector:
 
     # --- contract ---
     def validate(self, config: dict[str, Any]) -> ValidationResult:
-        missing = [k for k in ("token", "owner", "repo") if not config.get(k)]
+        # token is optional: public repositories are readable unauthenticated (at a
+        # lower rate limit). A private repo needs a token with the right scope.
+        missing = [k for k in ("owner", "repo") if not config.get(k)]
         if missing:
             return ValidationResult(ok=False, error=f"missing config: {', '.join(missing)}")
         return ValidationResult(ok=True)
@@ -161,15 +163,13 @@ class GithubConnector:
 
     # --- helpers ---
     def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self._base_url,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": _API_VERSION,
-            },
-            timeout=30.0,
-        )
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": _API_VERSION,
+        }
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        return httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=30.0)
 
     def _ref(self, path: str) -> DocRef:
         return DocRef(source_doc_id=path, instance_id=self.instance_id)

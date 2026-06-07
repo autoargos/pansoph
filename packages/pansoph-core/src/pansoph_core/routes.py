@@ -27,6 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import assembly
 from .audit import audit
+from .connectors import ConnectorManager, health, run_instance
 from .registry import list_adapters
 
 router = APIRouter(prefix="/api")
@@ -183,3 +184,63 @@ async def connectors() -> dict[str, list[str]]:
 @router.get("/adapters")
 async def adapters() -> dict[str, list[str]]:
     return {group: list_adapters(group) for group in _PORT_GROUPS}
+
+
+# --- connector instance management ---
+
+
+def _manager() -> ConnectorManager:
+    return ConnectorManager(assembly._postgres_dsn())
+
+
+class InstanceCreate(BaseModel):
+    connector: str
+    name: str
+    instance_id: str
+    tenant_id: str = "default"
+    config: dict[str, Any] = {}
+    schedule_seconds: int = 0
+
+
+@router.get("/connectors/instances")
+async def list_instances() -> dict[str, Any]:
+    return {"instances": await _manager().list_instances()}
+
+
+@router.post("/connectors/instances")
+async def create_instance(req: InstanceCreate) -> dict[str, Any]:
+    return await _manager().create_instance(
+        instance_id=req.instance_id,
+        connector=req.connector,
+        name=req.name,
+        tenant_id=req.tenant_id,
+        config=req.config,
+        schedule_seconds=req.schedule_seconds,
+    )
+
+
+@router.delete("/connectors/instances/{instance_id}")
+async def delete_instance(instance_id: str) -> dict[str, str]:
+    await _manager().delete_instance(instance_id)
+    return {"deleted": instance_id}
+
+
+@router.post("/connectors/instances/{instance_id}/sync")
+async def sync_instance(instance_id: str) -> dict[str, Any]:
+    manager = _manager()
+    instance = await manager.get_instance(instance_id)
+    if instance is None:
+        return {"error": "instance not found"}
+    result = await run_instance(manager, instance)
+    audit("connector_sync", actor="system", tenant=instance["tenant_id"], instance=instance_id)
+    return result
+
+
+@router.get("/connectors/instances/{instance_id}/runs")
+async def instance_runs(instance_id: str) -> dict[str, Any]:
+    return {"runs": await _manager().runs_for(instance_id)}
+
+
+@router.get("/health")
+async def health_endpoint() -> dict[str, Any]:
+    return await health(assembly._postgres_dsn())

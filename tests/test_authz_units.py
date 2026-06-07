@@ -9,9 +9,12 @@ from pansoph_authz.adapters.spicedb import _ns_id, _safe_obj
 from pansoph_authz.port import Principal
 
 
-def test_spicedb_safe_obj_replaces_colons() -> None:
-    assert _safe_obj("github:org1:42") == "github/org1/42"
-    assert _safe_obj("noColons") == "noColons"
+def test_spicedb_safe_obj_encodes_disallowed_chars() -> None:
+    # ':' (0x3a) and '.' (0x2e) are not valid SpiceDB object-id characters.
+    assert _safe_obj("github:inst:README.md") == "github=3ainst=3aREADME=2emd"
+    assert _safe_obj("plain_id-1") == "plain_id-1"
+    # Injective: distinct ids never collide to the same encoding.
+    assert _safe_obj("a:b") != _safe_obj("a.b")
 
 
 def test_spicedb_ns_id_namespacing() -> None:

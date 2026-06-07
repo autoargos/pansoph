@@ -7,6 +7,10 @@ UI Message Stream protocol so any frontend can consume it.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
+
 from fastapi import FastAPI
 
 from . import __version__
@@ -14,9 +18,30 @@ from .routes import router
 from .settings import Settings
 
 
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Start the in-process connector sync scheduler. Best effort: if it cannot be
+    started (for example Postgres is not up yet), agora still serves; the scheduler
+    retries each tick. Production runs syncs on the durable engine instead."""
+    from .assembly import _postgres_dsn
+    from .connectors import ConnectorManager
+    from .scheduler import scheduler_loop
+
+    task: asyncio.Task[None] | None = None
+    with contextlib.suppress(Exception):
+        task = asyncio.create_task(scheduler_loop(ConnectorManager(_postgres_dsn())))
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="pansoph", version=__version__)
+    app = FastAPI(title="pansoph", version=__version__, lifespan=_lifespan)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

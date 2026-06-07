@@ -56,10 +56,11 @@ export async function* chat(query: string, id: Identity): AsyncGenerator<ChatEve
     const { done, value } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    const frames = buf.split("\n\n");
+    // SSE frames are separated by a blank line; agora emits CRLF, so accept both.
+    const frames = buf.split(/\r?\n\r?\n/);
     buf = frames.pop() ?? "";
     for (const frame of frames) {
-      const line = frame.split("\n").find((l) => l.startsWith("data:"));
+      const line = frame.split(/\r?\n/).find((l) => l.startsWith("data:"));
       if (!line) continue;
       const payload = line.slice(5).trim();
       if (!payload) continue;
