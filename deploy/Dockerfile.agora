@@ -16,8 +16,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # connectors are installed the same way (their own package). GitHub is the one
 # implemented end to end today.
 COPY connectors/github ./connectors/github
+COPY connectors/weblink ./connectors/weblink
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --no-deps ./connectors/github
+    uv pip install --no-deps ./connectors/github ./connectors/weblink
 
 FROM python:3.12-slim-bookworm AS runtime
 # Non root user, no shell login, least privilege.
