@@ -27,11 +27,13 @@ class OIDCIdentity:
         client_id: str,
         groups_claim: str = "groups",
         jwks_url: str = "",
+        roles_claim: str = "roles",
     ) -> None:
         self._issuer_url = issuer_url.rstrip("/")
         self._client_id = client_id
         self._groups_claim = groups_claim
         self._jwks_url = jwks_url
+        self._roles_claim = roles_claim
         self._jwks_client: Any = None
         self._cache: dict[str, User] = {}
 
@@ -72,6 +74,7 @@ class OIDCIdentity:
             email=claims.get("email"),
             display_name=claims.get("name") or claims.get("preferred_username"),
             group_ids=list(claims.get(self._groups_claim, [])),
+            roles=list(claims.get(self._roles_claim, [])),
         )
         self._cache[user.id] = user
         return user

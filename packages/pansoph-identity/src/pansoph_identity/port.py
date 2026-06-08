@@ -13,7 +13,13 @@ class User(BaseModel):
     display_name: str | None = None
     tenant_id: str = ""
     # Direct group memberships. Transitive memberships are resolved by the port.
+    # Groups gate document retrieval (the ACL building block).
     group_ids: list[str] = Field(default_factory=list)
+    # Management roles (e.g. "admin", "connector_admin", "member"). Orthogonal to
+    # groups: roles gate what management actions the user may perform in pansoph,
+    # groups gate what documents they may retrieve. A flat list of strings so any
+    # IdP maps its own roles onto pansoph's via the adapter, never hardcoded here.
+    roles: list[str] = Field(default_factory=list)
 
 
 class Group(BaseModel):

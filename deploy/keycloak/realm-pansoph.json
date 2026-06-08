@@ -8,6 +8,16 @@
     { "name": "g1" },
     { "name": "g2" }
   ],
+  "roles": {
+    "realm": [
+      { "name": "admin", "description": "pansoph platform admin: full management" },
+      {
+        "name": "connector_admin",
+        "description": "manage connector instances within own scope"
+      },
+      { "name": "member", "description": "read-only: search and chat" }
+    ]
+  },
   "users": [
     {
       "username": "alice",
@@ -17,7 +27,8 @@
       "firstName": "Alice",
       "lastName": "Engineer",
       "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
-      "groups": ["/g1"]
+      "groups": ["/g1"],
+      "realmRoles": ["admin"]
     },
     {
       "username": "bob",
@@ -27,7 +38,8 @@
       "firstName": "Bob",
       "lastName": "Visitor",
       "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
-      "groups": []
+      "groups": [],
+      "realmRoles": ["member"]
     }
   ],
   "clients": [
@@ -64,6 +76,19 @@
             "included.client.audience": "lens",
             "id.token.claim": "false",
             "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
           }
         }
       ]

@@ -83,6 +83,7 @@ _IDENTITY_KWARGS: dict[str, Any] = {
         "client_id": _env("OIDC_CLIENT_ID"),
         "groups_claim": _env("OIDC_GROUPS_CLAIM", "groups"),
         "jwks_url": _env("OIDC_JWKS_URL"),
+        "roles_claim": _env("OIDC_ROLES_CLAIM", "roles"),
     },
 }
 

@@ -76,17 +76,54 @@ async def _effective_identity(req: Query, authorization: str | None) -> tuple[st
 
 
 async def _require_identity(authorization: str | None = Header(None)) -> Any:
-    """Require a valid bearer token. Gates the management and write surface.
+    """Require a valid bearer token. Gates the write surface that any signed-in user
+    may use (e.g. grab their own content).
 
-    This is authentication: a request with no valid token is rejected before it can
-    create or delete a connector, trigger a sync, or inject content. Role-based
-    authorization (admin / connector_admin / member) layers on top of this through
-    the Identity port. The check delegates to the Identity port, so it is adapter
-    agnostic, never coupled to a specific IdP."""
+    This is authentication: a request with no valid token is rejected. The check
+    delegates to the Identity port, so it is adapter agnostic, never coupled to a
+    specific IdP."""
     user = await _identity_from_token(authorization)
     if user is None:
         raise HTTPException(status_code=401, detail="authentication required")
     return user
+
+
+# Canonical pansoph management roles. Orthogonal to groups (which gate document
+# retrieval). The token carries these as a flat `roles` claim; any IdP maps its own
+# roles onto these strings via its claim mapper, so nothing here is IdP-specific.
+ROLE_ADMIN = "admin"
+ROLE_CONNECTOR_ADMIN = "connector_admin"
+ROLE_MEMBER = "member"
+
+
+def has_required_role(user_roles: list[str] | None, allowed: tuple[str, ...]) -> bool:
+    """The pure authorization decision: admin always passes, otherwise the caller
+    must hold at least one allowed role. Kept separate so it is unit testable without
+    a token or an IdP."""
+    roles = set(user_roles or [])
+    return ROLE_ADMIN in roles or bool(roles.intersection(allowed))
+
+
+def require_role(*allowed: str) -> Any:
+    """A dependency that requires the caller to hold one of `allowed` roles (admin
+    always passes). Authentication plus authorization, both through the Identity
+    port. Returns the authenticated user."""
+
+    async def _dep(authorization: str | None = Header(None)) -> Any:
+        user = await _identity_from_token(authorization)
+        if user is None:
+            raise HTTPException(status_code=401, detail="authentication required")
+        if has_required_role(getattr(user, "roles", []), allowed):
+            return user
+        raise HTTPException(
+            status_code=403, detail=f"requires one of roles: {', '.join((ROLE_ADMIN, *allowed))}"
+        )
+
+    return _dep
+
+
+# Dependency singletons, built once so they are plain names in argument defaults.
+_CONNECTOR_ADMIN = require_role(ROLE_CONNECTOR_ADMIN)
 
 
 async def _retrieve(
@@ -253,7 +290,7 @@ async def list_instances() -> dict[str, Any]:
 
 @router.post("/connectors/instances")
 async def create_instance(
-    req: InstanceCreate, user: Any = Depends(_require_identity)
+    req: InstanceCreate, user: Any = Depends(_CONNECTOR_ADMIN)
 ) -> dict[str, Any]:
     return await _manager().create_instance(
         instance_id=req.instance_id,
@@ -268,14 +305,14 @@ async def create_instance(
 
 @router.delete("/connectors/instances/{instance_id}")
 async def delete_instance(
-    instance_id: str, user: Any = Depends(_require_identity)
+    instance_id: str, user: Any = Depends(_CONNECTOR_ADMIN)
 ) -> dict[str, str]:
     await _manager().delete_instance(instance_id)
     return {"deleted": instance_id}
 
 
 @router.post("/connectors/instances/{instance_id}/sync")
-async def sync_instance(instance_id: str, user: Any = Depends(_require_identity)) -> dict[str, Any]:
+async def sync_instance(instance_id: str, user: Any = Depends(_CONNECTOR_ADMIN)) -> dict[str, Any]:
     manager = _manager()
     instance = await manager.get_instance(instance_id)
     if instance is None:
