@@ -13,6 +13,7 @@ dependencies = [
   "pansoph-retrieval>=0.0.1",
   "pansoph-ingestion>=0.0.1",
   "pansoph-mcp-bridge>=0.0.1",
+  "pansoph-identity>=0.0.1",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "pydantic-settings>=2.4",
@@ -29,6 +30,7 @@ stack = [
   "authzed>=1.0",
   "qdrant-client>=1.12",
   "aioboto3>=13",
+  "pyjwt[crypto]>=2.9",
 ]
 
 [project.scripts]

@@ -16,7 +16,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from pansoph_authz import Principal, membership_tuples, tuples_for_acl
 from pansoph_ingestion.chunking import chunk_sections
 from pansoph_retrieval.pipeline import retrieve
@@ -48,25 +48,48 @@ _PORT_GROUPS = [
 
 class Query(BaseModel):
     query: str
-    user: str
+    # user and groups are the fallback identity when no bearer token is present
+    # (the demo switcher). With a token they are ignored in favour of the token.
+    user: str = "anonymous"
     groups: list[str] = []
     tenant_id: str = "default"
     final_k: int = 8
 
 
-async def _retrieve(req: Query) -> list[Any]:
+async def _identity_from_token(authorization: str | None) -> Any:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        return await assembly.build_identity().authenticate(token)
+    except Exception:  # noqa: BLE001  an invalid token is anonymous, never a 500
+        return None
+
+
+async def _effective_identity(req: Query, authorization: str | None) -> tuple[str, list[str]]:
+    """Prefer the validated token identity; fall back to the request body (the demo
+    switcher) when no bearer token is present. The authz check enforces either way."""
+    user = await _identity_from_token(authorization)
+    if user is not None:
+        return user.id, list(user.group_ids)
+    return req.user, req.groups
+
+
+async def _retrieve(
+    user: str, groups: list[str], tenant_id: str, query: str, final_k: int
+) -> list[Any]:
     authz = assembly.build_authz()
     # Sync the subject's identity groups into the authz graph so the engine can
     # resolve nested-group document access. Idempotent. In a full deployment this is
     # done by the Identity port on login or SCIM sync; here it is per request.
-    if req.groups:
-        await authz.write_tuples(membership_tuples(req.user, req.groups, req.tenant_id))
+    if groups:
+        await authz.write_tuples(membership_tuples(user, groups, tenant_id))
     return await retrieve(
-        query=req.query,
-        subject=Principal(type="user", id=req.user),
-        tenant_id=req.tenant_id,
-        subject_groups=req.groups,
-        final_k=req.final_k,
+        query=query,
+        subject=Principal(type="user", id=user),
+        tenant_id=tenant_id,
+        subject_groups=groups,
+        final_k=final_k,
         vector_store=assembly.build_vector_store(),
         embedder=assembly.build_embedder(),
         authz=authz,
@@ -75,9 +98,10 @@ async def _retrieve(req: Query) -> list[Any]:
 
 
 @router.post("/search")
-async def search(req: Query) -> dict[str, Any]:
-    hits = await _retrieve(req)
-    audit("search", actor=req.user, tenant=req.tenant_id, results=len(hits))
+async def search(req: Query, authorization: str | None = Header(None)) -> dict[str, Any]:
+    user, groups = await _effective_identity(req, authorization)
+    hits = await _retrieve(user, groups, req.tenant_id, req.query, req.final_k)
+    audit("search", actor=user, tenant=req.tenant_id, results=len(hits))
     return {
         "results": [
             {"doc_id": h.doc_id, "chunk_id": h.chunk_id, "score": h.score, "text": h.text}
@@ -87,9 +111,10 @@ async def search(req: Query) -> dict[str, Any]:
 
 
 @router.post("/chat")
-async def chat(req: Query) -> EventSourceResponse:
-    hits = await _retrieve(req)
-    audit("chat", actor=req.user, tenant=req.tenant_id, sources=len(hits))
+async def chat(req: Query, authorization: str | None = Header(None)) -> EventSourceResponse:
+    user, groups = await _effective_identity(req, authorization)
+    hits = await _retrieve(user, groups, req.tenant_id, req.query, req.final_k)
+    audit("chat", actor=user, tenant=req.tenant_id, sources=len(hits))
     llm = assembly.build_llm()
 
     if hits:

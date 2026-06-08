@@ -95,6 +95,23 @@ services:
       retries: 10
       start_period: 10s
 
+  # Identity provider (auth). Keycloak with a seeded realm for the demo. Swappable
+  # via the Identity/OIDC port; Zitadel is the documented production default.
+  keycloak:
+    <<: *restart
+    image: quay.io/keycloak/keycloak:26.0
+    profiles: ["core"]
+    command: ["start-dev", "--import-realm", "--http-port=8080", "--hostname-strict=false"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8090
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./deploy/keycloak/realm-pansoph.json:/opt/keycloak/data/import/realm-pansoph.json:ro
+    ports:
+      - "8090:8080"
+
   agora:
     <<: *restart
     build:

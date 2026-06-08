@@ -76,6 +76,15 @@ _LLM_KWARGS: dict[str, Any] = {
         "api_key": _env("PANSOPH_LLM_API_KEY"),
     },
 }
+_IDENTITY_KWARGS: dict[str, Any] = {
+    "builtin": lambda: {},
+    "oidc": lambda: {
+        "issuer_url": _env("OIDC_ISSUER_URL"),
+        "client_id": _env("OIDC_CLIENT_ID"),
+        "groups_claim": _env("OIDC_GROUPS_CLAIM", "groups"),
+        "jwks_url": _env("OIDC_JWKS_URL"),
+    },
+}
 
 
 def _build(group: str, name: str, kwargs_map: dict[str, Any]) -> Any:
@@ -111,3 +120,7 @@ def build_llm() -> Any:
 
 def build_parser() -> Any:
     return _build("pansoph.parsers", _env("PANSOPH_PARSER_ADAPTER", "docling"), {})
+
+
+def build_identity() -> Any:
+    return _build("pansoph.identity", _env("PANSOPH_IDENTITY_ADAPTER", "builtin"), _IDENTITY_KWARGS)

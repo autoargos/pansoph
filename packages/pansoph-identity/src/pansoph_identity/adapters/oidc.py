@@ -1,14 +1,16 @@
 """OIDC identity adapter. Validates an IdP bearer token and maps claims to a User.
 
-authenticate verifies the JWT signature against the issuer's JWKS (discovered from
-the well-known configuration and cached), checks issuer, audience, and expiry, then
-maps the subject, email, and groups claim to a User. The groups claim feeds the same
-nested group machinery that connector ACLs use. get_user and groups_for_user read a
-cache populated at authentication time, since a generic user lookup needs the IdP's
-admin API or SCIM, which is a later addition.
+authenticate verifies the JWT signature against the issuer's JWKS, checks issuer and
+audience, and maps the username and groups claim to a User. The groups claim feeds
+the same nested-group machinery that connector ACLs use.
 
-Recommended default IdP is Zitadel; Keycloak, Authentik, and Ory also work. Install
-pansoph-identity[oidc].
+Networking note: in a container, the public issuer URL (what the browser and the
+token's `iss` use) is often not reachable from the server. So a jwks_url override
+lets agora fetch the keys over the internal network while still validating the token
+against the public issuer.
+
+Recommended default IdP is Zitadel; Keycloak (used in the demo), Authentik, and Ory
+also work. Install pansoph-identity[oidc].
 """
 
 from __future__ import annotations
@@ -19,22 +21,35 @@ from pansoph_identity.port import User
 
 
 class OIDCIdentity:
-    def __init__(self, issuer_url: str, client_id: str, groups_claim: str = "groups") -> None:
+    def __init__(
+        self,
+        issuer_url: str,
+        client_id: str,
+        groups_claim: str = "groups",
+        jwks_url: str = "",
+    ) -> None:
         self._issuer_url = issuer_url.rstrip("/")
         self._client_id = client_id
         self._groups_claim = groups_claim
+        self._jwks_url = jwks_url
         self._jwks_client: Any = None
         self._cache: dict[str, User] = {}
 
     async def _jwks(self) -> Any:
-        import httpx
         from jwt import PyJWKClient
 
         if self._jwks_client is None:
-            url = f"{self._issuer_url}/.well-known/openid-configuration"
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                conf = (await client.get(url)).json()
-            self._jwks_client = PyJWKClient(conf["jwks_uri"])
+            if self._jwks_url:
+                url = self._jwks_url
+            else:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    conf = (
+                        await client.get(f"{self._issuer_url}/.well-known/openid-configuration")
+                    ).json()
+                url = conf["jwks_uri"]
+            self._jwks_client = PyJWKClient(url)
         return self._jwks_client
 
     async def authenticate(self, token: str) -> User | None:
@@ -53,9 +68,9 @@ class OIDCIdentity:
         except jwt.PyJWTError:
             return None
         user = User(
-            id=claims["sub"],
+            id=claims.get("preferred_username") or claims["sub"],
             email=claims.get("email"),
-            display_name=claims.get("name"),
+            display_name=claims.get("name") or claims.get("preferred_username"),
             group_ids=list(claims.get(self._groups_claim, [])),
         )
         self._cache[user.id] = user
