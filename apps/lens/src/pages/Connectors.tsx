@@ -121,6 +121,25 @@ function fmtDuration(s: number | null): string {
   return s < 1 ? `${Math.round(s * 1000)}ms` : `${s.toFixed(1)}s`;
 }
 
+function configToValues(connector: string, config: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of CONNECTORS[connector]?.fields ?? []) {
+    if (f.kind === "checkbox") continue;
+    const v = config[f.key];
+    if (Array.isArray(v)) out[f.key] = v.join(f.kind === "lines" ? "\n" : ", ");
+    else if (v != null) out[f.key] = String(v);
+  }
+  return out;
+}
+
+function configToChecks(connector: string, config: Record<string, unknown>): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const f of CONNECTORS[connector]?.fields ?? []) {
+    if (f.kind === "checkbox") out[f.key] = Boolean(config[f.key]);
+  }
+  return out;
+}
+
 function Avatar({ connector }: { connector: string }) {
   const letter = (CONNECTORS[connector]?.label ?? connector).slice(0, 1).toUpperCase();
   return (
@@ -135,6 +154,7 @@ export default function Connectors() {
   const [types, setTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Instance | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunInfo[]>([]);
@@ -237,6 +257,9 @@ export default function Connectors() {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <Button variant="ghost" onClick={() => setEditing(inst)}>
+                      Edit
+                    </Button>
                     <Button variant="ghost" onClick={() => toggleRuns(inst.id)}>
                       Runs
                     </Button>
@@ -309,12 +332,17 @@ export default function Connectors() {
         </div>
       )}
 
-      {adding && (
-        <AddConnector
+      {(adding || editing) && (
+        <ConnectorForm
           types={types}
-          onClose={() => setAdding(false)}
-          onCreated={() => {
+          editing={editing}
+          onClose={() => {
             setAdding(false);
+            setEditing(null);
+          }}
+          onSaved={() => {
+            setAdding(false);
+            setEditing(null);
             refresh();
           }}
         />
@@ -323,24 +351,30 @@ export default function Connectors() {
   );
 }
 
-function AddConnector({
+function ConnectorForm({
   types,
+  editing,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   types: string[];
+  editing: Instance | null;
   onClose: () => void;
-  onCreated: () => void;
+  onSaved: () => void;
 }) {
   const ordered = useMemo(
     () => types.filter((t) => t in CONNECTORS).sort((a, b) => (a === "github" ? -1 : b === "github" ? 1 : 0)),
     [types],
   );
-  const [connector, setConnector] = useState(ordered[0] ?? "github");
-  const [name, setName] = useState("");
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [checks, setChecks] = useState<Record<string, boolean>>({});
-  const [schedule, setSchedule] = useState(0);
+  const [connector, setConnector] = useState(editing?.connector ?? ordered[0] ?? "github");
+  const [name, setName] = useState(editing?.name ?? "");
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    editing ? configToValues(editing.connector, editing.config) : {},
+  );
+  const [checks, setChecks] = useState<Record<string, boolean>>(() =>
+    editing ? configToChecks(editing.connector, editing.config) : {},
+  );
+  const [schedule, setSchedule] = useState(editing?.schedule_seconds ?? 0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -381,12 +415,13 @@ function AddConnector({
       await createInstance({
         connector,
         name: finalName,
-        instance_id: finalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
+        instance_id:
+          editing?.id ?? finalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
         tenant_id: "default",
         config: buildConfig(),
         schedule_seconds: schedule,
       });
-      onCreated();
+      onSaved();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -403,11 +438,16 @@ function AddConnector({
       onClick={onClose}
     >
       <Card className="max-h-[88vh] w-full max-w-md overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold">Add connector</h2>
+        <h2 className="text-lg font-semibold">{editing ? "Edit connector" : "Add connector"}</h2>
         <p className="mb-4 mt-0.5 text-sm text-muted">{def?.blurb}</p>
         <div className="space-y-3">
           <Field label="Type">
-            <select value={connector} onChange={(e) => changeType(e.target.value)} className={inputCls}>
+            <select
+              value={connector}
+              onChange={(e) => changeType(e.target.value)}
+              className={`${inputCls} disabled:opacity-60`}
+              disabled={!!editing}
+            >
               {ordered.map((t) => (
                 <option key={t} value={t}>
                   {CONNECTORS[t].label}
@@ -479,7 +519,13 @@ function AddConnector({
             Cancel
           </Button>
           <Button onClick={submit} disabled={busy}>
-            {busy ? <Spinner className="border-white/40 border-t-white" /> : "Create"}
+            {busy ? (
+              <Spinner className="border-white/40 border-t-white" />
+            ) : editing ? (
+              "Save"
+            ) : (
+              "Create"
+            )}
           </Button>
         </div>
       </Card>
