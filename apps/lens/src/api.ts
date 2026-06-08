@@ -1,6 +1,15 @@
 // Typed client for the agora API. The SSE chat is consumed with fetch and a stream
 // reader, since the chat endpoint is a POST and the browser EventSource is GET only.
 
+// The bearer token from the OIDC login. agora validates it and derives identity.
+let _authToken: string | null = null;
+export function setAuthToken(token: string | null): void {
+  _authToken = token;
+}
+function authHeader(): Record<string, string> {
+  return _authToken ? { authorization: `Bearer ${_authToken}` } : {};
+}
+
 export interface Identity {
   user: string;
   groups: string[];
@@ -34,7 +43,7 @@ function body(query: string, id: Identity): string {
 export async function search(query: string, id: Identity): Promise<SearchResult[]> {
   const res = await fetch("/api/search", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeader() },
     body: body(query, id),
   });
   if (!res.ok) throw new Error(`search failed: ${res.status}`);
@@ -45,7 +54,7 @@ export async function search(query: string, id: Identity): Promise<SearchResult[
 export async function* chat(query: string, id: Identity): AsyncGenerator<ChatEvent> {
   const res = await fetch("/api/chat", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeader() },
     body: body(query, id),
   });
   if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
@@ -117,7 +126,7 @@ export interface Instance {
 }
 
 async function jget<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(path, { headers: authHeader() });
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
   return (await res.json()) as T;
 }
