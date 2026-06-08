@@ -13,6 +13,8 @@ so a crash resumes rather than restarts.
 
 from __future__ import annotations
 
+import time
+
 from pansoph_authz import AuthzPort, ConsistencyToken, tuples_for_acl
 from pansoph_connector_sdk import Connector
 from pansoph_retrieval.ports import Embedder, SearchHit, VectorStore
@@ -75,6 +77,15 @@ class IngestionPipeline:
         embed_texts = await self._embed_texts(parsed.title, chunks)
         vectors = await self._embedder.embed(embed_texts)
 
+        # Write authz tuples first so the chunks can store the consistency token of
+        # this exact ACL write, which retrieval threads back into the bulk check.
+        # Two-level namespace: groups are tenant scoped (so identity groups resolve
+        # across instances), users and the public wildcard stay instance scoped (so
+        # two instances never collide). The mapper does this split; we pass both ids.
+        token = await self._authz.write_tuples(
+            tuples_for_acl(doc_id, ref.instance_id, acl, tenant_id=tenant_id)
+        )
+        written_at = time.time()
         hits = [
             SearchHit(
                 doc_id=doc_id,
@@ -85,16 +96,13 @@ class IngestionPipeline:
                 deny=list(acl.deny),
                 acl_version=1,
                 text=chunk,
+                consistency_token=str(token),
+                acl_written_at=written_at,
             )
             for i, chunk in enumerate(chunks)
         ]
         await self._vector_store.upsert(hits, vectors)
-        # Two-level namespace: groups are tenant scoped (so identity groups resolve
-        # across instances), users and the public wildcard stay instance scoped (so
-        # two instances never collide). The mapper does this split; we pass both ids.
-        return await self._authz.write_tuples(
-            tuples_for_acl(doc_id, ref.instance_id, acl, tenant_id=tenant_id)
-        )
+        return token
 
     async def _embed_texts(self, title: str | None, chunks: list[str]) -> list[str]:
         """Optionally prepend generated context to each chunk before embedding."""

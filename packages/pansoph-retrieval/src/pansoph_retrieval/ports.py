@@ -21,6 +21,12 @@ class SearchHit(BaseModel):
     deny: list[str] = Field(default_factory=list)
     acl_version: int = 0
     text: str | None = None
+    # The authz consistency token captured when this chunk's ACL was last written,
+    # and a comparable stamp of that write. retrieve() passes the freshest token to
+    # the bulk check so a revocation is never read stale (SpiceDB revisions are
+    # globally monotonic, so the latest-stamped token dominates all candidates).
+    consistency_token: str = ""
+    acl_written_at: float = 0.0
 
 
 class VectorFilter(BaseModel):

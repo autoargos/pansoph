@@ -8,7 +8,7 @@ exclusion tuples.
 
 from __future__ import annotations
 
-from pansoph_authz import AuthzPort, Principal
+from pansoph_authz import AuthzPort, ConsistencyToken, Principal
 
 from .ports import Embedder, Reranker, SearchHit, VectorFilter, VectorStore
 
@@ -45,10 +45,20 @@ async def retrieve(
     if not candidates:
         return []
 
+    # Thread the freshest stored consistency token so the bulk check reads no staler
+    # than the most recent ACL write among the candidates. Falls back to None (the
+    # adapter's own freshness) for chunks ingested before tokens were stored.
+    freshest = max(candidates, key=lambda h: h.acl_written_at, default=None)
+    token = (
+        ConsistencyToken(freshest.consistency_token)
+        if freshest and freshest.consistency_token
+        else None
+    )
     allowed_ids = await authz.bulk_check(
         subject=subject,
         permission="read",
         object_ids=[hit.doc_id for hit in candidates],
+        at_least_as_fresh=token,
     )
     # The authz bulk check is the source of truth for grants. `deny` is then applied
     # as a final filter (ADR-0002): a chunk denied to the subject directly or to any

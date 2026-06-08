@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS pansoph_chunks (
     tsv         tsvector
 );
 ALTER TABLE pansoph_chunks ADD COLUMN IF NOT EXISTS deny text[] NOT NULL DEFAULT '{}';
+ALTER TABLE pansoph_chunks ADD COLUMN IF NOT EXISTS consistency_token text NOT NULL DEFAULT '';
+ALTER TABLE pansoph_chunks ADD COLUMN IF NOT EXISTS acl_written_at double precision
+    NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS pansoph_chunks_tenant ON pansoph_chunks (tenant_id);
 CREATE INDEX IF NOT EXISTS pansoph_chunks_tsv ON pansoph_chunks USING gin (tsv);
 CREATE INDEX IF NOT EXISTS pansoph_chunks_groups ON pansoph_chunks USING gin (allow_groups);
@@ -63,9 +66,11 @@ class PgVectorScaleStore:
                         """
                         INSERT INTO pansoph_chunks (
                             chunk_id, doc_id, tenant_id, allow_groups, deny,
-                            acl_version, body, embedding, tsv
+                            acl_version, body, embedding, tsv,
+                            consistency_token, acl_written_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, to_tsvector('english', %s))
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, to_tsvector('english', %s),
+                                %s, %s)
                         ON CONFLICT (chunk_id) DO UPDATE SET
                           doc_id = EXCLUDED.doc_id,
                           tenant_id = EXCLUDED.tenant_id,
@@ -74,7 +79,9 @@ class PgVectorScaleStore:
                           acl_version = EXCLUDED.acl_version,
                           body = EXCLUDED.body,
                           embedding = EXCLUDED.embedding,
-                          tsv = EXCLUDED.tsv
+                          tsv = EXCLUDED.tsv,
+                          consistency_token = EXCLUDED.consistency_token,
+                          acl_written_at = EXCLUDED.acl_written_at
                         """,
                         (
                             hit.chunk_id,
@@ -86,6 +93,8 @@ class PgVectorScaleStore:
                             hit.text,
                             _vec_literal(vec),
                             hit.text or "",
+                            hit.consistency_token,
+                            hit.acl_written_at,
                         ),
                     )
         finally:
@@ -128,7 +137,8 @@ class PgVectorScaleStore:
                 if not fused:
                     return []
                 await cur.execute(
-                    "SELECT chunk_id, doc_id, tenant_id, allow_groups, acl_version, body, deny "
+                    "SELECT chunk_id, doc_id, tenant_id, allow_groups, acl_version, body, deny, "
+                    "consistency_token, acl_written_at "
                     "FROM pansoph_chunks WHERE chunk_id = ANY(%s)",
                     (fused,),
                 )
@@ -141,6 +151,8 @@ class PgVectorScaleStore:
                         acl_version=row[4],
                         text=row[5],
                         deny=list(row[6] or []),
+                        consistency_token=row[7] or "",
+                        acl_written_at=row[8] or 0.0,
                         score=0.0,
                     )
                     for row in await cur.fetchall()
@@ -198,6 +210,8 @@ class QdrantStore:
                             "deny": hit.deny,
                             "acl_version": hit.acl_version,
                             "text": hit.text,
+                            "consistency_token": hit.consistency_token,
+                            "acl_written_at": hit.acl_written_at,
                         },
                     )
                     for hit, vec in zip(hits, vectors, strict=True)
@@ -254,6 +268,8 @@ class QdrantStore:
                     deny=payload.get("deny", []),
                     acl_version=payload.get("acl_version", 0),
                     text=payload.get("text"),
+                    consistency_token=payload.get("consistency_token", ""),
+                    acl_written_at=payload.get("acl_written_at", 0.0),
                     score=float(point.score or 0.0),
                 )
             )
