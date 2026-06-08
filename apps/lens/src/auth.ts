@@ -57,6 +57,22 @@ export function groupsOf(user: User): string[] {
   return Array.isArray(g) ? (g as string[]) : [];
 }
 
+// Management roles from the token. Orthogonal to groups: groups gate what documents
+// you can retrieve, roles gate what management actions you may perform. Mirrors the
+// agora roles claim; the backend is the source of truth, this is only for show/hide.
+export function rolesOf(user: User): string[] {
+  const r = user.profile.roles;
+  return Array.isArray(r) ? (r as string[]) : [];
+}
+
+export function canManageConnectors(roles: string[]): boolean {
+  return roles.includes("admin") || roles.includes("connector_admin");
+}
+
+export function isAdmin(roles: string[]): boolean {
+  return roles.includes("admin");
+}
+
 export function usernameOf(user: User): string {
   return (user.profile.preferred_username as string) ?? "user";
 }

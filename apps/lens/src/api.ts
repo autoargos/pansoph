@@ -13,6 +13,7 @@ function authHeader(): Record<string, string> {
 export interface Identity {
   user: string;
   groups: string[];
+  roles: string[];
   tenant_id: string;
 }
 
@@ -120,6 +121,8 @@ export interface Instance {
   config: Record<string, unknown>;
   schedule_seconds: number;
   schedule_cron: string | null;
+  scope_type: string;
+  scope_ref: string | null;
   enabled: boolean;
   cursor: string | null;
   created_at: string | null;
@@ -152,13 +155,18 @@ export async function createInstance(payload: {
   config: Record<string, unknown>;
   schedule_seconds: number;
   schedule_cron?: string;
+  scope_type?: string;
+  scope_ref?: string;
 }): Promise<Instance> {
   const res = await fetch("/api/connectors/instances", {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeader() },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`create failed: ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail ?? `create failed: ${res.status}`);
+  }
   return (await res.json()) as Instance;
 }
 

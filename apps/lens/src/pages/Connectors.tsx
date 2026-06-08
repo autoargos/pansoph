@@ -63,7 +63,19 @@ const CONNECTORS: Record<string, ConnDef> = {
         placeholder: "ya29.…",
         help: "From the OAuth Playground with scope drive.readonly.",
       },
-      { key: "query", label: "Query", placeholder: "'<folderId>' in parents and trashed=false", help: "Optional scope." },
+      {
+        key: "folder_id",
+        label: "Folder ID",
+        placeholder: "1AbC…",
+        help: "Optional. Confine this instance to a single folder.",
+      },
+      {
+        key: "drive_id",
+        label: "Shared drive ID",
+        placeholder: "0AbC…",
+        help: "Optional. Set when the folder lives in a shared drive.",
+      },
+      { key: "query", label: "Query", placeholder: "trashed=false", help: "Optional extra filter." },
     ],
   },
   confluence: {
@@ -86,6 +98,12 @@ const CONNECTORS: Record<string, ConnDef> = {
     blurb: "Any MCP server that exposes resources.",
     fields: [
       { key: "server_url", label: "MCP server URL", placeholder: "http://mcp-sample:8000/mcp" },
+      {
+        key: "resource_uri_prefix",
+        label: "Resource URI prefix",
+        placeholder: "notes://",
+        help: "Optional. Confine this instance to resources under this prefix.",
+      },
       { key: "public", label: "Public to everyone", kind: "checkbox" },
       { key: "allow_groups", label: "Restrict to groups", placeholder: "g1", kind: "csv" },
     ],
@@ -155,7 +173,7 @@ function Avatar({ connector }: { connector: string }) {
   );
 }
 
-export default function Connectors() {
+export default function Connectors({ canManage }: { canManage: boolean }) {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [types, setTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -210,8 +228,10 @@ export default function Connectors() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Connectors"
-        subtitle="Sources feeding pansoph. Every instance has its own credentials, schedule, and ACL namespace."
-        action={<Button onClick={() => setAdding(true)}>+ Add connector</Button>}
+        subtitle="Sources feeding pansoph. Every instance has its own credentials, schedule, scope, and ACL namespace."
+        action={
+          canManage ? <Button onClick={() => setAdding(true)}>+ Add connector</Button> : undefined
+        }
       />
 
       {loading ? (
@@ -242,6 +262,14 @@ export default function Connectors() {
                         </svg>
                         {instanceSchedule(inst)}
                       </span>
+                      <span>·</span>
+                      <span className="inline-flex items-center gap-1 capitalize" title="instance scope">
+                        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 3l8 4v5c0 4.5-3 6.8-8 7.5C7 18.8 4 16.5 4 12V7z" strokeLinejoin="round" />
+                        </svg>
+                        {inst.scope_type}
+                        {inst.scope_ref ? `: ${inst.scope_ref}` : ""}
+                      </span>
                     </div>
                   </div>
 
@@ -263,26 +291,30 @@ export default function Connectors() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" onClick={() => setEditing(inst)}>
-                      Edit
-                    </Button>
                     <Button variant="ghost" onClick={() => toggleRuns(inst.id)}>
                       Runs
                     </Button>
-                    <Button onClick={() => sync(inst.id)} disabled={syncing === inst.id}>
-                      {syncing === inst.id ? (
-                        <Spinner className="border-white/40 border-t-white" />
-                      ) : (
-                        "Sync now"
-                      )}
-                    </Button>
-                    <button
-                      onClick={() => remove(inst)}
-                      className="rounded-lg px-2 py-2 text-faint hover:bg-err-soft hover:text-err"
-                      title="Delete"
-                    >
-                      ✕
-                    </button>
+                    {canManage && (
+                      <>
+                        <Button variant="ghost" onClick={() => setEditing(inst)}>
+                          Edit
+                        </Button>
+                        <Button onClick={() => sync(inst.id)} disabled={syncing === inst.id}>
+                          {syncing === inst.id ? (
+                            <Spinner className="border-white/40 border-t-white" />
+                          ) : (
+                            "Sync now"
+                          )}
+                        </Button>
+                        <button
+                          onClick={() => remove(inst)}
+                          className="rounded-lg px-2 py-2 text-faint hover:bg-err-soft hover:text-err"
+                          title="Delete"
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -383,6 +415,8 @@ function ConnectorForm({
   const [schedule, setSchedule] = useState(editing?.schedule_seconds ?? 0);
   const [cronMode, setCronMode] = useState(!!editing?.schedule_cron);
   const [cron, setCron] = useState(editing?.schedule_cron ?? "");
+  const [scopeType, setScopeType] = useState(editing?.scope_type ?? "org");
+  const [scopeRef, setScopeRef] = useState(editing?.scope_ref ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -429,6 +463,8 @@ function ConnectorForm({
         config: buildConfig(),
         schedule_seconds: cronMode ? 0 : schedule,
         schedule_cron: cronMode ? cron.trim() : "",
+        scope_type: scopeType,
+        scope_ref: scopeType === "org" ? "" : scopeRef.trim(),
       });
       onSaved();
     } catch (e) {
@@ -506,6 +542,30 @@ function ConnectorForm({
               </Field>
             ),
           )}
+
+          <Field label="Scope">
+            <select
+              value={scopeType}
+              onChange={(e) => setScopeType(e.target.value)}
+              className={inputCls}
+            >
+              <option value="org">Organization (whole source)</option>
+              <option value="group">Group</option>
+              <option value="individual">Individual</option>
+            </select>
+            {scopeType !== "org" && (
+              <input
+                className={`${inputCls} mt-2`}
+                value={scopeRef}
+                onChange={(e) => setScopeRef(e.target.value)}
+                placeholder={scopeType === "group" ? "group id, e.g. g1" : "user id, e.g. alice"}
+              />
+            )}
+            <span className="mt-1 block text-xs text-faint">
+              Which slice this instance covers. Management metadata; the source ACL still governs
+              who can read its documents.
+            </span>
+          </Field>
 
           <Field label="Schedule">
             <select

@@ -2,19 +2,61 @@ import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 
 import { health, type Health, type Identity } from "./api.ts";
-import { groupsOf, login, logout, useAuth, usernameOf } from "./auth.ts";
+import {
+  canManageConnectors,
+  groupsOf,
+  isAdmin,
+  login,
+  logout,
+  rolesOf,
+  useAuth,
+  usernameOf,
+} from "./auth.ts";
+import Access from "./pages/Access.tsx";
 import Chat from "./pages/Chat.tsx";
 import Connectors from "./pages/Connectors.tsx";
 import Search from "./pages/Search.tsx";
 import System from "./pages/System.tsx";
 import { Button } from "./ui.tsx";
 
-const NAV = [
-  { to: "/", label: "Chat", end: true, icon: "M4 5h16M4 12h10M4 19h7" },
-  { to: "/search", label: "Search", icon: "M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-4.3-4.3" },
-  { to: "/connectors", label: "Connectors", icon: "M8 7h8M8 12h8M8 17h5M5 4h14v16H5z" },
-  { to: "/system", label: "System", icon: "M12 3l8 4v6c0 5-3.5 7.5-8 8-4.5-.5-8-3-8-8V7z" },
-];
+interface NavItem {
+  to: string;
+  label: string;
+  end?: boolean;
+  icon: string;
+}
+
+const NAV_CHAT: NavItem = { to: "/", label: "Chat", end: true, icon: "M4 5h16M4 12h10M4 19h7" };
+const NAV_SEARCH: NavItem = {
+  to: "/search",
+  label: "Search",
+  icon: "M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-4.3-4.3",
+};
+const NAV_CONNECTORS: NavItem = {
+  to: "/connectors",
+  label: "Connectors",
+  icon: "M8 7h8M8 12h8M8 17h5M5 4h14v16H5z",
+};
+const NAV_ACCESS: NavItem = {
+  to: "/access",
+  label: "Access",
+  icon: "M12 3l7 4v5c0 5-3 7.5-7 8-4-.5-7-3-7-8V7zM9.5 12l1.8 1.8L15 10",
+};
+const NAV_SYSTEM: NavItem = {
+  to: "/system",
+  label: "System",
+  icon: "M12 3l8 4v6c0 5-3.5 7.5-8 8-4.5-.5-8-3-8-8V7z",
+};
+
+// Role-aware navigation. Connectors needs management rights, Access is admin only.
+// This is convenience, not security: agora enforces every action by role regardless.
+function navFor(roles: string[]): NavItem[] {
+  const nav: NavItem[] = [NAV_CHAT, NAV_SEARCH];
+  if (canManageConnectors(roles)) nav.push(NAV_CONNECTORS);
+  if (isAdmin(roles)) nav.push(NAV_ACCESS);
+  nav.push(NAV_SYSTEM);
+  return nav;
+}
 
 export default function App() {
   const { user, ready } = useAuth();
@@ -29,6 +71,7 @@ export default function App() {
   const identity: Identity = {
     user: usernameOf(user),
     groups: groupsOf(user),
+    roles: rolesOf(user),
     tenant_id: "default",
   };
 
@@ -68,6 +111,9 @@ function Shell({ identity }: { identity: Identity }) {
     return () => clearInterval(t);
   }, []);
   const healthy = hp?.ok ?? false;
+  const nav = navFor(identity.roles);
+  const canManage = canManageConnectors(identity.roles);
+  const admin = isAdmin(identity.roles);
 
   return (
     <div className="flex h-full">
@@ -79,7 +125,7 @@ function Shell({ identity }: { identity: Identity }) {
           <div className="mt-0.5 text-[11px] text-white/40">access-aware knowledge</div>
         </div>
         <nav className="flex flex-1 flex-col gap-1 px-3">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -118,10 +164,20 @@ function Shell({ identity }: { identity: Identity }) {
             <div className="flex items-center gap-1.5 text-muted">
               <span>signed in as</span>
               <span className="font-medium text-ink">{identity.user}</span>
+              {identity.roles.map((r) => (
+                <span
+                  key={r}
+                  className="rounded-full bg-ink/10 px-2 py-0.5 text-[11px] font-medium text-ink"
+                  title="management role"
+                >
+                  {r}
+                </span>
+              ))}
               {identity.groups.map((g) => (
                 <span
                   key={g}
                   className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent-ink"
+                  title="document group"
                 >
                   {g}
                 </span>
@@ -137,7 +193,8 @@ function Shell({ identity }: { identity: Identity }) {
           <Routes>
             <Route path="/" element={<Chat identity={identity} />} />
             <Route path="/search" element={<Search identity={identity} />} />
-            <Route path="/connectors" element={<Connectors />} />
+            <Route path="/connectors" element={<Connectors canManage={canManage} />} />
+            {admin && <Route path="/access" element={<Access identity={identity} />} />}
             <Route path="/system" element={<System />} />
           </Routes>
         </main>
