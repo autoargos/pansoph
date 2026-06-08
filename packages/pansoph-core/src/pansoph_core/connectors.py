@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS connector_instances (
     cursor           text,
     created_at       timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS schedule_cron text;
 CREATE TABLE IF NOT EXISTS sync_runs (
     id            bigserial PRIMARY KEY,
     instance_id   text NOT NULL,
@@ -72,6 +73,7 @@ class ConnectorManager:
         tenant_id: str,
         config: dict[str, Any],
         schedule_seconds: int,
+        schedule_cron: str = "",
     ) -> dict[str, Any]:
         from psycopg.types.json import Json
 
@@ -80,14 +82,23 @@ class ConnectorManager:
             await conn.execute(
                 """
                 INSERT INTO connector_instances
-                  (id, connector, name, tenant_id, config, schedule_seconds)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                  (id, connector, name, tenant_id, config, schedule_seconds, schedule_cron)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                   connector = EXCLUDED.connector, name = EXCLUDED.name,
                   tenant_id = EXCLUDED.tenant_id, config = EXCLUDED.config,
-                  schedule_seconds = EXCLUDED.schedule_seconds
+                  schedule_seconds = EXCLUDED.schedule_seconds,
+                  schedule_cron = EXCLUDED.schedule_cron
                 """,
-                (instance_id, connector, name, tenant_id, Json(config), schedule_seconds),
+                (
+                    instance_id,
+                    connector,
+                    name,
+                    tenant_id,
+                    Json(config),
+                    schedule_seconds,
+                    schedule_cron or None,
+                ),
             )
         finally:
             await conn.close()
@@ -106,8 +117,9 @@ class ConnectorManager:
         try:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT id, connector, name, tenant_id, config, schedule_seconds, enabled, "
-                    "cursor, created_at FROM connector_instances WHERE id = %s",
+                    "SELECT id, connector, name, tenant_id, config, schedule_seconds, "
+                    "schedule_cron, enabled, cursor, created_at "
+                    "FROM connector_instances WHERE id = %s",
                     (instance_id,),
                 )
                 row = await cur.fetchone()
@@ -120,8 +132,9 @@ class ConnectorManager:
         try:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT id, connector, name, tenant_id, config, schedule_seconds, enabled, "
-                    "cursor, created_at FROM connector_instances ORDER BY created_at"
+                    "SELECT id, connector, name, tenant_id, config, schedule_seconds, "
+                    "schedule_cron, enabled, cursor, created_at "
+                    "FROM connector_instances ORDER BY created_at"
                 )
                 rows = await cur.fetchall()
                 out = []
@@ -198,9 +211,10 @@ class ConnectorManager:
             "tenant_id": row[3],
             "config": row[4],
             "schedule_seconds": row[5],
-            "enabled": row[6],
-            "cursor": row[7],
-            "created_at": row[8].isoformat() if row[8] else None,
+            "schedule_cron": row[6],
+            "enabled": row[7],
+            "cursor": row[8],
+            "created_at": row[9].isoformat() if row[9] else None,
         }
 
     @staticmethod

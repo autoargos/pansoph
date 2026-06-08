@@ -119,6 +119,7 @@ export interface Instance {
   tenant_id: string;
   config: Record<string, unknown>;
   schedule_seconds: number;
+  schedule_cron: string | null;
   enabled: boolean;
   cursor: string | null;
   created_at: string | null;
@@ -150,6 +151,7 @@ export async function createInstance(payload: {
   tenant_id: string;
   config: Record<string, unknown>;
   schedule_seconds: number;
+  schedule_cron?: string;
 }): Promise<Instance> {
   const res = await fetch("/api/connectors/instances", {
     method: "POST",

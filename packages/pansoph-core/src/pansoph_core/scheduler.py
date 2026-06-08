@@ -18,17 +18,32 @@ _log = logging.getLogger("pansoph.scheduler")
 
 
 def _is_due(instance: dict, now: datetime) -> bool:
-    schedule = instance.get("schedule_seconds") or 0
-    if not instance.get("enabled") or schedule <= 0:
+    if not instance.get("enabled"):
         return False
     last = instance.get("last_run")
-    if not last or not last.get("started_at"):
-        return True
-    started = datetime.fromisoformat(last["started_at"])
     # A run still in progress is not due again.
-    if last.get("status") == "running":
+    if last and last.get("status") == "running":
         return False
-    return (now - started).total_seconds() >= schedule
+    last_started = (
+        datetime.fromisoformat(last["started_at"]) if last and last.get("started_at") else None
+    )
+
+    cron = instance.get("schedule_cron")
+    if cron:
+        from croniter import croniter
+
+        try:
+            prev_slot = croniter(cron, now).get_prev(datetime)
+        except (ValueError, KeyError):
+            return False
+        return last_started is None or last_started < prev_slot
+
+    schedule = instance.get("schedule_seconds") or 0
+    if schedule <= 0:
+        return False
+    if last_started is None:
+        return True
+    return (now - last_started).total_seconds() >= schedule
 
 
 async def scheduler_loop(manager: ConnectorManager, tick_seconds: int = 15) -> None:

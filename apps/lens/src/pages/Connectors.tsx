@@ -110,6 +110,12 @@ function scheduleLabel(s: number): string {
   return `every ${s}s`;
 }
 
+// What to show on a card: a cron expression takes precedence over the interval.
+function instanceSchedule(inst: Instance): string {
+  if (inst.schedule_cron) return `cron ${inst.schedule_cron}`;
+  return scheduleLabel(inst.schedule_seconds);
+}
+
 function runKind(status?: string): "ok" | "warn" | "err" {
   if (status === "success") return "ok";
   if (status === "running") return "warn";
@@ -234,7 +240,7 @@ export default function Connectors() {
                           <circle cx="12" cy="12" r="9" />
                           <path d="M12 7v5l3 2" strokeLinecap="round" />
                         </svg>
-                        {scheduleLabel(inst.schedule_seconds)}
+                        {instanceSchedule(inst)}
                       </span>
                     </div>
                   </div>
@@ -375,6 +381,8 @@ function ConnectorForm({
     editing ? configToChecks(editing.connector, editing.config) : {},
   );
   const [schedule, setSchedule] = useState(editing?.schedule_seconds ?? 0);
+  const [cronMode, setCronMode] = useState(!!editing?.schedule_cron);
+  const [cron, setCron] = useState(editing?.schedule_cron ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -419,7 +427,8 @@ function ConnectorForm({
           editing?.id ?? finalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
         tenant_id: "default",
         config: buildConfig(),
-        schedule_seconds: schedule,
+        schedule_seconds: cronMode ? 0 : schedule,
+        schedule_cron: cronMode ? cron.trim() : "",
       });
       onSaved();
     } catch (e) {
@@ -500,8 +509,15 @@ function ConnectorForm({
 
           <Field label="Schedule">
             <select
-              value={schedule}
-              onChange={(e) => setSchedule(parseInt(e.target.value, 10))}
+              value={cronMode ? "cron" : String(schedule)}
+              onChange={(e) => {
+                if (e.target.value === "cron") {
+                  setCronMode(true);
+                } else {
+                  setCronMode(false);
+                  setSchedule(parseInt(e.target.value, 10));
+                }
+              }}
               className={inputCls}
             >
               {SCHEDULES.map(([label, v]) => (
@@ -509,7 +525,21 @@ function ConnectorForm({
                   {label}
                 </option>
               ))}
+              <option value="cron">Custom (cron)…</option>
             </select>
+            {cronMode && (
+              <>
+                <input
+                  className={`${inputCls} mt-2 font-mono text-xs`}
+                  value={cron}
+                  onChange={(e) => setCron(e.target.value)}
+                  placeholder="0 */6 * * *"
+                />
+                <span className="mt-1 block text-xs text-faint">
+                  Standard 5-field cron (min hour day month weekday), evaluated in UTC.
+                </span>
+              </>
+            )}
           </Field>
 
           {error && <p className="text-sm text-err">{error}</p>}

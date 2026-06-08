@@ -225,6 +225,7 @@ class InstanceCreate(BaseModel):
     tenant_id: str = "default"
     config: dict[str, Any] = {}
     schedule_seconds: int = 0
+    schedule_cron: str = ""
 
 
 @router.get("/connectors/instances")
@@ -241,6 +242,7 @@ async def create_instance(req: InstanceCreate) -> dict[str, Any]:
         tenant_id=req.tenant_id,
         config=req.config,
         schedule_seconds=req.schedule_seconds,
+        schedule_cron=req.schedule_cron,
     )
 
 
