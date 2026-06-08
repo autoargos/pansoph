@@ -90,6 +90,10 @@ class GithubConnector:
         self._repo: str = cfg.get("repo", "")
         self._branch: str | None = cfg.get("branch")
         self._base_url: str = cfg.get("base_url", "https://api.github.com")
+        # Bound ingestion of large/popular repos: only files under `path`, capped at
+        # `max_files`, so a token's rate limit is respected.
+        self._path: str = cfg.get("path", "")
+        self._max_files: int = int(cfg.get("max_files", 300))
         self.meta = ConnectorMeta(
             name="github",
             auth=AuthScheme.api_token,
@@ -111,12 +115,19 @@ class GithubConnector:
         async with self._client() as client:
             branch = self._branch or (await self._repo_info(client))["default_branch"]
             next_cursor = await self._latest_commit_date(client) or ""
-            if cursor is None:
-                async for path in self._all_paths(client, branch):
-                    yield self._ref(path), next_cursor
-            else:
-                async for path in self._changed_paths(client, cursor):
-                    yield self._ref(path), next_cursor
+            source = (
+                self._all_paths(client, branch)
+                if cursor is None
+                else self._changed_paths(client, cursor)
+            )
+            count = 0
+            async for path in source:
+                if self._path and not path.startswith(self._path):
+                    continue
+                yield self._ref(path), next_cursor
+                count += 1
+                if count >= self._max_files:
+                    break
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

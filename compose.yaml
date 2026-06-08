@@ -74,26 +74,57 @@ services:
       retries: 10
       start_period: 15s
 
+  # One-shot: create SpiceDB's tables in Postgres so tuples persist across restarts.
+  spicedb-migrate:
+    image: authzed/spicedb:latest
+    profiles: ["core"]
+    restart: "no"
+    command:
+      - "datastore"
+      - "migrate"
+      - "head"
+      - "--datastore-engine=postgres"
+      - "--datastore-conn-uri=postgres://${POSTGRES_USER:-pansoph}:${POSTGRES_PASSWORD:-pansoph_local_dev}@postgres:5432/${POSTGRES_DB:-pansoph}?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   spicedb:
     <<: *restart
     image: authzed/spicedb:latest
     profiles: ["core"]
-    # Memory datastore for the demo (state is lost on restart). For persistence
-    # switch to: serve --datastore-engine postgres --datastore-conn-uri postgres://...
+    # Postgres datastore: tuples survive restarts (the demo no longer loses ACLs).
     command:
       - "serve"
-      - "--grpc-preshared-key"
-      - "${SPICEDB_PRESHARED_KEY:-pansoph_local_dev}"
-      - "--datastore-engine"
-      - "memory"
+      - "--grpc-preshared-key=${SPICEDB_PRESHARED_KEY:-pansoph_local_dev}"
+      - "--datastore-engine=postgres"
+      - "--datastore-conn-uri=postgres://${POSTGRES_USER:-pansoph}:${POSTGRES_PASSWORD:-pansoph_local_dev}@postgres:5432/${POSTGRES_DB:-pansoph}?sslmode=disable"
     ports:
       - "50051:50051"
+    depends_on:
+      spicedb-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=127.0.0.1:50051"]
       interval: 10s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      start_period: 15s
+
+  # A sample MCP server exposing resources, so the MCP bridge connector can be
+  # demonstrated end to end without an external server.
+  mcp-sample:
+    <<: *restart
+    image: cyproto/pansoph-agora:dev
+    profiles: ["core"]
+    entrypoint: ["python"]
+    command: ["/sample/server.py"]
+    healthcheck:
+      disable: true
+    volumes:
+      - ./deploy/mcp-sample/server.py:/sample/server.py:ro
+    expose:
+      - "8000"
 
   # Identity provider (auth). Keycloak with a seeded realm for the demo. Swappable
   # via the Identity/OIDC port; Zitadel is the documented production default.
@@ -111,6 +142,23 @@ services:
       - ./deploy/keycloak/realm-pansoph.json:/opt/keycloak/data/import/realm-pansoph.json:ro
     ports:
       - "8090:8080"
+
+  # Relax the master (admin) realm's SSL requirement so the admin console works over
+  # http in dev. Re-applied each start since dev mode uses an ephemeral store.
+  keycloak-config:
+    image: quay.io/keycloak/keycloak:26.0
+    profiles: ["core"]
+    restart: "no"
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        until /opt/keycloak/bin/kcadm.sh config credentials --server http://keycloak:8080
+        --realm master --user admin --password admin >/dev/null 2>&1; do sleep 3; done;
+        /opt/keycloak/bin/kcadm.sh update realms/master -s sslRequired=NONE &&
+        echo "master realm sslRequired set to none"
+    depends_on:
+      keycloak:
+        condition: service_started
 
   agora:
     <<: *restart

@@ -88,7 +88,10 @@ class IngestionPipeline:
             for i, chunk in enumerate(chunks)
         ]
         await self._vector_store.upsert(hits, vectors)
-        return await self._authz.write_tuples(tuples_for_acl(doc_id, ref.instance_id, acl))
+        # Group ACLs are tenant-scoped so a logged-in user's identity groups (also
+        # tenant-namespaced) resolve against connector documents.
+        scoped = acl.model_copy(update={"principal_ns": tenant_id})
+        return await self._authz.write_tuples(tuples_for_acl(doc_id, ref.instance_id, scoped))
 
     async def _embed_texts(self, title: str | None, chunks: list[str]) -> list[str]:
         """Optionally prepend generated context to each chunk before embedding."""

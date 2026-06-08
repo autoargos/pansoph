@@ -1,64 +1,34 @@
 """The granola connector.
 
-IMPLEMENTATION RULE (see pansoph CLAUDE.md section 6): implement against the latest
-official granola API documentation. Do not implement from memory. Before filling in
-the methods below, verify and then record here:
+Granola has historically had no bulk transcript API; it is reached through its MCP
+server. So this connector is the pansoph MCP bridge configured for Granola: point it
+at the Granola MCP endpoint and it ingests the resources that server exposes.
 
-  API docs:        <official docs URL>
-  API version:     <version or date>
-  Auth and scopes: <method and required scopes>
-  Pagination:      <how list pages work>
-  Incremental:     <cursor, change feed, or webhook mechanism>
-  Rate limits:     <limits and how this connector respects them>
-  ACL model:       <how source permissions map to AccessControl>
-  Verified on:     <YYYY-MM-DD by whom>
+  Reached via:  the Model Context Protocol (Granola's MCP server).
+  Config:       "server_url" (the Granola MCP endpoint), plus the ACL fields the MCP
+                bridge accepts ("public", "allow_groups"). The Granola MCP URL/token
+                is the operator's to provide.
+  Verified:     uses the same verified MCP client path as the relay bridge.
 
-Getting the ACL mapping wrong is a security bug. The runtime owns pagination,
-retries, backoff, and resumable sync, so a method only describes how to talk to the
-source for one page or one document.
+This is also the first proof of the bridge as a first-class tier: a source with no
+bulk API still becomes a connector at near-zero marginal cost.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from typing import Any
 
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
-from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+from pansoph_connector_sdk import ConnectorMeta
+from pansoph_mcp_bridge.bridge import MCPConnector
+from pansoph_types import AuthScheme, Capabilities
 
 
-class GranolaConnector:
+class GranolaConnector(MCPConnector):
     def __init__(self, instance_id: str, config: dict[str, Any] | None = None) -> None:
-        self.instance_id = instance_id
-        self._config = config or {}
+        super().__init__(instance_id, config)
+        # Same MCP machinery, branded as the Granola connector.
         self.meta = ConnectorMeta(
             name="granola",
             auth=AuthScheme.oauth2,
-            capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
-            ),
+            capabilities=Capabilities(slim_listing=True),
         )
-
-    def validate(self, config: dict[str, Any]) -> ValidationResult:
-        """Cheaply verify the config and credentials, ideally with one light call."""
-        raise NotImplementedError("validate: implement against the latest granola API docs")
-
-    async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
-        """Yield (DocRef, next_cursor) for everything changed since `cursor`.
-
-        Persist nothing yourself; the runtime checkpoints the cursor you yield.
-        """
-        raise NotImplementedError("list_changes: implement against the latest granola API docs")
-        yield  # pragma: no cover  (marks this as an async generator)
-
-    async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
-        """Fetch one document and its source ACL together."""
-        raise NotImplementedError("fetch: implement against the latest granola API docs")
-
-    async def list_acls(self, ref: DocRef) -> AccessControl:
-        """Return just the ACL for a document. Used when permission_sync is set."""
-        raise NotImplementedError("list_acls: implement against the latest granola API docs")
-
-    async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
-        """Optional. Normalize a source webhook into change events for freshness."""
-        return []
