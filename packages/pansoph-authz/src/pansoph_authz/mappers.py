@@ -15,28 +15,43 @@ from .port import Principal, Tuple
 READER = "reader"
 
 
-def tuples_for_acl(object_id: str, instance_id: str, acl: AccessControl) -> list[Tuple]:
+def tuples_for_acl(
+    object_id: str,
+    instance_id: str,
+    acl: AccessControl,
+    tenant_id: str | None = None,
+) -> list[Tuple]:
     """Produce the reader tuples implied by an ACL for one document.
 
-    Public documents get a wildcard reader so the bulk check can short circuit them.
-    Group and user grants become explicit reader tuples in the instance namespace.
-    `deny` is intentionally not expressed as tuples, since exclusion operators wreck
-    bulk check latency; denies are applied as a final filter in the enforcement path.
+    Two-level namespace (ADR-0001 "each instance has its own ACL namespace" with
+    ADR-0002 "map IdP groups to ReBAC group tuples so one nested group machinery
+    serves both human auth and connector ACLs"):
+
+      - group reader tuples are tenant scoped, so a user's identity groups (also
+        tenant scoped, see `membership_tuples`) resolve against any instance's docs;
+      - user and wildcard reader tuples are instance scoped, so two instances that
+        each have a same-named collaborator never collide.
+
+    When `tenant_id` is omitted, groups fall back to the user namespace (the legacy
+    single-level behavior). `deny` is intentionally not expressed as tuples, since
+    exclusion operators wreck bulk check latency; denies are applied as a final
+    filter in the enforcement path.
     """
-    ns = acl.principal_ns or instance_id
+    user_ns = acl.principal_ns or instance_id
+    group_ns = tenant_id if tenant_id is not None else user_ns
     out: list[Tuple] = []
     if acl.public:
-        out.append(_reader(Principal(type="user", id="*", ns=ns), object_id))
+        out.append(_reader(Principal(type="user", id="*", ns=user_ns), object_id))
     for group in acl.allow_groups:
-        out.append(_reader(Principal(type="group", id=group, ns=ns), object_id))
+        out.append(_reader(Principal(type="group", id=group, ns=group_ns), object_id))
     for user in acl.allow_users:
-        out.append(_reader(Principal(type="user", id=user, ns=ns), object_id))
+        out.append(_reader(Principal(type="user", id=user, ns=user_ns), object_id))
     return out
 
 
 def tuples_for_document(doc: Document) -> list[Tuple]:
     """Reader tuples for a document, from its stable id and imported ACL."""
-    return tuples_for_acl(doc.id, doc.instance_id, doc.acl)
+    return tuples_for_acl(doc.id, doc.instance_id, doc.acl, tenant_id=doc.tenant_id)
 
 
 def membership_tuples(user_id: str, groups: list[str], ns: str) -> list[Tuple]:
@@ -57,7 +72,11 @@ def membership_tuples(user_id: str, groups: list[str], ns: str) -> list[Tuple]:
 
 
 def diff_acls(
-    object_id: str, instance_id: str, old: AccessControl, new: AccessControl
+    object_id: str,
+    instance_id: str,
+    old: AccessControl,
+    new: AccessControl,
+    tenant_id: str | None = None,
 ) -> tuple[list[Tuple], list[Tuple]]:
     """Return (to_write, to_delete) for a permission change.
 
@@ -65,8 +84,8 @@ def diff_acls(
     new are deleted: these are the revocations, the dangerous case, and the caller
     applies them first.
     """
-    old_t = {_key(t): t for t in tuples_for_acl(object_id, instance_id, old)}
-    new_t = {_key(t): t for t in tuples_for_acl(object_id, instance_id, new)}
+    old_t = {_key(t): t for t in tuples_for_acl(object_id, instance_id, old, tenant_id)}
+    new_t = {_key(t): t for t in tuples_for_acl(object_id, instance_id, new, tenant_id)}
     to_write = [t for k, t in new_t.items() if k not in old_t]
     to_delete = [t for k, t in old_t.items() if k not in new_t]
     return to_write, to_delete

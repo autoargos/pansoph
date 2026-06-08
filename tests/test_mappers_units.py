@@ -28,6 +28,17 @@ def test_explicit_principal_ns_overrides_instance() -> None:
     assert next(iter(ts)).subject.ns == "other"
 
 
+def test_two_level_namespace_groups_tenant_users_instance() -> None:
+    # With a tenant_id, groups are tenant-scoped (so identity groups resolve across
+    # instances) while users and the public wildcard stay instance-scoped (so two
+    # instances never collide). This is the ADR isolation guarantee.
+    acl = AccessControl(allow_groups=["eng"], allow_users=["alice"], public=True)
+    keys = _keys(tuples_for_acl("doc1", "inst", acl, tenant_id="acme"))
+    assert ("group", "eng", "acme", "doc1") in keys
+    assert ("user", "alice", "inst", "doc1") in keys
+    assert ("user", "*", "inst", "doc1") in keys
+
+
 def test_deny_is_never_expressed_as_a_tuple() -> None:
     acl = AccessControl(allow_users=["alice"], deny=["bob"])
     ts = tuples_for_acl("doc1", "inst", acl)

@@ -50,7 +50,15 @@ async def retrieve(
         permission="read",
         object_ids=[hit.doc_id for hit in candidates],
     )
-    allowed = [hit for hit in candidates if hit.doc_id in allowed_ids]
+    # The authz bulk check is the source of truth for grants. `deny` is then applied
+    # as a final filter (ADR-0002): a chunk denied to the subject directly or to any
+    # of their groups is removed even if a group grant let it pass the check.
+    denied_principals = {subject.id, *subject_groups}
+    allowed = [
+        hit
+        for hit in candidates
+        if hit.doc_id in allowed_ids and denied_principals.isdisjoint(hit.deny)
+    ]
 
     if reranker is not None and allowed:
         return await reranker.rerank(query, allowed, top_n=final_k)

@@ -82,16 +82,19 @@ class IngestionPipeline:
                 score=0.0,
                 tenant_id=tenant_id,
                 allow_groups=list(acl.allow_groups),
+                deny=list(acl.deny),
                 acl_version=1,
                 text=chunk,
             )
             for i, chunk in enumerate(chunks)
         ]
         await self._vector_store.upsert(hits, vectors)
-        # Group ACLs are tenant-scoped so a logged-in user's identity groups (also
-        # tenant-namespaced) resolve against connector documents.
-        scoped = acl.model_copy(update={"principal_ns": tenant_id})
-        return await self._authz.write_tuples(tuples_for_acl(doc_id, ref.instance_id, scoped))
+        # Two-level namespace: groups are tenant scoped (so identity groups resolve
+        # across instances), users and the public wildcard stay instance scoped (so
+        # two instances never collide). The mapper does this split; we pass both ids.
+        return await self._authz.write_tuples(
+            tuples_for_acl(doc_id, ref.instance_id, acl, tenant_id=tenant_id)
+        )
 
     async def _embed_texts(self, title: str | None, chunks: list[str]) -> list[str]:
         """Optionally prepend generated context to each chunk before embedding."""

@@ -87,6 +87,22 @@ async def test_cross_tenant_isolation() -> None:
 
 
 @pytest.mark.permission
+async def test_deny_overrides_group_grant() -> None:
+    # An explicit deny is applied as a final filter and must override a group grant
+    # that would otherwise let the document through the authz check.
+    store = FakeVectorStore()
+    authz = FakeAuthz(user_groups={"alice": {"g1"}, "carol": {"g1"}})
+    c = InMemoryConnector(instance_id="mem")
+    c.put("secret", "sensitive", AccessControl(allow_groups=["g1"], deny=["alice"]))
+    await _pipeline(c, store, authz).sync(connector_name="memory", tenant_id="t1")
+
+    alice = await _ids(store, authz, "alice", ["g1"], "t1")
+    carol = await _ids(store, authz, "carol", ["g1"], "t1")
+    assert "memory:mem:secret" not in alice, "an explicit deny must override a group grant"
+    assert "memory:mem:secret" in carol, "carol is in g1 and is not denied"
+
+
+@pytest.mark.permission
 async def test_revocation_is_reflected() -> None:
     store, authz = await _scenario()
     before = await _ids(store, authz, "alice", ["g1"], "t1")

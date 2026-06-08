@@ -155,7 +155,7 @@ export async function createInstance(payload: {
 }): Promise<Instance> {
   const res = await fetch("/api/connectors/instances", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeader() },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`create failed: ${res.status}`);
@@ -163,11 +163,18 @@ export async function createInstance(payload: {
 }
 
 export async function deleteInstance(id: string): Promise<void> {
-  await fetch(`/api/connectors/instances/${id}`, { method: "DELETE" });
+  const res = await fetch(`/api/connectors/instances/${id}`, {
+    method: "DELETE",
+    headers: authHeader(),
+  });
+  if (!res.ok) throw new Error(`delete failed: ${res.status}`);
 }
 
 export async function syncInstance(id: string): Promise<{ status: string; docs_indexed: number; error?: string }> {
-  const res = await fetch(`/api/connectors/instances/${id}/sync`, { method: "POST" });
+  const res = await fetch(`/api/connectors/instances/${id}/sync`, {
+    method: "POST",
+    headers: authHeader(),
+  });
   return (await res.json()) as { status: string; docs_indexed: number; error?: string };
 }
 

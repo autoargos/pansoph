@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS pansoph_chunks (
     embedding   vector(%(dim)s),
     tsv         tsvector
 );
+ALTER TABLE pansoph_chunks ADD COLUMN IF NOT EXISTS deny text[] NOT NULL DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS pansoph_chunks_tenant ON pansoph_chunks (tenant_id);
 CREATE INDEX IF NOT EXISTS pansoph_chunks_tsv ON pansoph_chunks USING gin (tsv);
 CREATE INDEX IF NOT EXISTS pansoph_chunks_groups ON pansoph_chunks USING gin (allow_groups);
@@ -61,14 +62,15 @@ class PgVectorScaleStore:
                     await cur.execute(
                         """
                         INSERT INTO pansoph_chunks (
-                            chunk_id, doc_id, tenant_id, allow_groups,
+                            chunk_id, doc_id, tenant_id, allow_groups, deny,
                             acl_version, body, embedding, tsv
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, to_tsvector('english', %s))
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, to_tsvector('english', %s))
                         ON CONFLICT (chunk_id) DO UPDATE SET
                           doc_id = EXCLUDED.doc_id,
                           tenant_id = EXCLUDED.tenant_id,
                           allow_groups = EXCLUDED.allow_groups,
+                          deny = EXCLUDED.deny,
                           acl_version = EXCLUDED.acl_version,
                           body = EXCLUDED.body,
                           embedding = EXCLUDED.embedding,
@@ -79,6 +81,7 @@ class PgVectorScaleStore:
                             hit.doc_id,
                             hit.tenant_id,
                             hit.allow_groups,
+                            hit.deny,
                             hit.acl_version,
                             hit.text,
                             _vec_literal(vec),
@@ -125,7 +128,7 @@ class PgVectorScaleStore:
                 if not fused:
                     return []
                 await cur.execute(
-                    "SELECT chunk_id, doc_id, tenant_id, allow_groups, acl_version, body "
+                    "SELECT chunk_id, doc_id, tenant_id, allow_groups, acl_version, body, deny "
                     "FROM pansoph_chunks WHERE chunk_id = ANY(%s)",
                     (fused,),
                 )
@@ -137,6 +140,7 @@ class PgVectorScaleStore:
                         allow_groups=list(row[3] or []),
                         acl_version=row[4],
                         text=row[5],
+                        deny=list(row[6] or []),
                         score=0.0,
                     )
                     for row in await cur.fetchall()
@@ -191,6 +195,7 @@ class QdrantStore:
                             "doc_id": hit.doc_id,
                             "tenant_id": hit.tenant_id,
                             "allow_groups": hit.allow_groups,
+                            "deny": hit.deny,
                             "acl_version": hit.acl_version,
                             "text": hit.text,
                         },
@@ -206,19 +211,32 @@ class QdrantStore:
     ) -> list[SearchHit]:
         from qdrant_client import models
 
-        conditions: list[Any] = [
-            models.FieldCondition(key="tenant_id", match=models.MatchValue(value=flt.tenant_id))
+        # Mirror the Postgres pre-filter exactly: tenant match AND (the doc has no
+        # groups OR its groups overlap the subject's). Expressed as a nested should
+        # inside must, so a group mismatch is excluded, not merely deprioritized.
+        # (A bare `should` in Qdrant is optional unless min_should is set, which is
+        # why the previous tenant-must + group-should form leaked group docs.)
+        group_clause: list[Any] = [
+            models.IsEmptyCondition(is_empty=models.PayloadField(key="allow_groups"))
         ]
         if flt.any_groups:
-            conditions.append(
+            group_clause.append(
                 models.FieldCondition(key="allow_groups", match=models.MatchAny(any=flt.any_groups))
             )
+        query_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="tenant_id", match=models.MatchValue(value=flt.tenant_id)
+                ),
+                models.Filter(should=group_clause),
+            ]
+        )
         client = self._client()
         try:
             result = await client.query_points(
                 collection_name=self._collection,
                 query=query_vector,
-                query_filter=models.Filter(must=conditions[:1], should=conditions[1:]),
+                query_filter=query_filter,
                 limit=limit,
                 with_payload=True,
             )
@@ -233,6 +251,7 @@ class QdrantStore:
                     doc_id=payload.get("doc_id", ""),
                     tenant_id=payload.get("tenant_id", ""),
                     allow_groups=payload.get("allow_groups", []),
+                    deny=payload.get("deny", []),
                     acl_version=payload.get("acl_version", 0),
                     text=payload.get("text"),
                     score=float(point.score or 0.0),

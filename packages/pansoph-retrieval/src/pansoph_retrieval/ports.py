@@ -15,6 +15,10 @@ class SearchHit(BaseModel):
     score: float
     tenant_id: str
     allow_groups: list[str] = Field(default_factory=list)
+    # Explicit denies, carried from the source ACL. Applied as a final filter in the
+    # retrieval path, never as an authz exclusion tuple (exclusion operators wreck
+    # bulk-check latency). A deny entry is a user id or a group name.
+    deny: list[str] = Field(default_factory=list)
     acl_version: int = 0
     text: str | None = None
 

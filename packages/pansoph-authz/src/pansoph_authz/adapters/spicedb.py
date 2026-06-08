@@ -46,9 +46,7 @@ def _ns_id(principal: Principal) -> str:
 # SpiceDB object ids only allow [a-zA-Z0-9/_|=+-]. Document ids carry ':' and '.'
 # (e.g. "github:inst:README.md"), so encode any disallowed character as "=XX" hex,
 # which is injective (no two distinct ids collide) and uses only legal characters.
-_SAFE_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_|-+"
-)
+_SAFE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_|-+")
 
 
 def _safe_obj(object_id: str) -> str:

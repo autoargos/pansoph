@@ -16,7 +16,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pansoph_authz import Principal, membership_tuples, tuples_for_acl
 from pansoph_ingestion.chunking import chunk_sections
 from pansoph_retrieval.pipeline import retrieve
@@ -73,6 +73,20 @@ async def _effective_identity(req: Query, authorization: str | None) -> tuple[st
     if user is not None:
         return user.id, list(user.group_ids)
     return req.user, req.groups
+
+
+async def _require_identity(authorization: str | None = Header(None)) -> Any:
+    """Require a valid bearer token. Gates the management and write surface.
+
+    This is authentication: a request with no valid token is rejected before it can
+    create or delete a connector, trigger a sync, or inject content. Role-based
+    authorization (admin / connector_admin / member) layers on top of this through
+    the Identity port. The check delegates to the Identity port, so it is adapter
+    agnostic, never coupled to a specific IdP."""
+    user = await _identity_from_token(authorization)
+    if user is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return user
 
 
 async def _retrieve(
@@ -154,10 +168,13 @@ class GrabRequest(BaseModel):
 
 
 @router.post("/grab")
-async def grab(req: GrabRequest) -> dict[str, Any]:
+async def grab(req: GrabRequest, user: Any = Depends(_require_identity)) -> dict[str, Any]:
     """Ingest content captured by the scout extension: what the signed in user can
     already see, with consent. Same indexing path as a connector sync, so the
-    captured page is immediately retrievable under the ACL the request sets."""
+    captured page is immediately retrievable under the ACL the request sets.
+
+    Requires a valid token: the captured content is attributed to the authenticated
+    user, not to a caller-supplied id, so the audit trail is trustworthy."""
     parser = assembly.build_parser()
     embedder = assembly.build_embedder()
     vector = assembly.build_vector_store()
@@ -190,14 +207,15 @@ async def grab(req: GrabRequest) -> dict[str, Any]:
             score=0.0,
             tenant_id=req.tenant_id,
             allow_groups=list(acl.allow_groups),
+            deny=list(acl.deny),
             acl_version=1,
             text=chunk,
         )
         for i, chunk in enumerate(chunks)
     ]
     await vector.upsert(hits, vectors)
-    await authz.write_tuples(tuples_for_acl(doc_id, req.instance_id, acl))
-    audit("grab", actor=req.instance_id, tenant=req.tenant_id, url=req.url, chunks=len(chunks))
+    await authz.write_tuples(tuples_for_acl(doc_id, req.instance_id, acl, tenant_id=req.tenant_id))
+    audit("grab", actor=user.id, tenant=req.tenant_id, url=req.url, chunks=len(chunks))
     return {"indexed": len(chunks), "doc_id": doc_id}
 
 
@@ -234,7 +252,9 @@ async def list_instances() -> dict[str, Any]:
 
 
 @router.post("/connectors/instances")
-async def create_instance(req: InstanceCreate) -> dict[str, Any]:
+async def create_instance(
+    req: InstanceCreate, user: Any = Depends(_require_identity)
+) -> dict[str, Any]:
     return await _manager().create_instance(
         instance_id=req.instance_id,
         connector=req.connector,
@@ -247,13 +267,15 @@ async def create_instance(req: InstanceCreate) -> dict[str, Any]:
 
 
 @router.delete("/connectors/instances/{instance_id}")
-async def delete_instance(instance_id: str) -> dict[str, str]:
+async def delete_instance(
+    instance_id: str, user: Any = Depends(_require_identity)
+) -> dict[str, str]:
     await _manager().delete_instance(instance_id)
     return {"deleted": instance_id}
 
 
 @router.post("/connectors/instances/{instance_id}/sync")
-async def sync_instance(instance_id: str) -> dict[str, Any]:
+async def sync_instance(instance_id: str, user: Any = Depends(_require_identity)) -> dict[str, Any]:
     manager = _manager()
     instance = await manager.get_instance(instance_id)
     if instance is None:
