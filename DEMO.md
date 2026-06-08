@@ -30,17 +30,30 @@ curl -s localhost:8080/api/health | python3 -m json.tool   # expect "ok": true
 > model-agnostic and one env var flips it to a fully-local Ollama/TEI. A banner in
 > the System screen shows when a cloud model is active.
 
-Confirm the demo data and scopes are present (the story depends on these):
+Seed the demo corpus if this is a fresh stack (idempotent; skips if already present):
+
+```bash
+./deploy/seed-demo.sh
+```
+
+Confirm the connector instances and their scopes are present (the story depends on
+these): a public company wiki, six department knowledge bases each scoped to a group,
+and the public GitHub repo.
 
 ```bash
 curl -s localhost:8080/api/connectors/instances | python3 -c '
 import sys, json
 for i in json.load(sys.stdin)["instances"]:
     print("  %-16s %-11s %s" % (i["id"], i["scope_type"], i.get("scope_ref") or ""))'
-# expect:
-#   weblink-readme   individual  alice
+# expect (8 instances):
+#   nw-company       org
+#   nw-engineering   group        engineering
+#   nw-product       group        product       <- holds the confidential roadmap
+#   nw-finance       group        finance
+#   nw-hr            group        hr
+#   nw-sales         group        sales
+#   nw-security      group        leadership
 #   spoon-knife      org
-#   mcp-notes        group       g1     <- holds the confidential roadmap, scoped to g1
 ```
 
 Sanity-check the headline before you walk in (cold check, ~5 s):
@@ -61,18 +74,23 @@ Open two browser windows side by side, both at **http://localhost:3000**:
 - Right window: use a private/incognito window, sign in as **bob / bob**.
 
 Have these tabs ready: lens Chat (both), and in Alice's window the **Connectors** and
-**Access** screens.
+**Access** screens. For the full set of queries per persona, keep
+[`docs/demo-queries.md`](docs/demo-queries.md) open.
 
 ---
 
 ## 1. Credentials
 
-| Who | Where | User / pass | What they are |
+| Who | User / pass | Role | Groups (what they can read) |
 |---|---|---|---|
-| Alice | lens, http://localhost:3000 | `alice` / `alice` | role **admin**, group **g1** (can see the roadmap, can manage connectors) |
-| Bob | lens, http://localhost:3000 | `bob` / `bob` | role **member**, no groups (cannot see the roadmap, cannot manage) |
-| Keycloak admin | http://localhost:8090 | `admin` / `admin` | the identity provider's admin console (only if asked) |
+| Alice (eng lead) | `alice` / `alice` | **admin** | engineering, product, leadership, g1 |
+| Bob (sales) | `bob` / `bob` | **member** | sales |
+| Carol (finance/people) | `carol` / `carol` | **member** | finance, hr |
+| Dave (engineer) | `dave` / `dave` | **connector_admin** | engineering |
+| Keycloak admin | `admin` / `admin` at http://localhost:8090 | - | the IdP admin console (only if asked) |
 
+lens is at http://localhost:3000. Alice is the only admin (she sees the Access
+screen). Roles gate management; groups gate what documents each user can retrieve.
 Keycloak is the demo IdP and is swappable; pansoph only knows the issuer and client id.
 
 ---
@@ -93,33 +111,35 @@ She gets an answer **with an inline citation** to the roadmap source. Point at t
 citation: "Notice the answer is grounded in a real source, and she can open it because
 she is allowed to."
 
-Glance at the header: Alice carries a management role chip (**admin**) and a document
-group chip (**g1**). "Two different things: roles decide what she can *manage*, groups
-decide what she can *read*."
+Glance at the header: Alice carries a management role chip (**admin**) and document
+group chips (**engineering, product, leadership**). "Two different things: roles decide
+what she can *manage*, groups decide what she can *read*."
 
 ### Beat 3 — Bob asks the identical question (60 s) — THE MOMENT
 In Bob's window, on **Chat**, ask the **exact same question**:
 > *"Summarize our confidential product roadmap."*
 
 Bob gets an honest answer that **it has no such source** (no roadmap citation). "Same
-question, same assistant, same index. Bob is not in group g1, so the roadmap never
-even enters his candidate set. This is not a hidden button, it is the retrieval engine
-refusing to return a document he is not allowed to see."
+question, same assistant, same index. Bob is in sales, not product, so the roadmap
+never even enters his candidate set. This is not a hidden button, it is the retrieval
+engine refusing to return a document he is not allowed to see."
 
-> If you want it even starker, run a Search in both windows for *confidential roadmap*:
-> Alice's results include the roadmap doc, Bob's do not.
+> Even starker: run a Search in both windows for *confidential roadmap*. Alice's
+> results include the roadmap; Bob's do not. The same holds for Carol and Dave: only
+> Alice is in the product group.
 
 ### Beat 4 — Why it is trustworthy (60 s)
 In Alice's window, open **Access**. Show:
 - **Your access**: her roles and groups, side by side.
-- **Connector instances by scope**: the same source configured as independent
-  instances scoped to an **organization**, a **group** (g1, the roadmap's source), or
-  an **individual**. "Every instance has its own credentials and its own permission
-  namespace, so they never bleed into each other."
-- **Check access** tool: type `bob` with no groups, query *confidential roadmap*,
-  click Check. It returns nothing. Now type `alice`, groups `g1`, Check. The roadmap
-  appears. "This runs the exact same permission-enforced path the chat uses, so you
-  can audit who-can-see-what live."
+- **Connector instances by scope**: the same backend configured as independent
+  instances, one scoped to the whole **organization** (the public company wiki) and
+  one per **group** (engineering, product, finance, hr, sales, security). "Each
+  instance has its own credentials and its own permission namespace, so a finance
+  instance can never leak into an engineering query."
+- **Check access** tool: type `bob`, groups `sales`, query *confidential roadmap*,
+  click Check. It returns nothing. Now type `alice`, groups `product`, Check. The
+  roadmap appears. "This runs the exact same permission-enforced path the chat uses,
+  so you can audit who-can-see-what live, for any user, without impersonating them."
 
 ### Beat 5 — Management is role-gated (30 s)
 Open **Connectors** in Alice's window: she can add, sync, and delete (she is admin).
@@ -148,8 +168,9 @@ them from the Connectors screen as Alice.
 |---|---|
 | lens shows "agora unreachable" | `docker compose restart agora`; recheck `curl localhost:8080/api/health` |
 | Login bounces / "HTTPS required" | `docker compose up -d --force-recreate keycloak keycloak-config` (re-seeds the realm) |
-| Alice cannot see the roadmap | re-sync as Alice: Connectors -> mcp-notes -> Sync now, then retry |
-| Bob can see the roadmap | confirm Bob has no groups (header shows "no groups"); he must not be in g1 |
+| Data missing / nothing retrievable | run `./deploy/seed-demo.sh`, then retry |
+| Alice cannot see the roadmap | re-sync as Alice: Connectors -> nw-product -> Sync now, then retry |
+| Bob can see the roadmap | confirm Bob's only group is sales (header chips); he must not be in product |
 | Chat returns nothing for anyone | the LLM endpoint may be down; Search still proves the permission story without the model |
 
 Full bring-up logs: `docker compose logs -f agora`.

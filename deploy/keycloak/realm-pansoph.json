@@ -6,7 +6,13 @@
   "loginTheme": "keycloak",
   "groups": [
     { "name": "g1" },
-    { "name": "g2" }
+    { "name": "g2" },
+    { "name": "engineering" },
+    { "name": "product" },
+    { "name": "finance" },
+    { "name": "hr" },
+    { "name": "sales" },
+    { "name": "leadership" }
   ],
   "roles": {
     "realm": [
@@ -23,23 +29,45 @@
       "username": "alice",
       "enabled": true,
       "emailVerified": true,
-      "email": "alice@pansoph.local",
+      "email": "alice@northwind.local",
       "firstName": "Alice",
-      "lastName": "Engineer",
+      "lastName": "Okafor",
       "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
-      "groups": ["/g1"],
+      "groups": ["/g1", "/engineering", "/product", "/leadership"],
       "realmRoles": ["admin"]
     },
     {
       "username": "bob",
       "enabled": true,
       "emailVerified": true,
-      "email": "bob@pansoph.local",
+      "email": "bob@northwind.local",
       "firstName": "Bob",
-      "lastName": "Visitor",
+      "lastName": "Mercer",
       "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
-      "groups": [],
+      "groups": ["/sales"],
       "realmRoles": ["member"]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "carol@northwind.local",
+      "firstName": "Carol",
+      "lastName": "Nguyen",
+      "credentials": [{ "type": "password", "value": "carol", "temporary": false }],
+      "groups": ["/finance", "/hr"],
+      "realmRoles": ["member"]
+    },
+    {
+      "username": "dave",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "dave@northwind.local",
+      "firstName": "Dave",
+      "lastName": "Reyes",
+      "credentials": [{ "type": "password", "value": "dave", "temporary": false }],
+      "groups": ["/engineering"],
+      "realmRoles": ["connector_admin"]
     }
   ],
   "clients": [
