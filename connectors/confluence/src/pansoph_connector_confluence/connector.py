@@ -121,9 +121,7 @@ class ConfluenceConnector:
             # No explicit read restriction: scope to the space.
             space = page.get("space", {}).get("key") or self._space
             groups = [f"space:{space}"] if space else []
-        return AccessControl(
-            allow_users=users, allow_groups=groups, principal_ns=self.instance_id
-        )
+        return AccessControl(allow_users=users, allow_groups=groups, principal_ns=self.instance_id)
 
     async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
         return []

@@ -25,6 +25,9 @@ class MCPConnector:
         self._server_url: str = cfg.get("server_url", "")
         self._public: bool = bool(cfg.get("public", False))
         self._allow_groups: list[str] = list(cfg.get("allow_groups", []))
+        # Confine the instance to resources whose URI starts with this prefix, so one
+        # MCP server can back several scoped instances. Empty means all resources.
+        self._uri_prefix: str = cfg.get("resource_uri_prefix", "")
         self.meta = ConnectorMeta(
             name="mcp",
             auth=AuthScheme.oauth2,
@@ -50,7 +53,10 @@ class MCPConnector:
                 await session.initialize()
                 result = await session.list_resources()
                 for res in result.resources:
-                    yield DocRef(source_doc_id=str(res.uri), instance_id=self.instance_id), ""
+                    uri = str(res.uri)
+                    if self._uri_prefix and not uri.startswith(self._uri_prefix):
+                        continue
+                    yield DocRef(source_doc_id=uri, instance_id=self.instance_id), ""
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         from mcp import ClientSession

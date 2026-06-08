@@ -11,11 +11,16 @@ Implemented against the Google Drive API v3.
                delegation) is the operator's step; this connector does not run the
                OAuth flow.
   Incremental: the changes feed (changes.list with a saved startPageToken).
+  Scope:       an instance is confined to one folder with the `folder_id` config
+               (query operator "'<id>' in parents") and, for a shared drive, the
+               `drive_id` config (corpora=drive, driveId, includeItemsFromAllDrives,
+               supportsAllDrives). The deprecated teamDrive*/corpus params are not used.
   ACL model:   a file's permissions map to the ACL. An "anyone" permission is public;
                "user" permissions become allow_users (by emailAddress); "group" and
                "domain" become allow_groups. Namespaced by the connector instance.
-  Verified:    against the documented v3 endpoints; re-verify before production, and
-               provide an OAuth token to run it live.
+  Verified:    against the documented v3 endpoints (files.list search syntax and
+               shared-drive parameters) on 2026-06-08; provide an OAuth token to run
+               it live.
 
 The runtime owns pagination and retries; methods describe one page or one file.
 """
@@ -43,7 +48,12 @@ class GoogleDriveConnector:
         cfg = config or {}
         self.instance_id = instance_id
         self._token: str = cfg.get("token", "")
-        self._query: str = cfg.get("query", "trashed=false")
+        self._drive_id: str = cfg.get("drive_id", "")
+        base_q: str = cfg.get("query", "trashed=false")
+        folder_id: str = cfg.get("folder_id", "")
+        # Confine the instance to one folder when folder_id is set, by ANDing the
+        # parents operator onto the base query.
+        self._query: str = f"'{folder_id}' in parents and ({base_q})" if folder_id else base_q
         self.meta = ConnectorMeta(
             name="google_drive",
             auth=AuthScheme.oauth2,
@@ -64,6 +74,15 @@ class GoogleDriveConnector:
             timeout=30.0,
         )
 
+    def _drive_params(self) -> dict[str, str]:
+        """Shared-drive support. supportsAllDrives is harmless on My Drive; corpora
+        and driveId narrow the search to one shared drive when configured."""
+        params = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
+        if self._drive_id:
+            params["corpora"] = "drive"
+            params["driveId"] = self._drive_id
+        return params
+
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
         async with self._client() as client:
             page: str | None = None
@@ -74,6 +93,7 @@ class GoogleDriveConnector:
                         "q": self._query,
                         "fields": "nextPageToken, files(id, mimeType, modifiedTime)",
                         "pageSize": 100,
+                        **self._drive_params(),
                         **({"pageToken": page} if page else {}),
                     },
                 )
@@ -90,16 +110,20 @@ class GoogleDriveConnector:
             meta = (
                 await client.get(
                     f"/files/{ref.source_doc_id}",
-                    params={"fields": "id, name, mimeType, webViewLink"},
+                    params={"fields": "id, name, mimeType, webViewLink", **self._drive_params()},
                 )
             ).json()
             mime = meta.get("mimeType", "")
             if mime in _EXPORT:
                 resp = await client.get(
-                    f"/files/{ref.source_doc_id}/export", params={"mimeType": _EXPORT[mime]}
+                    f"/files/{ref.source_doc_id}/export",
+                    params={"mimeType": _EXPORT[mime], "supportsAllDrives": "true"},
                 )
             else:
-                resp = await client.get(f"/files/{ref.source_doc_id}", params={"alt": "media"})
+                resp = await client.get(
+                    f"/files/{ref.source_doc_id}",
+                    params={"alt": "media", "supportsAllDrives": "true"},
+                )
             resp.raise_for_status()
             raw = RawDoc(
                 source_doc_id=ref.source_doc_id,
@@ -118,7 +142,10 @@ class GoogleDriveConnector:
     async def _acl(self, client: httpx.AsyncClient, file_id: str) -> AccessControl:
         resp = await client.get(
             f"/files/{file_id}/permissions",
-            params={"fields": "permissions(type, role, emailAddress, domain)"},
+            params={
+                "fields": "permissions(type, role, emailAddress, domain)",
+                "supportsAllDrives": "true",
+            },
         )
         resp.raise_for_status()
         public = False

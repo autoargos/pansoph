@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS connector_instances (
     created_at       timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS schedule_cron text;
+-- An instance's scope: which slice of a source it covers (org-wide, one group's, or
+-- one individual's), and an optional reference (a group id or user id). First-class
+-- so the admin UI can present and filter by it and role checks can key off it.
+ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS scope_type text NOT NULL DEFAULT 'org';
+ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS scope_ref text;
 CREATE TABLE IF NOT EXISTS sync_runs (
     id            bigserial PRIMARY KEY,
     instance_id   text NOT NULL,
@@ -47,6 +52,29 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 );
 CREATE INDEX IF NOT EXISTS sync_runs_instance ON sync_runs (instance_id, started_at DESC);
 """
+
+# The granularity an instance covers. Orthogonal to the source ACL: scope is a
+# management concept (who owns and administers this instance), the source ACL still
+# governs who may read its documents.
+_SCOPE_TYPES = {"org", "group", "individual"}
+
+
+def validate_connector_config(connector: str, instance_id: str, config: dict[str, Any]) -> None:
+    """Validate a config against the connector's own contract before persisting, so a
+    misconfigured instance fails at creation rather than mid-sync. Resolves the
+    connector through the registry (never importing it here), instantiates it, and
+    calls its validate. Raises ValueError on an unknown connector or an invalid config.
+    """
+    try:
+        probe = load_adapter("pansoph.connectors", connector)(instance_id, config)
+    except Exception as exc:  # noqa: BLE001  surface a clear creation-time error
+        raise ValueError(f"unknown or unloadable connector '{connector}': {exc}") from exc
+    validate = getattr(probe, "validate", None)
+    if validate is None:
+        return
+    result = validate(config)
+    if not getattr(result, "ok", True):
+        raise ValueError(result.error or "invalid connector config")
 
 
 class ConnectorManager:
@@ -74,21 +102,29 @@ class ConnectorManager:
         config: dict[str, Any],
         schedule_seconds: int,
         schedule_cron: str = "",
+        scope_type: str = "org",
+        scope_ref: str = "",
     ) -> dict[str, Any]:
         from psycopg.types.json import Json
+
+        validate_connector_config(connector, instance_id, config)
+        if scope_type not in _SCOPE_TYPES:
+            raise ValueError(f"scope_type must be one of {sorted(_SCOPE_TYPES)}")
 
         conn = await self._conn()
         try:
             await conn.execute(
                 """
                 INSERT INTO connector_instances
-                  (id, connector, name, tenant_id, config, schedule_seconds, schedule_cron)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                  (id, connector, name, tenant_id, config, schedule_seconds, schedule_cron,
+                   scope_type, scope_ref)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                   connector = EXCLUDED.connector, name = EXCLUDED.name,
                   tenant_id = EXCLUDED.tenant_id, config = EXCLUDED.config,
                   schedule_seconds = EXCLUDED.schedule_seconds,
-                  schedule_cron = EXCLUDED.schedule_cron
+                  schedule_cron = EXCLUDED.schedule_cron,
+                  scope_type = EXCLUDED.scope_type, scope_ref = EXCLUDED.scope_ref
                 """,
                 (
                     instance_id,
@@ -98,6 +134,8 @@ class ConnectorManager:
                     Json(config),
                     schedule_seconds,
                     schedule_cron or None,
+                    scope_type,
+                    scope_ref or None,
                 ),
             )
         finally:
@@ -118,7 +156,7 @@ class ConnectorManager:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "SELECT id, connector, name, tenant_id, config, schedule_seconds, "
-                    "schedule_cron, enabled, cursor, created_at "
+                    "schedule_cron, enabled, cursor, created_at, scope_type, scope_ref "
                     "FROM connector_instances WHERE id = %s",
                     (instance_id,),
                 )
@@ -133,7 +171,7 @@ class ConnectorManager:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "SELECT id, connector, name, tenant_id, config, schedule_seconds, "
-                    "schedule_cron, enabled, cursor, created_at "
+                    "schedule_cron, enabled, cursor, created_at, scope_type, scope_ref "
                     "FROM connector_instances ORDER BY created_at"
                 )
                 rows = await cur.fetchall()
@@ -215,6 +253,8 @@ class ConnectorManager:
             "enabled": row[7],
             "cursor": row[8],
             "created_at": row[9].isoformat() if row[9] else None,
+            "scope_type": row[10],
+            "scope_ref": row[11],
         }
 
     @staticmethod

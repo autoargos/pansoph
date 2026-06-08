@@ -27,7 +27,9 @@ class _Entry:
 
 
 class InMemoryConnector:
-    def __init__(self, instance_id: str = "mem") -> None:
+    def __init__(self, instance_id: str = "mem", config: dict[str, Any] | None = None) -> None:
+        # Accept (and ignore) config so the reference connector is instantiated the
+        # same way the runtime builds every connector: cls(instance_id, config).
         self.instance_id = instance_id
         self._docs: dict[str, _Entry] = {}
         self._rev = 0

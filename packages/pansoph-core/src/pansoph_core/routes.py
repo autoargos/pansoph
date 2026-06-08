@@ -281,6 +281,9 @@ class InstanceCreate(BaseModel):
     config: dict[str, Any] = {}
     schedule_seconds: int = 0
     schedule_cron: str = ""
+    # Management scope: which slice of the source this instance covers.
+    scope_type: str = "org"  # org | group | individual
+    scope_ref: str = ""
 
 
 @router.get("/connectors/instances")
@@ -292,15 +295,22 @@ async def list_instances() -> dict[str, Any]:
 async def create_instance(
     req: InstanceCreate, user: Any = Depends(_CONNECTOR_ADMIN)
 ) -> dict[str, Any]:
-    return await _manager().create_instance(
-        instance_id=req.instance_id,
-        connector=req.connector,
-        name=req.name,
-        tenant_id=req.tenant_id,
-        config=req.config,
-        schedule_seconds=req.schedule_seconds,
-        schedule_cron=req.schedule_cron,
-    )
+    try:
+        return await _manager().create_instance(
+            instance_id=req.instance_id,
+            connector=req.connector,
+            name=req.name,
+            tenant_id=req.tenant_id,
+            config=req.config,
+            schedule_seconds=req.schedule_seconds,
+            schedule_cron=req.schedule_cron,
+            scope_type=req.scope_type,
+            scope_ref=req.scope_ref,
+        )
+    except ValueError as exc:
+        # A bad connector name, an invalid config, or an unknown scope type is the
+        # caller's error, not a server fault.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/connectors/instances/{instance_id}")
