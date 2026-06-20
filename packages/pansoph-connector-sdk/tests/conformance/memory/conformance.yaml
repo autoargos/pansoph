@@ -1,0 +1,10 @@
+connector: memory
+categories:
+  spec: {}
+  connection: { expect_ok: true }
+  discovery: {}
+  incremental: { enabled: true }
+  permissions:
+    source_acl: fixtures/permissions/source.json
+    principals: fixtures/permissions/principals.json
+    expected: fixtures/permissions/expected.json

@@ -10,6 +10,7 @@ from .contract import (
     ValidationResult,
 )
 from .memory import InMemoryConnector
+from .verify.engine import ConformanceResult, run_conformance
 
 __all__ = [
     "Connector",
@@ -18,4 +19,6 @@ __all__ = [
     "ChangeEvent",
     "InMemoryConnector",
     "assert_conforms",
+    "run_conformance",
+    "ConformanceResult",
 ]

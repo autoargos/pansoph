@@ -1,0 +1,4 @@
+{
+  "handbook": {"public": true, "allow_groups": [], "allow_users": [], "deny": []},
+  "secret": {"public": false, "allow_groups": ["eng"], "allow_users": [], "deny": []}
+}
