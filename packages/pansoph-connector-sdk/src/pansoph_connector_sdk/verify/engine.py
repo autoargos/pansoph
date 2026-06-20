@@ -76,9 +76,7 @@ async def run_conformance(
         await check_incremental(connector, abnormal)
         ran.append("incremental")
 
-    assert cats.permissions is not None, (
-        "the permission category is mandatory for every connector"
-    )
+    assert cats.permissions is not None, "the permission category is mandatory for every connector"
     await check_permissions(
         connector,
         source_acl=cfg.resolve(cats.permissions.source_acl),

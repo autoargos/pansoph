@@ -55,3 +55,20 @@ jobs:
       - run: uv sync --all-packages --dev
       - name: Permission red team
         run: uv run pytest -m permission -q
+
+  # Connector conformance, hermetic and offline. Every connector that ships a
+  # conformance.yaml or a marked conformance test runs here on every PR. A green
+  # checkmark means each connector honors the contract and its ACL mapping, with no
+  # live credentials and no network.
+  conformance-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.x"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --dev
+      - name: Connector conformance (hermetic, offline)
+        run: uv run pytest -m conformance -q

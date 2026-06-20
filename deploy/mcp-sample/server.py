@@ -13,7 +13,7 @@ company. No real data.
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("northwind-knowledge", host="0.0.0.0", port=8000)
+mcp = FastMCP("northwind-knowledge", host="0.0.0.0", port=8000)  # noqa: S104  sample server, binds inside its container only
 
 # uri -> document text. The URI scheme is the department; a connector instance is
 # confined to one scheme and given that department's ACL, so retrieval is naturally

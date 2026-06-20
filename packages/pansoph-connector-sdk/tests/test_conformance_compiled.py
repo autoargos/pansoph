@@ -47,7 +47,9 @@ async def test_compiled_connector_conforms(tmp_path: Path) -> None:
     (perms / "source.json").write_text("{}")
     (perms / "principals.json").write_text(json.dumps([{"user_id": "alice", "groups": ["eng"]}]))
     (perms / "expected.json").write_text(
-        json.dumps({"p1": {"public": False, "allow_groups": ["eng"], "allow_users": [], "deny": []}})
+        json.dumps(
+            {"p1": {"public": False, "allow_groups": ["eng"], "allow_users": [], "deny": []}}
+        )
     )
     (tmp_path / "conformance.yaml").write_text(
         "connector: demo\n"

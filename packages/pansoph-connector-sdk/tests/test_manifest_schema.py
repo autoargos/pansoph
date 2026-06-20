@@ -37,7 +37,10 @@ def test_manifest_round_trips() -> None:
             "streams": [
                 {
                     "name": "pages",
-                    "list": {"path": "/pages", "paginator": {"strategy": "page", "page_param": "page"}},
+                    "list": {
+                        "path": "/pages",
+                        "paginator": {"strategy": "page", "page_param": "page"},
+                    },
                     "fetch": {"path": "/pages/{id}"},
                     "acl": {"from": "perms", "groups": "$.groups[*]", "public": "$.is_public"},
                 }

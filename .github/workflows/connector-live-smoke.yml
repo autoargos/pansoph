@@ -1,0 +1,38 @@
+name: connector-live-smoke
+
+# Live smoke proves the connectors still work against the real sources and
+# regenerates the hermetic fixtures from reality. It is non blocking by design: it
+# never gates a merge, it reports drift so a maintainer can review the regenerated
+# cassettes and snapshots. Credentials come from CI secrets, never committed.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.x"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --dev
+      - name: Live smoke (re-record fixtures)
+        env:
+          PANSOPH_LIVE_SMOKE: "1"
+          GITHUB_SMOKE_TOKEN: ${{ secrets.GITHUB_SMOKE_TOKEN }}
+        run: uv run pytest -m integration -q || true
+      - name: Report fixture drift
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Fixtures drifted against live sources. A maintainer should review the"
+            echo "regenerated cassettes and snapshots and open a PR. Wiring the automatic"
+            echo "PR (peter-evans/create-pull-request) is a small follow up."
+            git status --porcelain
+          else
+            echo "No fixture drift detected."
+          fi

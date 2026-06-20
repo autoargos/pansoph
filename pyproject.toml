@@ -56,6 +56,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query"]
 "**/tests/**" = ["S101", "S105", "S106"]
 # The conformance harness uses assert as its public contract check.
 "**/conformance.py" = ["S101"]
+# The verification engine is the conformance harness: assert is its public contract
+# check (like conformance.py above), and it reads small fixture files synchronously
+# inside async category functions, which ASYNC240 flags but is intended here.
+"**/verify/**" = ["S101", "ASYNC240"]
 # Vector queries interpolate only an internal constant WHERE clause; all values
 # are bound parameters, so the S608 string-query warning is a false positive here.
 "**/adapters_vector.py" = ["S608"]

@@ -41,8 +41,7 @@ def scrub_response(response: dict[str, Any]) -> dict[str, Any]:
 def _scrub_obj(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {
-            k: (_REDACTED if k.lower() in _SECRET_FIELDS else _scrub_obj(v))
-            for k, v in obj.items()
+            k: (_REDACTED if k.lower() in _SECRET_FIELDS else _scrub_obj(v)) for k, v in obj.items()
         }
     if isinstance(obj, list):
         return [_scrub_obj(v) for v in obj]

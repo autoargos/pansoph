@@ -58,7 +58,14 @@ async def test_permissions_fail_when_expected_deny_not_applied(tmp_path: Path) -
     # Expected claims alice is denied, but the connector grants her via group: mismatch.
     exp.write_text(
         json.dumps(
-            {"doc1": {"public": False, "allow_groups": ["eng"], "allow_users": [], "deny": ["alice"]}}
+            {
+                "doc1": {
+                    "public": False,
+                    "allow_groups": ["eng"],
+                    "allow_users": [],
+                    "deny": ["alice"],
+                }
+            }
         )
     )
     with pytest.raises(AssertionError, match="set equality"):
