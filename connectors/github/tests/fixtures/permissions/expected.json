@@ -1,0 +1,3 @@
+{
+  "README.md": {"public": false, "allow_groups": ["core-team"], "allow_users": ["octocat"], "deny": []}
+}

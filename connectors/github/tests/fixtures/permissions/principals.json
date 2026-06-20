@@ -1,0 +1,4 @@
+[
+  {"user_id": "octocat", "groups": ["core-team"]},
+  {"user_id": "outsider", "groups": []}
+]
