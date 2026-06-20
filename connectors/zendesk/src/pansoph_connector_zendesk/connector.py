@@ -16,13 +16,14 @@ Implemented against the Zendesk Help Center API. Verified against the official d
                from the configured subdomain.
   Pagination:  Help Center list endpoints use cursor pagination. The response body
                carries `meta.has_more` and `links.next`; follow `links.next` while
-               `meta.has_more` is true. This connector reads the page of `articles`
-               and (for a first cut) returns an empty next_cursor, since the runtime
-               owns resumable sync; following links is wired through `links.next`.
+               `meta.has_more` is true. This connector paginates fully in one call,
+               reading every page of `articles` before it returns, and yields an empty
+               next_cursor since the runtime owns resumable sync.
   Incremental: the Help Center incremental export endpoint
                (`/api/v2/help_center/incremental/articles.json?start_time=...`)
-               returns articles changed since a Unix start time. The cursor in
-               list_changes is reserved for that start_time; the runtime persists it.
+               returns articles changed since a Unix start time. A first cut performs
+               a full listing each run via cursor pagination; the incremental export
+               API (start_time watermark) is a follow-up.
   Rate limit:  Zendesk enforces per minute account limits and returns 429 with a
                `Retry-After` header. The runtime owns backoff; it is surfaced here,
                not hidden.
@@ -83,7 +84,7 @@ class ZendeskConnector:
             name="zendesk",
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
+                incremental=False, permission_sync=True, deletions=True, slim_listing=True
             ),
         )
 
@@ -100,12 +101,29 @@ class ZendeskConnector:
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
+        """Yield a ref for every Help Center article, paginating fully in one call.
+
+        First cut performs a full listing each run via cursor pagination; the
+        incremental export API (start_time watermark) is a follow-up. Zendesk
+        Help Center uses cursor pagination: the response `meta.has_more` says
+        whether another page exists and `links.next` is the absolute URL of it.
+        We follow `links.next` until `has_more` is false or the link is missing.
+        """
         async with self._client() as client:
             resp = await client.get(f"/api/v2/help_center/{self._locale}/articles.json")
             resp.raise_for_status()
             payload = resp.json()
             for article in payload.get("articles", []):
                 yield self._ref(str(article["id"])), ""
+            while payload.get("meta", {}).get("has_more"):
+                next_url = payload.get("links", {}).get("next")
+                if not next_url:
+                    break
+                resp = await client.get(next_url)
+                resp.raise_for_status()
+                payload = resp.json()
+                for article in payload.get("articles", []):
+                    yield self._ref(str(article["id"])), ""
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

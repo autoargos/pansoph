@@ -59,7 +59,7 @@ class SlackConnector:
             name="slack",
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=False, slim_listing=True
+                incremental=False, permission_sync=True, deletions=False, slim_listing=True
             ),
         )
 
@@ -70,19 +70,30 @@ class SlackConnector:
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
+        """List every channel the credential can reach.
+
+        First cut performs a full listing each run by following Slack cursor
+        pagination; incremental message backfill is a follow-up. Incremental is off
+        (capabilities.incremental is False), so each yielded DocRef carries an empty
+        next_cursor. The cursor parameter is accepted for contract symmetry but the
+        loop always walks the full set internally so listing is complete regardless of
+        runtime re-drive behavior.
+        """
         async with self._client() as client:
             params: dict[str, Any] = {
                 "types": "public_channel,private_channel",
                 "limit": 200,
             }
-            if cursor:
-                params["cursor"] = cursor
-            resp = await client.get("/api/conversations.list", params=params)
-            resp.raise_for_status()
-            payload = resp.json()
-            next_cursor = payload.get("response_metadata", {}).get("next_cursor", "") or ""
-            for channel in payload.get("channels", []):
-                yield self._ref(channel["id"]), next_cursor
+            while True:
+                resp = await client.get("/api/conversations.list", params=params)
+                resp.raise_for_status()
+                payload = resp.json()
+                for channel in payload.get("channels", []):
+                    yield self._ref(channel["id"]), ""
+                next_cursor = payload.get("response_metadata", {}).get("next_cursor", "") or ""
+                if not next_cursor:
+                    break
+                params["cursor"] = next_cursor
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

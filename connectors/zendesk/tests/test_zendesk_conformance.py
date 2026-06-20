@@ -50,6 +50,39 @@ async def test_zendesk_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
 
 
 @pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_zendesk_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
+    # Two pages: the first carries has_more true and a links.next on the same
+    # path, the second closes it out. side_effect serves them in order, and the
+    # path= lookup matches both calls since links.next resolves to the same path.
+    respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "articles": [{"id": 1, "title": "A", "body": "x", "user_segment_id": None}],
+                    "meta": {"has_more": True},
+                    "links": {
+                        "next": "https://acme.zendesk.com/api/v2/help_center/en-us/articles.json?page[after]=N"
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "articles": [{"id": 2, "title": "B", "body": "y", "user_segment_id": None}],
+                    "meta": {"has_more": False},
+                    "links": {"next": None},
+                },
+            ),
+        ]
+    )
+    conn = _factory()
+    ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert ids == ["1", "2"]
+
+
+@pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
 async def test_zendesk_permissions(respx_mock: respx.MockRouter) -> None:

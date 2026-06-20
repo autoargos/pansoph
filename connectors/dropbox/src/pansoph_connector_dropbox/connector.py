@@ -19,7 +19,9 @@ Implemented against the Dropbox HTTP API v2. Verified against the official docs:
                files/list_folder/continue using the cursor.
   Incremental: the list_folder cursor is the durable resume point. A later sync
                passes the stored cursor to files/list_folder/continue to receive
-               only entries changed since.
+               only entries changed since. First cut performs a full listing each
+               run; cursor-filtered incremental (Dropbox delta cursors via
+               list_folder/continue) is a follow-up.
   Rate limit:  Dropbox returns 429 with Retry-After; surfaced, not hidden. The
                runtime owns backoff.
   ACL model:   sharing/list_file_members returns the users and groups a file is
@@ -61,7 +63,7 @@ class DropboxConnector:
             name="dropbox",
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
+                incremental=False, permission_sync=True, deletions=True, slim_listing=True
             ),
         )
 
@@ -72,6 +74,9 @@ class DropboxConnector:
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
+        # Full listing each run: read the first page, then follow has_more through
+        # files/list_folder/continue until the listing is exhausted. Incremental is
+        # off, so the yielded cursor is unused and we surface an empty string.
         async with self._client() as client:
             resp = await client.post(
                 "/2/files/list_folder",
@@ -79,13 +84,18 @@ class DropboxConnector:
             )
             resp.raise_for_status()
             payload = resp.json()
-            # The list_folder cursor is the durable resume point for the next sync.
-            # has_more indicates more pages via files/list_folder/continue; for this
-            # first cut we surface the cursor and read the first page of entries.
-            next_cursor = payload.get("cursor", "")
-            for entry in payload.get("entries", []):
-                if entry.get(".tag") == "file":
-                    yield self._ref(entry["id"]), next_cursor
+            while True:
+                for entry in payload.get("entries", []):
+                    if entry.get(".tag") == "file":
+                        yield self._ref(entry["id"]), ""
+                if not payload.get("has_more"):
+                    break
+                resp = await client.post(
+                    "/2/files/list_folder/continue",
+                    json={"cursor": payload.get("cursor", "")},
+                )
+                resp.raise_for_status()
+                payload = resp.json()
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

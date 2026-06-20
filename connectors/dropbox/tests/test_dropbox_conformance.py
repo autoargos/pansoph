@@ -43,6 +43,34 @@ async def test_dropbox_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
 
 
 @pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_dropbox_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
+    respx_mock.post(path="/2/files/list_folder").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "entries": [{".tag": "file", "id": "F1", "name": "a"}],
+                "has_more": True,
+                "cursor": "C1",
+            },
+        )
+    )
+    respx_mock.post(path="/2/files/list_folder/continue").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "entries": [{".tag": "file", "id": "F2", "name": "b"}],
+                "has_more": False,
+                "cursor": "C2",
+            },
+        )
+    )
+    conn = _factory()
+    refs = [ref async for ref, _ in conn.list_changes(None)]
+    assert [r.source_doc_id for r in refs] == ["F1", "F2"]
+
+
+@pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
 async def test_dropbox_permissions(respx_mock: respx.MockRouter) -> None:

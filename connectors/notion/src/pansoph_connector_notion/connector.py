@@ -15,10 +15,12 @@ Implemented against the official Notion API. Verified against the official docs:
                the API rejects it.
   Base URL:    https://api.notion.com/v1, overridable via config "base_url".
   Pagination:  cursor based. POST /v1/search and GET block children both return
-               "has_more" and "next_cursor". Pass "start_cursor" to continue. The
-               runtime checkpoints the cursor we yield, so a crash resumes.
-  Incremental: list_changes pages through /v1/search filtered to pages, yielding a
-               DocRef per page. The cursor is the search next_cursor.
+               "has_more" and "next_cursor". Pass "start_cursor" to continue.
+               list_changes follows this pagination internally to the end, so one
+               call yields a complete listing.
+  Incremental: not yet. The first cut performs a full listing each run by following
+               Notion search pagination; incremental is a follow-up. capabilities
+               .incremental is therefore False.
 
   ACL CAVEAT (read this, it is a deliberate product decision, not a stub):
   ===================================================================================
@@ -78,7 +80,10 @@ class NotionConnector:
             capabilities=Capabilities(
                 # permission_sync is False on purpose: Notion exposes no per document
                 # permission API, so there is nothing to sync. See module header.
-                incremental=True,
+                # incremental is False on purpose: the first cut performs a full
+                # listing each run by following Notion search pagination; incremental
+                # is a follow-up. See list_changes.
+                incremental=False,
                 permission_sync=False,
                 deletions=False,
                 slim_listing=True,
@@ -92,6 +97,13 @@ class NotionConnector:
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
+        """List every page by following Notion search pagination to the end.
+
+        First cut performs a full listing each run by following Notion search
+        pagination; incremental is a follow-up. We loop the Notion cursor
+        internally so one call yields a complete listing rather than relying on
+        the runtime to re drive with start_cursor.
+        """
         async with self._client() as client:
             body: dict[str, Any] = {
                 "filter": {"property": "object", "value": "page"},
@@ -99,14 +111,17 @@ class NotionConnector:
             }
             if cursor:
                 body["start_cursor"] = cursor
-            resp = await client.post("/v1/search", json=body)
-            resp.raise_for_status()
-            payload = resp.json()
-            next_cursor = payload.get("next_cursor") or ""
-            for page in payload.get("results", []):
-                page_id = page.get("id")
-                if page_id:
-                    yield self._ref(page_id), next_cursor
+            while True:
+                resp = await client.post("/v1/search", json=body)
+                resp.raise_for_status()
+                payload = resp.json()
+                for page in payload.get("results", []):
+                    page_id = page.get("id")
+                    if page_id:
+                        yield self._ref(page_id), ""
+                if not payload.get("has_more"):
+                    break
+                body["start_cursor"] = payload.get("next_cursor")
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

@@ -63,7 +63,7 @@ class GmailConnector:
             name="gmail",
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=False, slim_listing=True
+                incremental=False, permission_sync=True, deletions=False, slim_listing=True
             ),
         )
 

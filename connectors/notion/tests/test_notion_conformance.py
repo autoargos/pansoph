@@ -47,6 +47,34 @@ async def test_notion_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
 
 
 @pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_notion_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
+    respx_mock.post(path="/v1/search").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "results": [{"id": "p1", "object": "page"}],
+                    "has_more": True,
+                    "next_cursor": "NC",
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "results": [{"id": "p2", "object": "page"}],
+                    "has_more": False,
+                    "next_cursor": None,
+                },
+            ),
+        ]
+    )
+    conn = _factory()
+    ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert ids == ["p1", "p2"]
+
+
+@pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
 async def test_notion_permissions(respx_mock: respx.MockRouter) -> None:

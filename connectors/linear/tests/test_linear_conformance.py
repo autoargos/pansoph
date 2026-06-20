@@ -40,6 +40,37 @@ async def test_linear_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
 
 
 @pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_linear_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
+    page1 = httpx.Response(
+        200,
+        json={
+            "data": {
+                "issues": {
+                    "nodes": [{"id": "i1", "title": "A"}],
+                    "pageInfo": {"hasNextPage": True, "endCursor": "E1"},
+                }
+            }
+        },
+    )
+    page2 = httpx.Response(
+        200,
+        json={
+            "data": {
+                "issues": {
+                    "nodes": [{"id": "i2", "title": "B"}],
+                    "pageInfo": {"hasNextPage": False, "endCursor": "E2"},
+                }
+            }
+        },
+    )
+    respx_mock.post(path="/graphql").mock(side_effect=[page1, page2])
+    conn = _factory()
+    ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert ids == ["i1", "i2"]
+
+
+@pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
 async def test_linear_permissions(respx_mock: respx.MockRouter) -> None:

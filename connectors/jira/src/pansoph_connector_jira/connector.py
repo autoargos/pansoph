@@ -99,7 +99,7 @@ class JiraConnector:
             name="jira",
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=False, slim_listing=True
+                incremental=False, permission_sync=True, deletions=False, slim_listing=True
             ),
         )
 

@@ -11,8 +11,9 @@ Implemented against the Linear GraphQL API. Verified against the official docs:
                from config "token" and sends it verbatim as {"Authorization": token},
                so a caller passes a personal key as is, or "Bearer <token>" for OAuth.
   Pagination:  GraphQL connections expose pageInfo with endCursor and hasNextPage.
-               A continuation passes the endCursor as the `after` argument. This
-               connector surfaces the cursor as the next_cursor of list_changes.
+               A continuation passes the endCursor as the `after` argument. First cut
+               performs a full listing each run by paging GraphQL connections;
+               cursor-filtered incremental is a follow-up.
   Incremental: not supported here. Linear can order by updatedAt, but this connector
                does a full listing each run (Capabilities.incremental = False).
   ACL model:   best effort, team scoped. Linear has no per issue viewer list, so
@@ -42,7 +43,10 @@ import httpx
 from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
-_LIST_QUERY = "{ issues(first: 100) { nodes { id title } pageInfo { endCursor hasNextPage } } }"
+_LIST_QUERY = (
+    "query($after: String) { issues(first: 100, after: $after) "
+    "{ nodes { id title } pageInfo { hasNextPage endCursor } } }"
+)
 _FETCH_QUERY = "query($id:String!){ issue(id:$id){ id title description team { id key } } }"
 
 
@@ -68,13 +72,20 @@ class LinearConnector:
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
+        # First cut performs a full listing each run by paging GraphQL connections;
+        # cursor-filtered incremental is a follow-up. The incoming cursor is ignored,
+        # so paging starts at the head and walks pageInfo to the end every run.
         async with self._client() as client:
-            data = await self._graphql(client, _LIST_QUERY)
-            issues = data.get("issues", {})
-            page = issues.get("pageInfo", {})
-            next_cursor = page.get("endCursor") or ""
-            for node in issues.get("nodes", []):
-                yield self._ref(node["id"]), next_cursor
+            after: str | None = None
+            while True:
+                data = await self._graphql(client, _LIST_QUERY, {"after": after})
+                issues = data.get("issues", {})
+                for node in issues.get("nodes", []):
+                    yield self._ref(node["id"]), ""
+                page = issues.get("pageInfo", {})
+                if not page.get("hasNextPage"):
+                    break
+                after = page.get("endCursor")
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

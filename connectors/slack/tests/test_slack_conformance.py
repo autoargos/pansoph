@@ -48,6 +48,32 @@ async def test_slack_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
 
 
 @pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_slack_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get(path="/api/conversations.list").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "channels": [{"id": "C1", "is_private": False}],
+                    "response_metadata": {"next_cursor": "NC"},
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "channels": [{"id": "C2", "is_private": False}],
+                    "response_metadata": {"next_cursor": ""},
+                },
+            ),
+        ]
+    )
+    conn = _factory()
+    ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert ids == ["C1", "C2"]
+
+
+@pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
 async def test_slack_permissions(respx_mock: respx.MockRouter) -> None:

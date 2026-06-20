@@ -75,7 +75,7 @@ class SharepointConnector:
             name="sharepoint",
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
+                incremental=False, permission_sync=True, deletions=True, slim_listing=True
             ),
         )
 
