@@ -17,6 +17,10 @@ dev = [
   "mypy>=1.11",
   "pytest>=8",
   "pytest-asyncio>=0.24",
+  "respx>=0.21",
+  "vcrpy>=6",
+  "pytest-recording>=0.13",
+  "syrupy>=4.7",
 ]
 
 [tool.uv.workspace]
@@ -67,4 +71,5 @@ testpaths = ["packages", "tests"]
 markers = [
   "permission: document level access control red team tests that gate releases",
   "integration: tests that need live services (postgres, spicedb, ...)",
+  "conformance: connector conformance suite, hermetic and offline",
 ]
