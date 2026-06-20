@@ -11,7 +11,10 @@ from pansoph_connector_granola.connector import GranolaConnector
 from pansoph_connector_sdk import assert_conforms
 
 
-@pytest.mark.skip(reason="implement granola against its latest API docs, then enable")
+@pytest.mark.skip(
+    reason="deferred: granola subclasses MCPConnector; conformance lands with the "
+    "pansoph-mcp-bridge fake-MCP-session harness (sub-project B), not here"
+)
 async def test_granola_conforms() -> None:
     connector = GranolaConnector(instance_id="test")
     # TODO seed the connector or point it at a recorded fixture, then:

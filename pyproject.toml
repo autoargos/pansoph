@@ -24,7 +24,7 @@ dev = [
 ]
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "connectors/*"]
 
 [tool.uv.sources]
 pansoph-types = { workspace = true }
@@ -67,7 +67,7 @@ warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages", "tests"]
+testpaths = ["packages", "connectors", "tests"]
 markers = [
   "permission: document level access control red team tests that gate releases",
   "integration: tests that need live services (postgres, spicedb, ...)",

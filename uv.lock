@@ -23,7 +23,12 @@ resolution-markers = [
 [manifest]
 members = [
     "pansoph-authz",
+    "pansoph-connector-confluence",
+    "pansoph-connector-github",
+    "pansoph-connector-google-drive",
+    "pansoph-connector-granola",
     "pansoph-connector-sdk",
+    "pansoph-connector-weblink",
     "pansoph-core",
     "pansoph-identity",
     "pansoph-infra",
@@ -2831,6 +2836,76 @@ requires-dist = [
 provides-extras = ["spicedb", "openfga"]
 
 [[package]]
+name = "pansoph-connector-confluence"
+version = "0.0.1"
+source = { editable = "connectors/confluence" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-github"
+version = "0.0.1"
+source = { editable = "connectors/github" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-google-drive"
+version = "0.0.1"
+source = { editable = "connectors/google_drive" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-granola"
+version = "0.0.1"
+source = { editable = "connectors/granola" }
+dependencies = [
+    { name = "mcp" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-mcp-bridge" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcp", specifier = ">=1.2" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-mcp-bridge", editable = "packages/pansoph-mcp-bridge" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
 name = "pansoph-connector-sdk"
 version = "0.0.1"
 source = { editable = "packages/pansoph-connector-sdk" }
@@ -2847,6 +2922,23 @@ requires-dist = [
     { name = "pansoph-types", editable = "packages/pansoph-types" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6" },
+]
+
+[[package]]
+name = "pansoph-connector-weblink"
+version = "0.0.1"
+source = { editable = "connectors/weblink" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
 ]
 
 [[package]]
