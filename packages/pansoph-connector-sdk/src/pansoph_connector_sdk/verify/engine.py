@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -34,7 +34,7 @@ class ConformanceResult(BaseModel):
 
 def _load_hermetic_config(cfg: ConformanceConfig) -> dict[str, Any]:
     if cfg.hermetic_config:
-        return json.loads(cfg.resolve(cfg.hermetic_config).read_text())
+        return cast(dict[str, Any], json.loads(cfg.resolve(cfg.hermetic_config).read_text()))
     return {}
 
 
