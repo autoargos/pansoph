@@ -1,0 +1,18 @@
+[project]
+name = "pansoph-connector-notion"
+version = "0.0.1"
+description = "pansoph connector for notion. Implement against the latest official docs."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = ["pansoph-types>=0.0.1", "pansoph-connector-sdk>=0.0.1", "httpx>=0.27"]
+
+[project.entry-points."pansoph.connectors"]
+notion = "pansoph_connector_notion.connector:NotionConnector"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pansoph_connector_notion"]

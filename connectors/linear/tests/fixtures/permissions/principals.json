@@ -1,0 +1,4 @@
+[
+  {"user_id": "u1", "groups": ["TEAM1"]},
+  {"user_id": "u2", "groups": ["OTHER"]}
+]

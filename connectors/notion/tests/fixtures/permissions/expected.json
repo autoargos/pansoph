@@ -1,0 +1,3 @@
+{
+  "p1": {"public": false, "allow_groups": ["everyone"], "allow_users": [], "deny": []}
+}

@@ -1,0 +1,3 @@
+{
+  "id:F1": {"public": false, "allow_groups": ["eng"], "allow_users": ["alice@x.com"], "deny": []}
+}

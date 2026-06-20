@@ -1,0 +1,3 @@
+{
+  "500ABC": {"public": false, "allow_groups": ["00Gengteam"], "allow_users": ["005alice"], "deny": []}
+}

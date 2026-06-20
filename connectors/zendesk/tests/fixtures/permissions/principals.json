@@ -1,0 +1,4 @@
+[
+  {"user_id": "agent1", "groups": ["staff", "group:7"]},
+  {"user_id": "cust1", "groups": []}
+]

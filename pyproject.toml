@@ -63,6 +63,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query"]
 # Vector queries interpolate only an internal constant WHERE clause; all values
 # are bound parameters, so the S608 string-query warning is a false positive here.
 "**/adapters_vector.py" = ["S608"]
+# The Salesforce REST query API takes SOQL as a string with no bind parameters. The
+# object name is operator config and the id is a Salesforce-issued key, so the S608
+# string-query warning has no safe alternative here.
+"connectors/salesforce/**" = ["S608"]
 
 [tool.mypy]
 python_version = "3.12"

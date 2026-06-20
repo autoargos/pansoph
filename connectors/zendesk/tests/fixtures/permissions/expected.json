@@ -1,0 +1,3 @@
+{
+  "2": {"public": false, "allow_groups": ["staff", "group:7"], "allow_users": [], "deny": []}
+}

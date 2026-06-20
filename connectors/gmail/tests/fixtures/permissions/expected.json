@@ -1,0 +1,3 @@
+{
+  "m1": {"public": false, "allow_groups": [], "allow_users": ["alice@x.com"], "deny": []}
+}

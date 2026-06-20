@@ -24,11 +24,21 @@ resolution-markers = [
 members = [
     "pansoph-authz",
     "pansoph-connector-confluence",
+    "pansoph-connector-dropbox",
     "pansoph-connector-github",
+    "pansoph-connector-gmail",
     "pansoph-connector-google-drive",
     "pansoph-connector-granola",
+    "pansoph-connector-jira",
+    "pansoph-connector-linear",
+    "pansoph-connector-notion",
+    "pansoph-connector-salesforce",
     "pansoph-connector-sdk",
+    "pansoph-connector-sharepoint",
+    "pansoph-connector-slack",
+    "pansoph-connector-teams",
     "pansoph-connector-weblink",
+    "pansoph-connector-zendesk",
     "pansoph-core",
     "pansoph-identity",
     "pansoph-infra",
@@ -2853,9 +2863,43 @@ requires-dist = [
 ]
 
 [[package]]
+name = "pansoph-connector-dropbox"
+version = "0.0.1"
+source = { editable = "connectors/dropbox" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
 name = "pansoph-connector-github"
 version = "0.0.1"
 source = { editable = "connectors/github" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-gmail"
+version = "0.0.1"
+source = { editable = "connectors/gmail" }
 dependencies = [
     { name = "httpx" },
     { name = "pansoph-connector-sdk" },
@@ -2906,6 +2950,74 @@ requires-dist = [
 ]
 
 [[package]]
+name = "pansoph-connector-jira"
+version = "0.0.1"
+source = { editable = "connectors/jira" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-linear"
+version = "0.0.1"
+source = { editable = "connectors/linear" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-notion"
+version = "0.0.1"
+source = { editable = "connectors/notion" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-salesforce"
+version = "0.0.1"
+source = { editable = "connectors/salesforce" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
 name = "pansoph-connector-sdk"
 version = "0.0.1"
 source = { editable = "packages/pansoph-connector-sdk" }
@@ -2925,9 +3037,77 @@ requires-dist = [
 ]
 
 [[package]]
+name = "pansoph-connector-sharepoint"
+version = "0.0.1"
+source = { editable = "connectors/sharepoint" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-slack"
+version = "0.0.1"
+source = { editable = "connectors/slack" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-teams"
+version = "0.0.1"
+source = { editable = "connectors/teams" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
 name = "pansoph-connector-weblink"
 version = "0.0.1"
 source = { editable = "connectors/weblink" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pansoph-connector-sdk" },
+    { name = "pansoph-types" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pansoph-connector-sdk", editable = "packages/pansoph-connector-sdk" },
+    { name = "pansoph-types", editable = "packages/pansoph-types" },
+]
+
+[[package]]
+name = "pansoph-connector-zendesk"
+version = "0.0.1"
+source = { editable = "connectors/zendesk" }
 dependencies = [
     { name = "httpx" },
     { name = "pansoph-connector-sdk" },

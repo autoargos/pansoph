@@ -1,0 +1,3 @@
+{
+  "ENG-1": {"public": false, "allow_groups": ["jira-users"], "allow_users": ["alice"], "deny": []}
+}

@@ -1,0 +1,4 @@
+[
+  {"user_id": "alice", "groups": ["jira-users"]},
+  {"user_id": "ext", "groups": []}
+]

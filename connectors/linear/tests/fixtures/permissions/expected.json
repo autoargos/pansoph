@@ -1,0 +1,3 @@
+{
+  "i1": {"public": false, "allow_groups": ["TEAM1"], "allow_users": [], "deny": []}
+}

@@ -1,0 +1,4 @@
+[
+  {"user_id": "u1", "groups": ["everyone"]},
+  {"user_id": "u2", "groups": []}
+]
