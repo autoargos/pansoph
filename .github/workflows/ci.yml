@@ -72,3 +72,41 @@ jobs:
       - run: uv sync --all-packages --dev
       - name: Connector conformance (hermetic, offline)
         run: uv run pytest -m conformance -q
+
+  # The live enforcement gate. Brings up a real SpiceDB and a real pgvector and runs the
+  # retrieval enforcement path against them, so a schema bug, a ZedToken freshness bug, or
+  # a vector pre filter group leak fails the build. This is the live counterpart to
+  # permission-gate (which runs on in-memory fakes): a green check here means permissions
+  # hold against the real engines, not just the logic. Replaces the old
+  # `pytest -m integration -q || true` no op as the project's integration signal.
+  enforcement-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.x"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --dev --group integration
+      - name: Start SpiceDB and pgvector
+        run: docker compose -f deploy/compose.test.yaml up -d --wait
+      - name: Wait for the gRPC and Postgres ports
+        run: |
+          wait_port() {
+            for _ in $(seq 1 60); do
+              (echo > /dev/tcp/127.0.0.1/"$1") >/dev/null 2>&1 && return 0
+              sleep 1
+            done
+            echo "port $1 not ready"; return 1
+          }
+          wait_port 50051
+          wait_port 5433
+      - name: Live enforcement tests (real SpiceDB + pgvector)
+        env:
+          PANSOPH_SPICEDB_ENDPOINT: localhost:50051
+          PANSOPH_PG_DSN: postgresql://pansoph:pansoph@localhost:5433/pansoph
+        run: uv run pytest -m integration -q
+      - name: Tear down
+        if: always()
+        run: docker compose -f deploy/compose.test.yaml down -v

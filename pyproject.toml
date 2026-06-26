@@ -22,6 +22,16 @@ dev = [
   "pytest-recording>=0.13",
   "syrupy>=4.7",
 ]
+# The integration group adds the real engine clients the live enforcement suite needs
+# (the SpiceDB gRPC client and the Postgres driver). These mirror the optional extras
+# pansoph-authz[spicedb] and pansoph-retrieval[pgvectorscale]. They are dev/test only,
+# not runtime deps of any package, so no ADR is required (CLAUDE.md section 4). CI syncs
+# this group only for the enforcement-live job; the fast suite never needs it.
+integration = [
+  "authzed>=1.0",
+  "grpcio>=1.66",
+  "psycopg[binary]>=3.2",
+]
 
 [tool.uv.workspace]
 members = ["packages/*", "connectors/*"]
