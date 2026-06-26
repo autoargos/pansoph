@@ -3022,17 +3022,21 @@ name = "pansoph-connector-sdk"
 version = "0.0.1"
 source = { editable = "packages/pansoph-connector-sdk" }
 dependencies = [
+    { name = "httpx" },
     { name = "jsonpath-ng" },
     { name = "pansoph-types" },
     { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
     { name = "pansoph-types", editable = "packages/pansoph-types" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
     { name = "pyyaml", specifier = ">=6" },
 ]
 
@@ -3337,6 +3341,11 @@ dev = [
     { name = "syrupy" },
     { name = "vcrpy" },
 ]
+integration = [
+    { name = "authzed" },
+    { name = "grpcio" },
+    { name = "psycopg", extra = ["binary"] },
+]
 
 [package.metadata]
 
@@ -3350,6 +3359,11 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
     { name = "syrupy", specifier = ">=4.7" },
     { name = "vcrpy", specifier = ">=6" },
+]
+integration = [
+    { name = "authzed", specifier = ">=1.0" },
+    { name = "grpcio", specifier = ">=1.66" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
 ]
 
 [[package]]

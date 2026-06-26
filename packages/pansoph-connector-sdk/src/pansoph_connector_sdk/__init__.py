@@ -2,6 +2,18 @@
 
 from __future__ import annotations
 
+from .auth import CredentialProvider
+from .auth_types import (
+    AccessToken,
+    AuthError,
+    AuthRequirement,
+    GrantType,
+    ReauthRequired,
+    SecretRef,
+    SecretStore,
+    TokenRefreshError,
+    TokenSource,
+)
 from .conformance import assert_conforms
 from .contract import (
     ChangeEvent,
@@ -21,4 +33,15 @@ __all__ = [
     "assert_conforms",
     "run_conformance",
     "ConformanceResult",
+    # Auth subsystem (auto-refresh credentials).
+    "AccessToken",
+    "AuthError",
+    "AuthRequirement",
+    "CredentialProvider",
+    "GrantType",
+    "ReauthRequired",
+    "SecretRef",
+    "SecretStore",
+    "TokenRefreshError",
+    "TokenSource",
 ]
