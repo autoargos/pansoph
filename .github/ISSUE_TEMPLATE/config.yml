@@ -1,0 +1,13 @@
+# Issue template chooser configuration.
+# https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/autoargos/pansoph/security/advisories/new
+    about: >-
+      Never file a security issue as a public issue. Use GitHub private vulnerability
+      reporting (this link) or the email in SECURITY.md. pansoph's entire pitch is
+      permission enforcement, so a retrieval leak or ACL-mapping bug is a security report.
+  - name: Question or discussion
+    url: https://github.com/autoargos/pansoph/discussions
+    about: For usage questions and open-ended ideas, start a discussion rather than an issue.

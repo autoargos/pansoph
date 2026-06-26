@@ -1,0 +1,12 @@
+# Code owners for pansoph. While the project is solo-maintained, the maintainer reviews
+# all changes. The handle below is inferred from the git config and the repo namespace;
+# correct it if your GitHub username or team handle differs.
+# As the project grows, add path-scoped owners.
+
+* @cyproto
+
+# Highest-sensitivity paths: the permission-enforcement core and the authz layer.
+# Changes here decide whether a user can retrieve what they should not, so they should
+# always be reviewed by a security-aware owner.
+/packages/pansoph-retrieval/src/pansoph_retrieval/pipeline.py @cyproto
+/packages/pansoph-authz/ @cyproto
