@@ -1,4 +1,4 @@
-"""The FastAPI application: REST, health, and a placeholder SSE chat stream.
+"""The FastAPI application: REST, health, and the SSE chat stream.
 
 This is the thin surface. Route handlers will delegate to pansoph-retrieval and
 pansoph-ingestion once the adapters are wired. The SSE endpoint follows the AI SDK

@@ -1,0 +1,30 @@
+@startuml 04-ingestion-acl
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+title Ingestion and ACL lifecycle, per connector instance per cycle
+
+participant "Connector\ninstance" as con
+participant "Source" as src
+participant "Pipeline\nparse, chunk, embed" as pipe
+participant "Vector index\nQdrant" as vec
+participant "Authz engine\nReBAC" as authz
+
+loop every sync interval
+  con -> src : list changes since cursor
+  src --> con : new and changed docs plus ACLs
+  con -> pipe : raw bytes plus ACL metadata
+  pipe -> pipe : parse, contextual chunk, embed
+  pipe -> vec : upsert chunks with tenant, group ids, acl_version
+  pipe -> authz : write relationship tuples, doc to group to user
+  con -> vec : delete removed docs
+  con -> authz : revoke tuples on permission change
+end
+
+note over con, authz
+Permission changes propagate by webhook where the source supports it.
+Consistent doc ids link the vector payload and the authz graph.
+A 429 from the source is surfaced so revocations are never silently delayed.
+end note
+@enduml

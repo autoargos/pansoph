@@ -1,0 +1,39 @@
+@startuml 07-deployment
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+skinparam ArrowColor #5A5A5A
+title Self hosted deployment, Docker Compose
+
+node "Single host or cluster" {
+  component "Web, React" as web
+  component "API, FastAPI" as api
+  component "Sync workers\nscale horizontally" as work
+  queue "Redis\nqueue and cache" as redis
+  database "Postgres\nmetadata" as pg
+  database "Qdrant\nvector index" as qd
+  component "OpenFGA\nauthz, optional" as fga
+  folder "MinIO\nblobs" as minio
+}
+
+node "User browser" {
+  component "Browser extension\nuser authorized capture" as ext
+}
+
+cloud "Provider APIs\nOpenRouter and sources" as papi
+
+web --> api
+api --> pg
+api --> qd
+api --> fga
+api --> redis
+work --> redis
+work --> pg
+work --> qd
+work --> fga
+work --> minio
+work --> papi
+api --> papi
+ext --> api
+@enduml

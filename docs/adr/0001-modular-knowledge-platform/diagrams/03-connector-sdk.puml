@@ -1,0 +1,41 @@
+@startuml 03-connector-sdk
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+skinparam ArrowColor #5A5A5A
+title Connector SDK, one contract and many instances
+
+interface "Connector contract\nauth, list, fetch, acls, cursor, capabilities" as IF
+
+rectangle "Tier 1 native, declarative plus code escape hatch" {
+  component "Google Drive" as d
+  component "GitHub" as g
+  component "Confluence" as c
+  component "Granola" as gn
+}
+rectangle "Tier 2 reach anything" {
+  component "Public link fetch" as pl
+  component "MCP connector bridge" as mcp
+}
+rectangle "Tier 3 grabber" {
+  component "Browser extension\nuser authorized" as be
+}
+
+d ..|> IF
+g ..|> IF
+c ..|> IF
+gn ..|> IF
+pl ..|> IF
+mcp ..|> IF
+be ..|> IF
+
+note right of IF
+Each source can run many instances.
+Example, three GitHub orgs or two Drives.
+Each instance has its own credentials,
+schedule, and ACL namespace.
+Every tier emits one normalized Document plus ACL.
+Community adds connectors by PR against one repo.
+end note
+@enduml

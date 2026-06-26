@@ -42,7 +42,7 @@ Consequences for how you write code:
 
 ## 4. Tech stack (finalized in ADR-0002)
 
-The authoritative record is `../architecture-decision-records/adr-0002-finalized-tech-stack/`. Summary:
+The authoritative record is `docs/adr/0002-finalized-tech-stack/`. Summary:
 
 | Layer | Choice |
 |---|---|
@@ -175,8 +175,8 @@ Every change to the retrieval enforcement path or an authz adapter must come wit
 
 ## 12. Pointers
 
-- Vision: `../architecture-decision-records/adr-0001-modular-knowledge-platform/`
-- Finalized stack and ports: `../architecture-decision-records/adr-0002-finalized-tech-stack/`
+- Vision: `docs/adr/0001-modular-knowledge-platform/`
+- Finalized stack and ports: `docs/adr/0002-finalized-tech-stack/`
 - Architecture map: `docs/ARCHITECTURE.md`
 
 When in doubt, return to section 1. A user can only ever retrieve what they are already allowed to see, across every connected source, on their own hardware, with their own models, with every part replaceable. Everything else serves that.

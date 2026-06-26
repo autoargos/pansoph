@@ -1,0 +1,32 @@
+@startuml 05-rbac-retrieval
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+title ACL aware retrieval, the RBAC highlight
+
+actor User as u
+participant "Identity\nours or external OIDC" as id
+participant "Query plane" as q
+participant "Vector index\nQdrant" as vec
+participant "Authz engine\nours or external FGA" as authz
+participant "Reranker" as rr
+participant "LLM\nOpenRouter" as llm
+
+u -> id : sign in
+id --> q : subject, groups, tenant
+u -> q : question
+q -> vec : pre-filter by tenant and groups, overfetch top K times 3 to 5
+vec --> q : candidate chunks
+q -> authz : bulk check each candidate doc
+authz --> q : allowed subset only
+q -> rr : rerank allowed chunks
+rr --> q : top chunks
+q -> llm : answer from allowed context only
+llm --> u : answer with citations to sources the user can open
+
+note over q, authz
+Pre-filter gives recall and speed. The authz post-check is the
+source of truth and closes the leak that metadata alone cannot.
+end note
+@enduml

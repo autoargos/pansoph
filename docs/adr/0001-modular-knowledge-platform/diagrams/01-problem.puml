@@ -1,0 +1,29 @@
+@startuml 01-problem
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+skinparam ArrowColor #5A5A5A
+title Knowledge is scattered, and naive RAG ignores permissions
+
+actor Employee as user
+cloud "Google Drive" as gd
+cloud "GitHub" as gh
+cloud "Confluence" as cf
+cloud "Granola notes" as gr
+cloud "Public sites" as web
+cloud "Apps with no clean API" as noapi
+
+user --> gd
+user --> gh
+user --> cf
+user --> gr
+user --> web
+user --> noapi
+
+note bottom of noapi
+Naive RAG indexes everything and ranks by similarity only.
+A relevant confidential doc is returned to anyone who asks.
+That is permission blind retrieval, the top enterprise blocker.
+end note
+@enduml

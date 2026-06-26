@@ -1,0 +1,64 @@
+@startuml 02-architecture
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+skinparam ArrowColor #5A5A5A
+title pansoph high level architecture
+
+rectangle "Surfaces" {
+  component "Chat UI" as chat
+  component "Search UI" as search
+  component "REST API" as api
+  component "MCP server we expose" as mcpout
+}
+
+rectangle "Query plane, ACL aware" {
+  component "Hybrid retrieval\nBM25 + dense + rerank" as retr
+  component "Access filter\npre-filter then post-check" as acl
+}
+
+rectangle "Stores" {
+  database "Vector index\nQdrant, ACL in payload" as vec
+  database "Metadata\nPostgres" as meta
+  component "Authz engine\nReBAC, pluggable" as authz
+  folder "Blobs\nMinIO" as blob
+}
+
+rectangle "Ingestion plane" {
+  component "Sync workers\nper connector instance" as workers
+  component "Parse, contextual chunk, embed" as pipe
+}
+
+rectangle "Connector tiers, one SDK" {
+  component "Native\nDrive, GitHub, Confluence, Granola" as native
+  component "Public link fetch" as link
+  component "Browser extension\nuser authorized capture" as ext
+  component "MCP connector bridge" as mcpin
+}
+
+rectangle "Pluggable providers" {
+  component "LLM and embeddings\nOpenRouter and others" as llm
+  component "Identity\nOIDC, Keycloak and others" as idp
+}
+
+chat --> retr
+search --> retr
+api --> retr
+mcpout --> retr
+retr --> acl
+acl --> vec
+acl --> authz
+retr --> llm
+idp --> acl
+native --> workers
+link --> workers
+ext --> workers
+mcpin --> workers
+workers --> pipe
+pipe --> vec
+pipe --> meta
+pipe --> blob
+pipe --> authz
+pipe --> llm
+@enduml

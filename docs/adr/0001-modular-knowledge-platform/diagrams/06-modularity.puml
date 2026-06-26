@@ -1,0 +1,49 @@
+@startuml 06-modularity
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+skinparam ArrowColor #5A5A5A
+title Modular core, ports and swappable adapters
+
+component "Thin core\norchestration only" as core
+
+rectangle "Ports, stable interfaces" {
+  interface "Connector" as pc
+  interface "Embeddings" as pe
+  interface "LLM" as pl
+  interface "Vector store" as pv
+  interface "Reranker" as pr
+  interface "Identity" as pi
+  interface "Authz" as pa
+}
+
+core -- pc
+core -- pe
+core -- pl
+core -- pv
+core -- pr
+core -- pi
+core -- pa
+
+component "Connector plugins, community PRs" as ac
+component "OpenRouter, local models" as ae
+component "OpenRouter, Anthropic, OpenAI" as al
+component "Qdrant, others" as av
+component "cross encoder, Cohere" as ar
+component "ours, or Keycloak via OIDC" as ai
+component "ours ReBAC, or OpenFGA, SpiceDB, or none" as aa
+
+pc <|.. ac
+pe <|.. ae
+pl <|.. al
+pv <|.. av
+pr <|.. ar
+pi <|.. ai
+pa <|.. aa
+
+note bottom of aa
+RBAC ships built in and is the highlight, yet it is a plugin.
+Replace it with your IdP and FGA, or run with no auth.
+end note
+@enduml
