@@ -18,12 +18,13 @@ from .contract import ChangeEvent, ConnectorMeta, ValidationResult
 
 
 class _Entry:
-    __slots__ = ("raw", "acl", "rev")
+    __slots__ = ("raw", "acl", "rev", "deleted")
 
-    def __init__(self, raw: RawDoc, acl: AccessControl, rev: int) -> None:
+    def __init__(self, raw: RawDoc, acl: AccessControl, rev: int, deleted: bool = False) -> None:
         self.raw = raw
         self.acl = acl
         self.rev = rev
+        self.deleted = deleted
 
 
 class InMemoryConnector:
@@ -53,7 +54,18 @@ class InMemoryConnector:
         self._docs[source_doc_id] = _Entry(raw, acl or AccessControl(public=True), self._rev)
 
     def remove(self, source_doc_id: str) -> None:
-        self._docs.pop(source_doc_id, None)
+        """Tombstone a document so list_changes surfaces it as deleted=True.
+
+        The entry is kept (not popped) and bumped to a new revision with
+        deleted=True, so an incremental list from a cursor before the removal
+        yields the tombstone, exactly as a real connector reports a deletion.
+        """
+        entry = self._docs.get(source_doc_id)
+        if entry is None:
+            return
+        self._rev += 1
+        entry.rev = self._rev
+        entry.deleted = True
 
     # --- contract ---
     def validate(self, config: dict[str, Any]) -> ValidationResult:
@@ -63,7 +75,11 @@ class InMemoryConnector:
         since = int(cursor) if cursor else 0
         for entry in sorted(self._docs.values(), key=lambda e: e.rev):
             if entry.rev > since:
-                ref = DocRef(source_doc_id=entry.raw.source_doc_id, instance_id=self.instance_id)
+                ref = DocRef(
+                    source_doc_id=entry.raw.source_doc_id,
+                    instance_id=self.instance_id,
+                    deleted=entry.deleted,
+                )
                 yield ref, str(entry.rev)
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:

@@ -60,7 +60,14 @@ class Connector(Protocol):
         """Yield (DocRef, next_cursor) for everything changed since `cursor`.
 
         The runtime checkpoints `next_cursor` as a durable step output, so a crash
-        resumes from the last yielded cursor rather than from zero.
+        resumes from the last yielded cursor rather than from zero. `cursor` is the
+        durable resume point the source defines (a high-water mark, a delta link,
+        a page token), never an intra-listing page token reused across runs.
+
+        To report a removal, yield a DocRef with `deleted=True` (a tombstone): the
+        runtime purges that document and its access tuples. A connector that
+        declares the deletions capability but never yields a deleted DocRef is not
+        actually implementing deletions, which the conformance suite checks.
         """
         ...
 

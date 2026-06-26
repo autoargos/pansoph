@@ -63,11 +63,19 @@ class Section(BaseModel):
 
 
 class DocRef(BaseModel):
-    """A lightweight reference to a source document, returned by list_changes."""
+    """A lightweight reference to a source document, returned by list_changes.
+
+    `deleted` is how a connector signals a removal during a poll-based sync: it
+    yields a DocRef with deleted=True for a source document that no longer exists
+    (a tombstone), and the runtime purges that document and its access tuples. A
+    deleted DocRef still carries source_doc_id and instance_id so the runtime can
+    identify what to remove; its content is never fetched.
+    """
 
     source_doc_id: str
     instance_id: str
     updated_at: datetime | None = None
+    deleted: bool = False
     extra: dict[str, str] = Field(default_factory=dict)
 
 

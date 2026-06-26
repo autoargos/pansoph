@@ -26,6 +26,9 @@ class IncrementalCategory(BaseModel):
 
 class DeletionsCategory(BaseModel):
     enabled: bool = True
+    # A cursor recorded just before a source document was removed. Listing from it
+    # must yield that document as a deleted DocRef. None lists from the start.
+    deleted_state: str | None = None
 
 
 class ConnectionCategory(BaseModel):

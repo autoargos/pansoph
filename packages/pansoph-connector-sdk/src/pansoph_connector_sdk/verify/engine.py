@@ -20,7 +20,7 @@ from ..contract import Connector
 from .categories.contract import check_connection, check_discovery, check_spec
 from .categories.permissions import check_permissions
 from .categories.read import check_read
-from .categories.sync import check_incremental
+from .categories.sync import check_deletions, check_incremental
 from .config import ConformanceConfig, load_config
 
 Factory = Callable[[str, dict[str, Any]], Connector]
@@ -75,6 +75,10 @@ async def run_conformance(
             abnormal = cfg.resolve(cats.incremental.abnormal_state).read_text().strip()
         await check_incremental(connector, abnormal)
         ran.append("incremental")
+
+    if cats.deletions is not None and cats.deletions.enabled and caps.deletions:
+        await check_deletions(connector, cats.deletions.deleted_state)
+        ran.append("deletions")
 
     assert cats.permissions is not None, "the permission category is mandatory for every connector"
     await check_permissions(
