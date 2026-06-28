@@ -12,7 +12,7 @@ PANSOPH_SPICEDB_ENDPOINT / PANSOPH_PG_DSN env vars set; otherwise every test ski
 from __future__ import annotations
 
 import pytest
-from pansoph_authz import Principal, Tuple
+from pansoph_authz import TENANT_EVERYONE, Principal, Tuple, membership_tuples
 from pansoph_retrieval.pipeline import retrieve
 from pansoph_retrieval.ports import SearchHit
 from pansoph_types import AccessControl
@@ -31,6 +31,11 @@ async def _ids(
     query: str = "the document body",
 ) -> set[str]:
     """Run the real enforcement path and return the doc ids the subject can retrieve."""
+    # Mirror routes._retrieve: every user is a member of its tenant everyone group, so
+    # public documents (granted to that group) resolve within the tenant.
+    await authz.write_tuples(  # type: ignore[attr-defined]
+        membership_tuples(user, [TENANT_EVERYONE], tenant)
+    )
     hits = await retrieve(
         query=query,
         subject=Principal(type="user", id=user),
@@ -42,6 +47,26 @@ async def _ids(
         authz=authz,  # type: ignore[arg-type]
     )
     return {h.doc_id for h in hits}
+
+
+async def test_live_public_is_tenant_scoped_at_authz_layer(authz, seed) -> None:
+    # Defense in depth for multi-tenant: a public document is readable only WITHIN its
+    # tenant at the authz layer (the source of truth), not only at the vector
+    # pre-filter, because public grants to the tenant everyone group rather than a
+    # global wildcard. A cross-tenant user is denied even if the pre-filter were bypassed.
+    await seed(doc_id="doc:t1pub", tenant="t1", instance="inst", public=True)
+    await authz.write_tuples(membership_tuples("alice", [TENANT_EVERYONE], "t1"))
+    await authz.write_tuples(membership_tuples("mallory", [TENANT_EVERYONE], "t2"))
+
+    in_tenant = await authz.bulk_check(Principal(type="user", id="alice"), "read", ["doc:t1pub"])
+    cross_tenant = await authz.bulk_check(
+        Principal(type="user", id="mallory"), "read", ["doc:t1pub"]
+    )
+
+    assert "doc:t1pub" in in_tenant, "a tenant member reads its tenant's public document"
+    assert "doc:t1pub" not in cross_tenant, (
+        "a cross-tenant user must NOT read a public document (no global wildcard)"
+    )
 
 
 async def test_live_cross_user_isolation_excludes_non_member(

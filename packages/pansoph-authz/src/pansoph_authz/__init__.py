@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from .mappers import diff_acls, membership_tuples, tuples_for_acl, tuples_for_document
+from .mappers import (
+    TENANT_EVERYONE,
+    diff_acls,
+    membership_tuples,
+    tuples_for_acl,
+    tuples_for_document,
+)
 from .port import AuthzPort, ConsistencyToken, Principal, Relation, Tuple
 
 __all__ = [
@@ -11,6 +17,7 @@ __all__ = [
     "Principal",
     "Relation",
     "ConsistencyToken",
+    "TENANT_EVERYONE",
     "tuples_for_document",
     "tuples_for_acl",
     "membership_tuples",

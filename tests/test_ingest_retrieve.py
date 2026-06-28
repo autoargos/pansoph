@@ -12,7 +12,7 @@ The exhaustive suite is task #21; this proves the vertical works today.
 from __future__ import annotations
 
 import pytest
-from pansoph_authz import AuthzPort, ConsistencyToken, Principal, Tuple
+from pansoph_authz import TENANT_EVERYONE, AuthzPort, ConsistencyToken, Principal, Tuple
 from pansoph_connector_sdk import InMemoryConnector
 from pansoph_ingestion.adapters_parser import DoclingParser
 from pansoph_ingestion.pipeline import IngestionPipeline
@@ -74,7 +74,8 @@ class _FakeAuthz(AuthzPort):
         object_ids: list[str],
         at_least_as_fresh: ConsistencyToken | None = None,
     ) -> set[str]:
-        groups = self._user_groups.get(subject.id, set())
+        # Every user is a member of its tenant everyone group, so public docs resolve.
+        groups = self._user_groups.get(subject.id, set()) | {TENANT_EVERYONE}
         allowed: set[str] = set()
         for oid in object_ids:
             if ("user", "*", oid) in self._tuples or ("user", subject.id, oid) in self._tuples:

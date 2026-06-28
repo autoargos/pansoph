@@ -14,6 +14,13 @@ from .port import Principal, Tuple
 
 READER = "reader"
 
+# The reserved group every user is a member of within their tenant. A "public"
+# document grants read to this group (tenant-scoped), so "public" means "everyone in
+# this tenant" and the authz engine enforces tenant isolation, rather than relying on
+# a global user:* wildcard that any user in any tenant would match. The double
+# underscore prefix avoids colliding with a real source group name.
+TENANT_EVERYONE = "__pansoph_everyone"
+
 
 def tuples_for_acl(
     object_id: str,
@@ -41,7 +48,11 @@ def tuples_for_acl(
     group_ns = tenant_id if tenant_id is not None else user_ns
     out: list[Tuple] = []
     if acl.public:
-        out.append(_reader(Principal(type="user", id="*", ns=user_ns), object_id))
+        # Grant to the tenant's everyone group (tenant-scoped via group_ns), not a
+        # global user:* wildcard. Every user is made a member of this group at
+        # retrieval, so the authz engine, not just the vector pre-filter, keeps a
+        # public document from crossing the tenant boundary.
+        out.append(_reader(Principal(type="group", id=TENANT_EVERYONE, ns=group_ns), object_id))
     for group in acl.allow_groups:
         out.append(_reader(Principal(type="group", id=group, ns=group_ns), object_id))
     for user in acl.allow_users:

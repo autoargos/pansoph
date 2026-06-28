@@ -8,7 +8,7 @@ nested-group reader tuples that the mappers write.
 
 from __future__ import annotations
 
-from pansoph_authz import AuthzPort, ConsistencyToken, Principal, Tuple
+from pansoph_authz import TENANT_EVERYONE, AuthzPort, ConsistencyToken, Principal, Tuple
 from pansoph_retrieval.ports import SearchHit, VectorFilter
 
 
@@ -68,7 +68,10 @@ class FakeAuthz(AuthzPort):
         object_ids: list[str],
         at_least_as_fresh: ConsistencyToken | None = None,
     ) -> set[str]:
-        groups = self._user_groups.get(subject.id, set())
+        # Every user is a member of its tenant everyone group, so public docs (granted
+        # to that group) resolve. The fake is tenant-blind, matching the real engine's
+        # group resolution for the suite's single-tenant scenarios.
+        groups = self._user_groups.get(subject.id, set()) | {TENANT_EVERYONE}
         allowed: set[str] = set()
         for oid in object_ids:
             if ("user", "*", oid) in self.tuples or ("user", subject.id, oid) in self.tuples:

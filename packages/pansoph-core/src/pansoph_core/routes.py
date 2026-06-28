@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pansoph_authz import Principal, membership_tuples, tuples_for_acl
+from pansoph_authz import TENANT_EVERYONE, Principal, membership_tuples, tuples_for_acl
 from pansoph_ingestion.chunking import chunk_sections
 from pansoph_retrieval.pipeline import retrieve
 from pansoph_retrieval.ports import SearchHit
@@ -133,8 +133,11 @@ async def _retrieve(
     # Sync the subject's identity groups into the authz graph so the engine can
     # resolve nested-group document access. Idempotent. In a full deployment this is
     # done by the Identity port on login or SCIM sync; here it is per request.
-    if groups:
-        await authz.write_tuples(membership_tuples(user, groups, tenant_id))
+    # Every user is a member of its tenant's everyone group, so a public document
+    # (granted to that group, not a global wildcard) is readable only within its
+    # tenant. This enforces tenant isolation at the authz layer, defense in depth with
+    # the vector pre-filter. Identity groups are synced alongside it.
+    await authz.write_tuples(membership_tuples(user, [TENANT_EVERYONE, *groups], tenant_id))
     return await retrieve(
         query=query,
         subject=Principal(type="user", id=user),

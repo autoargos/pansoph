@@ -67,7 +67,14 @@ async def retrieve(
     allowed = [
         hit
         for hit in candidates
-        if hit.doc_id in allowed_ids and denied_principals.isdisjoint(hit.deny)
+        if hit.doc_id in allowed_ids
+        # Defense in depth: never cross the tenant boundary even if the vector
+        # pre-filter over-returned. The authz check already enforces tenant isolation
+        # (public grants to the tenant everyone group, group grants are tenant
+        # namespaced), so this redundant guard on each candidate's stored tenant means
+        # a single pre-filter bug cannot leak a cross-tenant document.
+        and hit.tenant_id == tenant_id
+        and denied_principals.isdisjoint(hit.deny)
     ]
 
     if reranker is not None and allowed:

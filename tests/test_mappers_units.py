@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pansoph_authz import diff_acls, tuples_for_acl
+from pansoph_authz import TENANT_EVERYONE, diff_acls, tuples_for_acl
 from pansoph_authz.mappers import tuples_for_document
 from pansoph_types import AccessControl, Document
 
@@ -11,9 +11,11 @@ def _keys(tuples):
     return {(t.subject.type, t.subject.id, t.subject.ns, t.object_id) for t in tuples}
 
 
-def test_public_maps_to_user_wildcard() -> None:
+def test_public_maps_to_tenant_everyone_group() -> None:
+    # Public grants to the tenant everyone group (tenant-scoped), not a global user:*
+    # wildcard, so the authz engine enforces tenant isolation for public documents.
     ts = tuples_for_acl("doc1", "inst", AccessControl(public=True))
-    assert _keys(ts) == {("user", "*", "inst", "doc1")}
+    assert _keys(ts) == {("group", TENANT_EVERYONE, "inst", "doc1")}
 
 
 def test_groups_and_users_map_in_instance_namespace() -> None:
@@ -29,14 +31,15 @@ def test_explicit_principal_ns_overrides_instance() -> None:
 
 
 def test_two_level_namespace_groups_tenant_users_instance() -> None:
-    # With a tenant_id, groups are tenant-scoped (so identity groups resolve across
-    # instances) while users and the public wildcard stay instance-scoped (so two
-    # instances never collide). This is the ADR isolation guarantee.
+    # With a tenant_id, groups (and the tenant everyone group that public maps to) are
+    # tenant-scoped, so identity groups resolve across instances and a public doc never
+    # crosses tenants, while direct users stay instance-scoped (so two instances never
+    # collide). This is the ADR isolation guarantee.
     acl = AccessControl(allow_groups=["eng"], allow_users=["alice"], public=True)
     keys = _keys(tuples_for_acl("doc1", "inst", acl, tenant_id="acme"))
     assert ("group", "eng", "acme", "doc1") in keys
     assert ("user", "alice", "inst", "doc1") in keys
-    assert ("user", "*", "inst", "doc1") in keys
+    assert ("group", TENANT_EVERYONE, "acme", "doc1") in keys
 
 
 def test_deny_is_never_expressed_as_a_tuple() -> None:
