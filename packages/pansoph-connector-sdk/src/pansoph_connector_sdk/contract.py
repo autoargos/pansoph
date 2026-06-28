@@ -45,9 +45,17 @@ class Connector(Protocol):
     """The contract every connector satisfies.
 
     Implementations are instantiated per configured instance, so `self` already
-    carries that instance's credentials, schedule, and ACL namespace. The runtime
-    persists the cursor returned by `list_changes` and replays it on the next
-    durable sync.
+    carries that instance's schedule and ACL namespace. The runtime persists the
+    cursor returned by `list_changes` and replays it on the next durable sync.
+
+    Auth (optional convention): a connector that needs a refreshing credential may
+    expose `auth_requirement(self) -> AuthRequirement | None` (from
+    `pansoph_connector_sdk.auth_types`). When it returns a requirement, the runtime
+    builds a TokenSource from the configured secret store and the process-wide
+    credential provider and sets it as `self.token_source`; the connector then calls
+    `self.token_source.get_access_token()` per request and never holds a raw secret.
+    A connector that does not expose the method keeps using its own config-based
+    auth, so the convention is fully backward compatible.
     """
 
     meta: ConnectorMeta

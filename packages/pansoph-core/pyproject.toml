@@ -14,6 +14,7 @@ dependencies = [
   "pansoph-ingestion>=0.0.1",
   "pansoph-mcp-bridge>=0.0.1",
   "pansoph-identity>=0.0.1",
+  "pansoph-infra>=0.0.1",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "pydantic-settings>=2.4",

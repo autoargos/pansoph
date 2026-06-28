@@ -88,6 +88,19 @@ _IDENTITY_KWARGS: dict[str, Any] = {
 }
 
 
+_SECRET_KWARGS: dict[str, Any] = {
+    # Envelope encryption, root-key based, no external service. The root key is
+    # supplied as raw bytes from the environment (an age key or a KMS export).
+    "envelope": lambda: {"root_key": _env("PANSOPH_ENVELOPE_ROOT_KEY").encode("utf-8")},
+    # OpenBao (the open-source Vault). Self-persisting and natively async, the
+    # production default for centralized, audited, rotatable secret storage.
+    "openbao": lambda: {
+        "addr": _env("OPENBAO_ADDR", "http://openbao:8200"),
+        "token": _env("OPENBAO_TOKEN"),
+    },
+}
+
+
 def _build(group: str, name: str, kwargs_map: dict[str, Any]) -> Any:
     cls = load_adapter(group, name)
     factory = kwargs_map.get(name)
@@ -125,3 +138,34 @@ def build_parser() -> Any:
 
 def build_identity() -> Any:
     return _build("pansoph.identity", _env("PANSOPH_IDENTITY_ADAPTER", "builtin"), _IDENTITY_KWARGS)
+
+
+def build_secret_store() -> Any:
+    """Build the configured SecretStore (envelope by default, openbao for production).
+
+    Both satisfy the same SecretStore port, so the credential provider and the
+    connectors never know which is in use. Selected by PANSOPH_SECRET_ADAPTER. Built
+    lazily, only when a connector actually declares an AuthRequirement, so a
+    deployment with no auto-refresh connector needs no secret backend configured.
+    """
+    return _build(
+        "pansoph.secretstores", _env("PANSOPH_SECRET_ADAPTER", "envelope"), _SECRET_KWARGS
+    )
+
+
+_credential_provider: Any = None
+
+
+def build_credential_provider() -> Any:
+    """Return the process-wide CredentialProvider, building it on first use.
+
+    One provider per process so its token cache and single-flight refresh locks are
+    shared across every connector instance, holding one httpx client.
+    """
+    global _credential_provider
+    if _credential_provider is None:
+        import httpx
+        from pansoph_connector_sdk import CredentialProvider
+
+        _credential_provider = CredentialProvider(build_secret_store(), httpx.AsyncClient())
+    return _credential_provider

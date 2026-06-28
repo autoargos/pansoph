@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -34,6 +34,7 @@ from .auth_types import (
     AccessToken,
     AuthError,
     AuthRequirement,
+    GrantType,
     ReauthRequired,
     SecretStore,
     Sleeper,
@@ -261,6 +262,10 @@ class CredentialProvider:
         shapes from auth_types). The minter resolves secrets just-in-time, builds
         and POSTs the token request, and returns an `AccessToken`.
         """
+        if requirement.grant is GrantType.STATIC:
+            # A STATIC grant has no token endpoint: the stored value is the token.
+            return await self._static_token(requirement)
+
         from .auth_minters import minter_for
 
         minter: Minter = minter_for(requirement.grant)
@@ -274,6 +279,26 @@ class CredentialProvider:
             set_refresh_token=lambda value: self._store_rotated_refresh_token(
                 tenant_id, requirement, entry, value
             ),
+        )
+
+    async def _static_token(self, requirement: AuthRequirement) -> AccessToken:
+        """Serve a long-lived token (a PAT or API token) straight from the store.
+
+        A STATIC grant has no token endpoint: the stored value IS the bearer token
+        (a github fine-grained PAT, an Atlassian API token, a Notion internal token).
+        It is cached with a far-future expiry so the hot path serves it without
+        re-resolving; a connector that rotates the token re-provisions it in the
+        store, and the next sync picks up the new value when the cache lapses.
+        """
+        ref = requirement.secret_refs["token"]
+        raw = await self._secrets.get_secret(ref.tenant_id, ref.name)
+        if raw is None:
+            raise ReauthRequired(
+                f"static token {ref.tenant_id}/{ref.name} is not in the secret store"
+            )
+        return AccessToken(
+            value=raw.decode("utf-8"),
+            expires_at=self._clock() + timedelta(days=3650),
         )
 
     async def _store_rotated_refresh_token(

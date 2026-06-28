@@ -305,7 +305,30 @@ async def run_instance(manager: ConnectorManager, instance: dict[str, Any]) -> d
 
 def _build_connector(instance: dict[str, Any]) -> Any:
     cls = load_adapter("pansoph.connectors", instance["connector"])
-    return cls(instance["id"], instance["config"])
+    connector = cls(instance["id"], instance["config"])
+    _attach_auth(connector, instance["tenant_id"])
+    return connector
+
+
+def _attach_auth(connector: Any, tenant_id: str, provider: Any = None) -> None:
+    """Give a connector a refreshing TokenSource if it declares an AuthRequirement.
+
+    Backward compatible by construction: a connector that does not expose
+    auth_requirement (or whose auth_requirement returns None) is left untouched and
+    keeps using its own config-based auth, so this cannot break an existing
+    connector. A connector that opts in receives connector.token_source, bound to the
+    configured secret store and the process-wide credential provider, and calls
+    get_access_token() per request. The provider is injectable for tests.
+    """
+    get_req = getattr(connector, "auth_requirement", None)
+    if get_req is None:
+        return
+    requirement = get_req()
+    if requirement is None:
+        return
+    if provider is None:
+        provider = assembly.build_credential_provider()
+    connector.token_source = provider.token_source(tenant_id, requirement)
 
 
 async def health(dsn: str) -> dict[str, Any]:

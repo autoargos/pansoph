@@ -551,3 +551,28 @@ def _refresh_req() -> AuthRequirement:
         },
         extra={"client_id": "cid"},
     )
+
+
+# ---------------------------------------------------------------------------
+# STATIC: a long-lived token served from the store, never minted
+# ---------------------------------------------------------------------------
+
+
+async def test_static_grant_serves_token_from_store_without_minting() -> None:
+    store = FakeSecretStore()
+    await store.set_secret(TENANT, "pat", b"ghp_secret")
+    clock = FixedClock(datetime(2026, 6, 26, 12, 0, 0, tzinfo=UTC))
+    provider, client = _provider(store, clock=clock)
+
+    req = AuthRequirement(
+        grant=GrantType.STATIC,
+        token_url="",
+        secret_refs={"token": SecretRef(TENANT, "pat")},
+    )
+    token = await provider.token_source(TENANT, req).get_access_token()
+
+    assert token.value == "ghp_secret"
+    # Cached with a far-future expiry, never POSTed to a token endpoint.
+    assert token.expires_at is not None
+    assert token.expires_at > clock.now
+    await client.aclose()
