@@ -12,6 +12,7 @@ import os
 from typing import Any
 
 from .registry import load_adapter
+from .secrets import PostgresSecretBackend
 
 
 def _env(name: str, default: str = "") -> str:
@@ -91,7 +92,11 @@ _IDENTITY_KWARGS: dict[str, Any] = {
 _SECRET_KWARGS: dict[str, Any] = {
     # Envelope encryption, root-key based, no external service. The root key is
     # supplied as raw bytes from the environment (an age key or a KMS export).
-    "envelope": lambda: {"root_key": _env("PANSOPH_ENVELOPE_ROOT_KEY").encode("utf-8")},
+    "envelope": lambda: {
+        "root_key": _env("PANSOPH_ENVELOPE_ROOT_KEY").encode("utf-8"),
+        # Durable Postgres backend so sealed secrets survive an agora restart.
+        "backend": PostgresSecretBackend(_postgres_dsn()),
+    },
     # OpenBao (the open-source Vault). Self-persisting and natively async, the
     # production default for centralized, audited, rotatable secret storage.
     "openbao": lambda: {

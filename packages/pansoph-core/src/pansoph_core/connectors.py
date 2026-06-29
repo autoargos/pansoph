@@ -22,6 +22,7 @@ from pansoph_ingestion.pipeline import IngestionPipeline
 
 from . import assembly
 from .registry import load_adapter
+from .secrets import resolve_config, seal_config, secret_handle
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS connector_instances (
@@ -110,6 +111,11 @@ class ConnectorManager:
         validate_connector_config(connector, instance_id, config)
         if scope_type not in _SCOPE_TYPES:
             raise ValueError(f"scope_type must be one of {sorted(_SCOPE_TYPES)}")
+
+        # Seal the connector's declared secret fields into the secret store, replacing them
+        # in the persisted config with handles. The config column never holds a plaintext
+        # credential. Connectors that declare no secret fields are untouched.
+        config = await _seal_instance_secrets(connector, instance_id, tenant_id, config)
 
         conn = await self._conn()
         try:
@@ -275,6 +281,8 @@ class ConnectorManager:
 async def run_instance(manager: ConnectorManager, instance: dict[str, Any]) -> dict[str, Any]:
     """Run one connector instance through the ingestion pipeline and record the run."""
     run_id = await manager.record_run_start(instance["id"])
+    # Resolve any sealed secret handles in the config to plaintext for this run only.
+    instance = {**instance, "config": await _resolved_config(instance)}
     parser = assembly.build_parser()
     embedder = assembly.build_embedder()
     vector = assembly.build_vector_store()
@@ -329,6 +337,41 @@ def _attach_auth(connector: Any, tenant_id: str, provider: Any = None) -> None:
     if provider is None:
         provider = assembly.build_credential_provider()
     connector.token_source = provider.token_source(tenant_id, requirement)
+
+
+def _connector_secret_keys(connector: str) -> tuple[str, ...]:
+    """The secret-kind field keys a connector declares in its ConnectorSpec, or () when it
+    declares no spec (the transitional case until every connector adopts one)."""
+    cls = load_adapter("pansoph.connectors", connector)
+    spec_fn = getattr(cls, "spec", None)
+    if spec_fn is None:
+        return ()
+    try:
+        return tuple(spec_fn().secret_keys())
+    except Exception:  # noqa: BLE001  a missing or old spec must never block creation
+        return ()
+
+
+async def _seal_instance_secrets(
+    connector: str, instance_id: str, tenant_id: str, config: dict[str, Any]
+) -> dict[str, Any]:
+    """Seal a connector's declared secrets into the secret store and return the config to
+    persist. No-op (no secret store built) when the connector declares no secret fields."""
+    secret_keys = _connector_secret_keys(connector)
+    if not secret_keys:
+        return config
+    return await seal_config(
+        assembly.build_secret_store(), tenant_id, instance_id, config, secret_keys
+    )
+
+
+async def _resolved_config(instance: dict[str, Any]) -> dict[str, Any]:
+    """Resolve sealed secret handles in an instance's config to plaintext for one run.
+    No-op when the config carries no handles (legacy or secret-free instances)."""
+    config = instance.get("config") or {}
+    if not any(secret_handle(v) is not None for v in config.values()):
+        return config
+    return await resolve_config(assembly.build_secret_store(), instance["tenant_id"], config)
 
 
 async def health(dsn: str) -> dict[str, Any]:
