@@ -34,3 +34,7 @@ data/
 # Editor
 .idea/
 .vscode/
+
+# Local connector working log + file secrets (never committed)
+docs/connectors/results.md
+.secrets/
