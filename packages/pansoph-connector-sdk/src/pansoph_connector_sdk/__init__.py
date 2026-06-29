@@ -22,6 +22,7 @@ from .contract import (
     ValidationResult,
 )
 from .memory import InMemoryConnector
+from .spec import ConfigField, ConnectorSpec, FieldKind, looks_like_credential
 from .verify.engine import ConformanceResult, run_conformance
 
 __all__ = [
@@ -33,6 +34,11 @@ __all__ = [
     "assert_conforms",
     "run_conformance",
     "ConformanceResult",
+    # Connector config spec (onboarding + secret sealing).
+    "ConnectorSpec",
+    "ConfigField",
+    "FieldKind",
+    "looks_like_credential",
     # Auth subsystem (auto-refresh credentials).
     "AccessToken",
     "AuthError",
