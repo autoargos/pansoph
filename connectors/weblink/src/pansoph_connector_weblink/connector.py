@@ -10,7 +10,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -25,6 +32,36 @@ class WeblinkConnector:
             name="weblink",
             auth=AuthScheme.none,
             capabilities=Capabilities(slim_listing=True),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="weblink",
+            title="Public web links",
+            description="Ingest public web pages over HTTPS. No credentials needed.",
+            fields=(
+                ConfigField(
+                    key="urls",
+                    label="URLs",
+                    kind=FieldKind.LIST,
+                    help="Absolute http(s) URLs to ingest, one per line.",
+                ),
+                ConfigField(
+                    key="public",
+                    label="Public to the whole tenant",
+                    kind=FieldKind.BOOL,
+                    required=False,
+                    help="Expose ingested pages to everyone in the tenant.",
+                ),
+                ConfigField(
+                    key="allow_groups",
+                    label="Allowed groups",
+                    kind=FieldKind.LIST,
+                    required=False,
+                    help="Groups allowed to read these pages.",
+                ),
+            ),
         )
 
     def _acl(self) -> AccessControl:

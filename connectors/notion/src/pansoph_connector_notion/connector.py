@@ -56,7 +56,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 _API_VERSION = "2025-09-03"
@@ -87,6 +94,42 @@ class NotionConnector:
                 permission_sync=False,
                 deletions=False,
                 slim_listing=True,
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="notion",
+            title="Notion",
+            description="Ingest pages and databases shared with a Notion internal integration.",
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="Integration token",
+                    kind=FieldKind.SECRET,
+                    help="Notion internal integration token. Sealed in the secret store.",
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://api.notion.com",
+                    help="Override only for a proxy or self-managed gateway.",
+                ),
+                ConfigField(
+                    key="public",
+                    label="Public to the whole tenant",
+                    kind=FieldKind.BOOL,
+                    required=False,
+                ),
+                ConfigField(
+                    key="allow_groups", label="Allowed groups", kind=FieldKind.LIST, required=False
+                ),
+                ConfigField(
+                    key="allow_users", label="Allowed users", kind=FieldKind.LIST, required=False
+                ),
             ),
         )
 
