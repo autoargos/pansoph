@@ -134,6 +134,11 @@ class JiraConnector:
         self._api_token: str = cfg.get("api_token", "")
         self._oauth_token: str = cfg.get("oauth_token", "")
         self._project_key: str = cfg.get("project_key", "")
+        # The ACL is project level (the project Browse role), so it is constant for
+        # every issue in a sync. A connector instance lives for exactly one sync run
+        # (the runtime builds a fresh instance per sync), so caching the computed ACL
+        # on the instance is correct and never serves stale data across runs.
+        self._acl_cache: AccessControl | None = None
         self.meta = ConnectorMeta(
             name="jira",
             auth=AuthScheme.api_token,
@@ -286,6 +291,11 @@ class JiraConnector:
         return httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=30.0)
 
     async def _acl(self, client: httpx.AsyncClient) -> AccessControl:
+        # The ACL is project level, so compute it once per sync and reuse it for
+        # every issue. Without this cache every fetched issue re-fetched the project
+        # role, doubling the call count and risking the Atlassian rate limit mid-sync.
+        if self._acl_cache is not None:
+            return self._acl_cache
         resp = await client.get(f"/rest/api/3/project/{self._project_key}/role/{_BROWSE_ROLE_ID}")
         resp.raise_for_status()
         actors = resp.json().get("actors", [])
@@ -301,8 +311,9 @@ class JiraConnector:
             user = actor.get("actorUser")
             if user and user.get("accountId"):
                 allow_users.append(user["accountId"])
-        return AccessControl(
+        self._acl_cache = AccessControl(
             allow_groups=allow_groups,
             allow_users=allow_users,
             principal_ns=self.instance_id,
         )
+        return self._acl_cache

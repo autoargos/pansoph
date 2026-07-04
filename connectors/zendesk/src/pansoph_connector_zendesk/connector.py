@@ -87,6 +87,14 @@ class ZendeskConnector:
         # A test may pin the base URL directly. Otherwise it is built from the
         # configured subdomain so the host is {subdomain}.zendesk.com.
         self._base_url: str = cfg.get("base_url") or (f"https://{self._subdomain}.zendesk.com")
+        # A user segment's reach is constant for the whole sync run, and many
+        # articles share the same segment id. Cache the computed ACL per segment id
+        # (None for a public article) so the segment lookup runs once per distinct
+        # segment instead of once per article. A connector instance lives for exactly
+        # one sync run (the runtime builds a fresh instance per sync), so this never
+        # serves stale reach across runs. The cached ACL equals what a fresh fetch
+        # would compute; only the number of GET user_segments calls changes.
+        self._acl_cache: dict[Any, AccessControl] = {}
         self.meta = ConnectorMeta(
             name="zendesk",
             auth=AuthScheme.api_token,
@@ -228,9 +236,17 @@ class ZendeskConnector:
         return DocRef(source_doc_id=source_doc_id, instance_id=self.instance_id)
 
     async def _acl(self, client: httpx.AsyncClient, user_segment_id: Any) -> AccessControl:
+        # The segment lookup depends only on user_segment_id, and a segment's reach
+        # is fixed for the whole sync run, so cache the computed ACL per segment id
+        # and reuse it. Many articles share a segment, so this avoids refetching the
+        # same /user_segments/{id}.json for every article in that segment.
+        if user_segment_id in self._acl_cache:
+            return self._acl_cache[user_segment_id]
         ns = self.instance_id
         if user_segment_id is None:
-            return AccessControl(public=True, principal_ns=ns)
+            acl = AccessControl(public=True, principal_ns=ns)
+            self._acl_cache[user_segment_id] = acl
+            return acl
         resp = await client.get(f"/api/v2/help_center/user_segments/{user_segment_id}.json")
         resp.raise_for_status()
         segment = resp.json()["user_segment"]
@@ -246,4 +262,6 @@ class ZendeskConnector:
             allow_groups.append("signed_in")
         allow_groups.extend(f"group:{g}" for g in group_ids)
         allow_groups.extend(f"org:{o}" for o in organization_ids)
-        return AccessControl(allow_groups=allow_groups, principal_ns=ns)
+        acl = AccessControl(allow_groups=allow_groups, principal_ns=ns)
+        self._acl_cache[user_segment_id] = acl
+        return acl
