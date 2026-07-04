@@ -30,10 +30,12 @@ def test_chunking_keeps_small_sections_together_and_splits_on_budget() -> None:
         Section(text="gamma " * 200),
     ]
     chunks = chunk_sections(sections, target_tokens=50)
-    # The two small sections fit in one chunk; the oversized one stands alone.
-    assert len(chunks) == 2
+    # The two small sections fit in one chunk; the oversized section is split into bounded
+    # pieces (no chunk exceeds the target) rather than becoming one giant chunk, and no
+    # content is lost. Splitting oversized sections is the fix for the raw-page mega-chunk.
     assert "alpha" in chunks[0] and "beta" in chunks[0]
-    assert "gamma" in chunks[1]
+    assert all(len(c.split()) <= 50 for c in chunks)
+    assert sum(c.count("gamma") for c in chunks) == 200
 
 
 def test_document_id_is_stable_and_namespaced() -> None:
