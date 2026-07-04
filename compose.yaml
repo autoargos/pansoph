@@ -168,6 +168,10 @@ services:
     image: cyproto/pansoph-agora:dev
     profiles: ["core"]
     env_file: [.env]
+    # Reach a host-run model server (for example Ollama at host.docker.internal:11434).
+    # Docker Desktop provides this name automatically; host-gateway adds it on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     depends_on:
@@ -202,6 +206,9 @@ services:
     image: cyproto/pansoph-scribe:dev
     profiles: ["workers"]
     env_file: [.env]
+    # Reach a host-run model server (for example Ollama at host.docker.internal:11434).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres: { condition: service_healthy }
 
