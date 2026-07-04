@@ -1,7 +1,9 @@
 """The weblink connector: ingest any directly-fetchable public URL.
 
 No credentials, no auth bypass: it fetches only openly reachable URLs. Each configured
-URL becomes one document, with the ACL set from config (public by default).
+URL becomes one document, with the ACL set from config (public by default). Every fetch
+carries a descriptive User-Agent that identifies pansoph and gives a contact URL, which
+many sites now require (see DEFAULT_USER_AGENT).
 """
 
 from __future__ import annotations
@@ -20,6 +22,17 @@ from pansoph_connector_sdk import (
 )
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
+# A polite, honest User-Agent. Wikimedia and a growing number of sites enforce a
+# User-Agent policy and return 403 for generic or unidentified bot agents (and for
+# browser-spoof strings). The correct, non-bypass answer (pansoph CLAUDE.md section 5:
+# identify yourself, no anti bot) is a descriptive agent that names the software and
+# gives a contact URL. Operators should override user_agent with their own contact, per
+# https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy
+DEFAULT_USER_AGENT = "pansoph/0.1 (+https://github.com/autoargos/pansoph)"
+
+# A normal browser Accept. Some origins 406/403 a request that omits it.
+_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
 
 class WeblinkConnector:
     def __init__(self, instance_id: str, config: dict[str, Any] | None = None) -> None:
@@ -28,6 +41,8 @@ class WeblinkConnector:
         self._urls: list[str] = list(cfg.get("urls", []))
         self._public: bool = bool(cfg.get("public", True))
         self._allow_groups: list[str] = list(cfg.get("allow_groups", []))
+        # Operators can supply their own contact string; fall back to the honest default.
+        self._user_agent: str = str(cfg.get("user_agent") or DEFAULT_USER_AGENT)
         self.meta = ConnectorMeta(
             name="weblink",
             auth=AuthScheme.none,
@@ -61,6 +76,17 @@ class WeblinkConnector:
                     required=False,
                     help="Groups allowed to read these pages.",
                 ),
+                ConfigField(
+                    key="user_agent",
+                    label="User-Agent",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder=DEFAULT_USER_AGENT,
+                    help=(
+                        "Sent on every fetch. Some sites (Wikipedia) reject generic bot "
+                        "agents with 403; set a descriptive agent with your contact URL."
+                    ),
+                ),
             ),
         )
 
@@ -79,8 +105,9 @@ class WeblinkConnector:
             yield DocRef(source_doc_id=url, instance_id=self.instance_id), ""
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
+        headers = {"user-agent": self._user_agent, "accept": _ACCEPT}
         async with httpx.AsyncClient(
-            timeout=30.0, follow_redirects=True, headers={"user-agent": "pansoph-weblink"}
+            timeout=30.0, follow_redirects=True, headers=headers
         ) as client:
             resp = await client.get(ref.source_doc_id)
             resp.raise_for_status()
