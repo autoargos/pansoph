@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="pansoph aperture mark">
+  <title>pansoph - aperture mark</title>
+  <!--
+    Iris / aperture that also reads as a lowercase "p".
+    Six shutter blades spiral around a small hexagonal pupil; blades alternate
+    ink and accent so the eye reads a rotating diaphragm. The open pupil means
+    "you see exactly what you are allowed to see" (access-aware). A rounded stem
+    drops from the lower-left of the ring to complete the "p".
+    Grid: 128 canvas, iris centered at (64,58), outer ring r=40.
+  -->
+  <!-- p descender stem -->
+  <rect x="21" y="58" width="9" height="52" rx="4.5" fill="#12161F"/>
+
+  <!-- shutter blades -->
+  <g>
+    <path d="M64.00 19.00 A39 39 0 0 1 97.77 38.50 L68.02 45.64 Z" fill="#12161F"/>
+    <path d="M97.77 38.50 A39 39 0 0 1 97.77 77.50 L76.72 55.30 Z" fill="#12161F"/>
+    <path d="M97.77 77.50 A39 39 0 0 1 64.00 97.00 L72.70 67.66 Z" fill="#12161F"/>
+    <path d="M64.00 97.00 A39 39 0 0 1 30.23 77.50 L59.98 70.36 Z" fill="#12161F"/>
+    <path d="M30.23 77.50 A39 39 0 0 1 30.23 38.50 L51.28 60.70 Z" fill="#12161F"/>
+    <path d="M30.23 38.50 A39 39 0 0 1 64.00 19.00 L55.30 48.34 Z" fill="#12161F"/>
+  </g>
+
+  <!-- crisp outer ring holds the mark together at favicon sizes -->
+  <circle cx="64" cy="58" r="40" fill="none" stroke="#12161F" stroke-width="4"/>
+</svg>

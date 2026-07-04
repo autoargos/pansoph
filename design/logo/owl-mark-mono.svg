@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="pansoph owl mark">
+  <title>pansoph - owl mark</title>
+  <!--
+    Abstract owl / eye-of-wisdom monogram.
+    The two big eyes double as two "o"-like apertures; the beak is a downward
+    triangle that also nods to a play button / read cursor. Built from arcs and
+    circles on a symmetric grid (center x=64). Brows are one continuous stroke
+    that forms the owl's face and subtly a "p" bowl on the right eye.
+  -->
+  <!-- head silhouette: a rounded shield -->
+  <path d="M64 16
+           C92 16 108 34 108 62
+           C108 92 90 112 64 112
+           C38 112 20 92 20 62
+           C20 34 36 16 64 16 Z"
+        fill="none" stroke="#12161F" stroke-width="5" stroke-linejoin="round"/>
+
+  <!-- brow / ear-tufts: continuous stroke sweeping over both eyes -->
+  <path d="M30 52 C34 34 48 30 56 44 M98 52 C94 34 80 30 72 44"
+        fill="none" stroke="#12161F" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- eyes: outer rings (the two apertures) -->
+  <circle cx="47" cy="58" r="16" fill="none" stroke="#12161F" stroke-width="5"/>
+  <circle cx="81" cy="58" r="16" fill="none" stroke="#12161F" stroke-width="5"/>
+
+  <!-- pupils: one ink, one accent = seeing / access-aware -->
+  <circle cx="47" cy="58" r="6.5" fill="#12161F"/>
+  <circle cx="81" cy="58" r="6.5" fill="#12161F"/>
+
+  <!-- beak: downward triangle -->
+  <path d="M58 74 L70 74 L64 88 Z" fill="#12161F"/>
+</svg>

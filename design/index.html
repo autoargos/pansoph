@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>pansoph &middot; Design Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #f4f4f2;
+    --surface: #ffffff;
+    --border: #e6e6e2;
+    --border-strong: #d8d8d3;
+    --ink: #17171a;
+    --ink-soft: #4b4b52;
+    --ink-faint: #8a8a92;
+    --shadow-sm: 0 1px 2px rgba(20, 20, 24, 0.04), 0 2px 8px rgba(20, 20, 24, 0.04);
+    --shadow-lg: 0 18px 48px rgba(20, 20, 24, 0.14), 0 4px 12px rgba(20, 20, 24, 0.06);
+    --radius: 20px;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+  body {
+    font-family: "Inter", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(1100px 620px at 12% -8%, rgba(91, 91, 245, 0.06), transparent 60%),
+      radial-gradient(900px 560px at 92% 4%, rgba(16, 185, 129, 0.05), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 88px 32px 120px;
+  }
+
+  /* Header */
+  header { margin-bottom: 64px; }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 7px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .eyebrow .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+  }
+
+  h1 {
+    margin-top: 24px;
+    font-size: clamp(40px, 6vw, 66px);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.02;
+  }
+
+  h1 .accent {
+    background: linear-gradient(100deg, #5b5bf5, #2fbfa0 60%, #e5b769);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .lede {
+    margin-top: 22px;
+    max-width: 620px;
+    font-size: 18px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+  }
+
+  /* Section titles */
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-head h2 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+
+  .section-head .count {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+  }
+
+  /* Cards */
+  .card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 30px 30px 26px;
+    text-decoration: none;
+    color: inherit;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    transition: transform 0.45s var(--ease), box-shadow 0.45s var(--ease), border-color 0.45s var(--ease);
+  }
+
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    height: 4px;
+    background: var(--card-accent, #ccc);
+    opacity: 0.9;
+    transition: height 0.45s var(--ease);
+  }
+
+  .card:hover {
+    transform: translateY(-6px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--border-strong);
+  }
+
+  .card:hover::before { height: 6px; }
+
+  .card:focus-visible {
+    outline: 2px solid #5b5bf5;
+    outline-offset: 3px;
+  }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 6px;
+  }
+
+  .card-name {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .card-arrow {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    color: var(--ink-soft);
+    transition: transform 0.4s var(--ease), background 0.4s var(--ease), color 0.4s var(--ease), border-color 0.4s var(--ease);
+  }
+
+  .card:hover .card-arrow {
+    transform: rotate(-45deg);
+    background: var(--card-accent, #17171a);
+    color: #fff;
+    border-color: transparent;
+  }
+
+  .card-desc {
+    margin-top: 14px;
+    font-size: 15px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+    max-width: 40ch;
+  }
+
+  /* Swatches */
+  .swatches {
+    display: flex;
+    gap: 10px;
+    margin-top: 26px;
+    padding-top: 22px;
+    border-top: 1px solid var(--border);
+  }
+
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .swatch .chip {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    box-shadow: inset 0 0 0 1px rgba(20, 20, 24, 0.09);
+    transition: transform 0.3s var(--ease);
+  }
+
+  .card:hover .swatch .chip { transform: translateY(-2px); }
+
+  .swatch .hex {
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    text-transform: uppercase;
+  }
+
+  /* Logo (single wide) card */
+  .logo-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 32px;
+    padding: 34px 36px;
+    --card-accent: linear-gradient(90deg, #5b5bf5, #2fbfa0, #e5b769);
+  }
+
+  .logo-card .logo-text { max-width: 560px; }
+
+  .logo-card .card-name { font-size: 24px; }
+
+  .logo-card .card-desc { margin-top: 10px; }
+
+  .logo-marks {
+    display: flex;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .mark {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    font-size: 24px;
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.4s var(--ease);
+  }
+
+  .card:hover .mark:nth-child(1) { transform: translateY(-4px) rotate(-4deg); }
+  .card:hover .mark:nth-child(2) { transform: translateY(-6px); }
+  .card:hover .mark:nth-child(3) { transform: translateY(-4px) rotate(4deg); }
+
+  .mark.m1 { background: linear-gradient(135deg, #5b5bf5, #7c5cff); }
+  .mark.m2 { background: linear-gradient(135deg, #0f6e6e, #2fbfa0); }
+  .mark.m3 { background: linear-gradient(135deg, #1a1614, #4b4b52); color: #e5b769; }
+
+  /* Footer */
+  footer {
+    margin-top: 80px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+
+  footer .brand { font-weight: 700; color: var(--ink-soft); letter-spacing: -0.01em; }
+
+  .section + .section { margin-top: 72px; }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 56px 20px 80px; }
+    .grid { grid-template-columns: 1fr; }
+    .logo-card { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <span class="eyebrow"><span class="dot"></span>Design Review</span>
+      <h1>Choose the look for <span class="accent">pansoph</span>.</h1>
+      <p class="lede">Four full UI directions and a logo gallery, ready to review. Open any option to see the mockup in full, then pick the one that feels right.</p>
+    </header>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>UI Directions</h2>
+        <span class="count">4 options</span>
+      </div>
+
+      <div class="grid">
+        <!-- Scholar -->
+        <a class="card" href="./mockups/scholar.html" style="--card-accent: #0f6e6e;">
+          <div class="card-top">
+            <span class="card-name">Scholar</span>
+            <span class="card-arrow" aria-hidden="true">&rarr;</span>
+          </div>
+          <p class="card-desc">Warm paper and ink with a scholarly teal. Calm, readable, and editorial.</p>
+          <div class="swatches">
+            <div class="swatch"><span class="chip" style="background:#FAF7F2"></span><span class="hex">#FAF7F2</span></div>
+            <div class="swatch"><span class="chip" style="background:#1A1614"></span><span class="hex">#1A1614</span></div>
+            <div class="swatch"><span class="chip" style="background:#0F6E6E"></span><span class="hex">#0F6E6E</span></div>
+          </div>
+        </a>
+
+        <!-- Obsidian -->
+        <a class="card" href="./mockups/obsidian.html" style="--card-accent: #7c5cff;">
+          <div class="card-top">
+            <span class="card-name">Obsidian</span>
+            <span class="card-arrow" aria-hidden="true">&rarr;</span>
+          </div>
+          <p class="card-desc">Deep dark surfaces lit by electric violet. Focused, modern, and low-glare.</p>
+          <div class="swatches">
+            <div class="swatch"><span class="chip" style="background:#0B0B0F"></span><span class="hex">#0B0B0F</span></div>
+            <div class="swatch"><span class="chip" style="background:#16161E"></span><span class="hex">#16161E</span></div>
+            <div class="swatch"><span class="chip" style="background:#7C5CFF"></span><span class="hex">#7C5CFF</span></div>
+          </div>
+        </a>
+
+        <!-- Aurora -->
+        <a class="card" href="./mockups/aurora.html" style="--card-accent: #2fbfa0;">
+          <div class="card-top">
+            <span class="card-name">Aurora</span>
+            <span class="card-arrow" aria-hidden="true">&rarr;</span>
+          </div>
+          <p class="card-desc">Midnight green with gold and teal accents. Rich, premium, and atmospheric.</p>
+          <div class="swatches">
+            <div class="swatch"><span class="chip" style="background:#0A1613"></span><span class="hex">#0A1613</span></div>
+            <div class="swatch"><span class="chip" style="background:#E5B769"></span><span class="hex">#E5B769</span></div>
+            <div class="swatch"><span class="chip" style="background:#2FBFA0"></span><span class="hex">#2FBFA0</span></div>
+          </div>
+        </a>
+
+        <!-- Luminous -->
+        <a class="card" href="./mockups/luminous.html" style="--card-accent: #5b5bf5;">
+          <div class="card-top">
+            <span class="card-name">Luminous</span>
+            <span class="card-arrow" aria-hidden="true">&rarr;</span>
+          </div>
+          <p class="card-desc">Bright white with indigo and emerald. Crisp, airy, and confidently minimal.</p>
+          <div class="swatches">
+            <div class="swatch"><span class="chip" style="background:#FFFFFF"></span><span class="hex">#FFFFFF</span></div>
+            <div class="swatch"><span class="chip" style="background:#5B5BF5"></span><span class="hex">#5B5BF5</span></div>
+            <div class="swatch"><span class="chip" style="background:#10B981"></span><span class="hex">#10B981</span></div>
+          </div>
+        </a>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Identity</h2>
+        <span class="count">Gallery</span>
+      </div>
+
+      <a class="card logo-card" href="./logo/index.html">
+        <div class="logo-text">
+          <div class="card-top">
+            <span class="card-name">Logo Gallery</span>
+          </div>
+          <p class="card-desc">Explore the full set of pansoph logo concepts, marks, and wordmark treatments side by side.</p>
+        </div>
+        <div class="logo-marks">
+          <span class="mark m1">p</span>
+          <span class="mark m2">p</span>
+          <span class="mark m3">p</span>
+        </div>
+      </a>
+    </section>
+
+    <footer>
+      <span class="brand">pansoph</span>
+      <span>Review the options, then choose a direction.</span>
+    </footer>
+  </div>
+</body>
+</html>

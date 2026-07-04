@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pansoph &middot; logo concepts</title>
+<style>
+  :root{
+    --ink:#12161F;
+    --accent:#1FA6A0;
+    --paper:#F4F4F5;
+    --line:#E4E4E7;
+    --muted:#71717A;
+    --muted-dark:#9AA0AA;
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    color:var(--ink);
+    background:#FAFAFB;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:64px 32px 96px}
+
+  /* header */
+  header{margin-bottom:56px}
+  .eyebrow{
+    font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px;
+  }
+  h1{font-size:40px;font-weight:650;letter-spacing:-.02em;margin:0 0 12px}
+  header p{font-size:16px;color:var(--muted);max-width:60ch;margin:0}
+  .palette{display:flex;gap:10px;margin-top:24px;flex-wrap:wrap}
+  .chip{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .chip i{width:16px;height:16px;border-radius:5px;display:inline-block;border:1px solid rgba(0,0,0,.08)}
+
+  /* concept card */
+  .concept{
+    background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+    margin-bottom:40px;overflow:hidden;
+  }
+  .concept-head{
+    padding:28px 32px 24px;border-bottom:1px solid var(--line);
+    display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap;
+  }
+  .concept-head .num{
+    font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--accent);
+    text-transform:uppercase;margin:0 0 6px;
+  }
+  .concept-head h2{font-size:24px;font-weight:640;letter-spacing:-.01em;margin:0 0 8px}
+  .concept-head p{margin:0;color:var(--muted);font-size:14.5px;max-width:64ch}
+  .concept-head .note{margin-top:10px;font-size:12.5px;color:var(--muted)}
+  .concept-head .note code{
+    background:#F4F4F5;padding:1px 6px;border-radius:5px;font-size:12px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+
+  /* swatch grid: light + dark side by side */
+  .swatches{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  @media (max-width:760px){.swatches{grid-template-columns:1fr}}
+  .swatch{padding:34px 32px}
+  .swatch.light{background:#fff}
+  .swatch.dark{background:var(--ink)}
+  .swatch + .swatch{border-left:1px solid var(--line)}
+  @media (max-width:760px){.swatch + .swatch{border-left:0;border-top:1px solid #23272F}}
+  .swatch .tag{
+    font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+    margin:0 0 22px;
+  }
+  .swatch.light .tag{color:var(--muted)}
+  .swatch.dark .tag{color:var(--muted-dark)}
+
+  /* rows inside a swatch */
+  .block{margin-bottom:30px}
+  .block:last-child{margin-bottom:0}
+  .block > .lbl{
+    font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+    margin:0 0 14px;
+  }
+  .swatch.light .lbl{color:#A1A1AA}
+  .swatch.dark .lbl{color:#6B7280}
+
+  .mark-row{display:flex;align-items:center;gap:28px;flex-wrap:wrap}
+  .lockup-row img{display:block}
+  .favicons{display:flex;align-items:flex-end;gap:22px}
+  .favicons figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:7px}
+  .favicons figcaption{font-size:10px;color:#A1A1AA}
+  .swatch.dark .favicons figcaption{color:#6B7280}
+  .fav-frame{
+    display:flex;align-items:center;justify-content:center;
+    border-radius:6px;
+  }
+  .swatch.light .fav-frame{background:#fff;box-shadow:0 0 0 1px #ECECEE inset}
+  .swatch.dark .fav-frame{background:#1B2029;box-shadow:0 0 0 1px #2A2F3A inset}
+  .fav-frame.s16{width:16px;height:16px}
+  .fav-frame.s32{width:32px;height:32px}
+  .fav-frame.s48{width:48px;height:48px}
+  .fav-frame img{display:block}
+
+  img{image-rendering:auto}
+
+  footer{margin-top:56px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:24px}
+  footer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#F4F4F5;padding:1px 6px;border-radius:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">pansoph &middot; brand exploration</p>
+    <h1>Four logo concepts</h1>
+    <p>
+      <strong>pansoph</strong> (from <em>pansophy</em>, all-encompassing wisdom) is an
+      open-source, access-aware knowledge platform; the app is <strong>lens</strong>.
+      Each concept below is shown as a standalone mark, a horizontal lockup, a row of
+      favicon sizes, and a single-color version, on both a light and a dark swatch.
+      All artwork is pure vector SVG with no external font dependency.
+    </p>
+    <div class="palette">
+      <span class="chip"><i style="background:#12161F"></i> ink &nbsp;<code style="font-size:11px;background:none;color:inherit">#12161F</code></span>
+      <span class="chip"><i style="background:#1FA6A0"></i> accent &nbsp;<code style="font-size:11px;background:none;color:inherit">#1FA6A0</code></span>
+      <span class="chip"><i style="background:#F4F4F5"></i> paper &nbsp;<code style="font-size:11px;background:none;color:inherit">#F4F4F5</code></span>
+    </div>
+  </header>
+
+  <!-- ============ CONCEPT 1: APERTURE ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div>
+        <p class="num">Concept 01</p>
+        <h2>aperture</h2>
+        <p>
+          A minimal iris that also reads as a lowercase <strong>p</strong>: shutter
+          blades spiral around an open pupil, with a stem dropping from the ring.
+          The meaning is baked into the geometry. You see exactly what you are
+          allowed to see (access-aware), and it ties directly to the <strong>lens</strong> app.
+        </p>
+      </div>
+    </div>
+    <div class="swatches">
+      <div class="swatch light">
+        <p class="tag">On light</p>
+        <div class="block"><p class="lbl">Mark</p><div class="mark-row"><img src="aperture-mark.svg" width="80" height="80" alt="aperture mark"></div></div>
+        <div class="block"><p class="lbl">Lockup</p><div class="lockup-row"><img src="aperture-lockup.svg" height="52" alt="aperture lockup"></div></div>
+        <div class="block"><p class="lbl">Favicon</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="aperture-mark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="aperture-mark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="aperture-mark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="aperture-mark-mono.svg" width="56" height="56" alt="aperture mono"><img src="aperture-lockup-mono.svg" height="40" alt="aperture lockup mono"></div></div>
+      </div>
+      <div class="swatch dark">
+        <p class="tag">On dark</p>
+        <div class="block"><p class="lbl">Mark</p><div class="mark-row"><img src="aperture-mark-ondark.svg" width="80" height="80" alt="aperture mark on dark"></div></div>
+        <div class="block"><p class="lbl">Lockup</p><div class="lockup-row"><img src="aperture-lockup-ondark.svg" height="52" alt="aperture lockup on dark"></div></div>
+        <div class="block"><p class="lbl">Favicon</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="aperture-mark-ondark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="aperture-mark-ondark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="aperture-mark-ondark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="aperture-mark-mono-ondark.svg" width="56" height="56" alt="aperture mono on dark"><img src="aperture-lockup-mono-ondark.svg" height="40" alt="aperture lockup mono on dark"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CONCEPT 2: CONSTELLATION ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div>
+        <p class="num">Concept 02</p>
+        <h2>constellation</h2>
+        <p>
+          Linked nodes form a small graph in the silhouette of a lowercase
+          <strong>p</strong>, a spine of nodes for the stem and a closed loop for the
+          bowl. Many sources unified into one access-controlled knowledge graph;
+          the single accented node is the point of governed access.
+        </p>
+      </div>
+    </div>
+    <div class="swatches">
+      <div class="swatch light">
+        <p class="tag">On light</p>
+        <div class="block"><p class="lbl">Mark</p><div class="mark-row"><img src="constellation-mark.svg" width="80" height="80" alt="constellation mark"></div></div>
+        <div class="block"><p class="lbl">Lockup</p><div class="lockup-row"><img src="constellation-lockup.svg" height="52" alt="constellation lockup"></div></div>
+        <div class="block"><p class="lbl">Favicon</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="constellation-mark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="constellation-mark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="constellation-mark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="constellation-mark-mono.svg" width="56" height="56" alt="constellation mono"><img src="constellation-lockup-mono.svg" height="40" alt="constellation lockup mono"></div></div>
+      </div>
+      <div class="swatch dark">
+        <p class="tag">On dark</p>
+        <div class="block"><p class="lbl">Mark</p><div class="mark-row"><img src="constellation-mark-ondark.svg" width="80" height="80" alt="constellation mark on dark"></div></div>
+        <div class="block"><p class="lbl">Lockup</p><div class="lockup-row"><img src="constellation-lockup-ondark.svg" height="52" alt="constellation lockup on dark"></div></div>
+        <div class="block"><p class="lbl">Favicon</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="constellation-mark-ondark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="constellation-mark-ondark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="constellation-mark-ondark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="constellation-mark-mono-ondark.svg" width="56" height="56" alt="constellation mono on dark"><img src="constellation-lockup-mono-ondark.svg" height="40" alt="constellation lockup mono on dark"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CONCEPT 3: WORDMARK ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div>
+        <p class="num">Concept 03</p>
+        <h2>wordmark</h2>
+        <p>
+          A refined lowercase geometric wordmark with one clever detail: the
+          <strong>o</strong> becomes a lens/aperture, quietly echoing Concept 01 and
+          the <strong>lens</strong> app. Timeless and typographic. The compact aperture
+          tile doubles as an app icon when a symbol is needed.
+        </p>
+        <p class="note">
+          Letterforms are drawn from a geometric grotesque (Futura Medium) and
+          <strong>converted to vector paths</strong>, so no font is referenced inside the SVG.
+        </p>
+      </div>
+    </div>
+    <div class="swatches">
+      <div class="swatch light">
+        <p class="tag">On light</p>
+        <div class="block"><p class="lbl">Aperture tile (mark)</p><div class="mark-row"><img src="wordmark-mark.svg" width="80" height="80" alt="wordmark aperture tile"></div></div>
+        <div class="block"><p class="lbl">Wordmark</p><div class="lockup-row"><img src="wordmark-lockup.svg" height="56" alt="pansoph wordmark"></div></div>
+        <div class="block"><p class="lbl">Favicon (tile)</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="wordmark-mark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="wordmark-mark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="wordmark-mark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="wordmark-mark-mono.svg" width="56" height="56" alt="wordmark tile mono"><img src="wordmark-mono.svg" height="42" alt="wordmark mono"></div></div>
+      </div>
+      <div class="swatch dark">
+        <p class="tag">On dark</p>
+        <div class="block"><p class="lbl">Aperture tile (mark)</p><div class="mark-row"><img src="wordmark-mark-ondark.svg" width="80" height="80" alt="wordmark aperture tile on dark"></div></div>
+        <div class="block"><p class="lbl">Wordmark</p><div class="lockup-row"><img src="wordmark-lockup-ondark.svg" height="56" alt="pansoph wordmark on dark"></div></div>
+        <div class="block"><p class="lbl">Favicon (tile)</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="wordmark-mark-ondark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="wordmark-mark-ondark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="wordmark-mark-ondark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="wordmark-mark-mono-ondark.svg" width="56" height="56" alt="wordmark tile mono on dark"><img src="wordmark-mono-ondark.svg" height="42" alt="wordmark mono on dark"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CONCEPT 4: OWL ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div>
+        <p class="num">Concept 04</p>
+        <h2>owl</h2>
+        <p>
+          An abstract owl / eye-of-wisdom monogram. Two eyes double as apertures,
+          one accented to signal seeing with permission; the brow is a single
+          continuous sweep. Memorable and characterful, a touch more playful than
+          the others.
+        </p>
+      </div>
+    </div>
+    <div class="swatches">
+      <div class="swatch light">
+        <p class="tag">On light</p>
+        <div class="block"><p class="lbl">Mark</p><div class="mark-row"><img src="owl-mark.svg" width="80" height="80" alt="owl mark"></div></div>
+        <div class="block"><p class="lbl">Lockup</p><div class="lockup-row"><img src="owl-lockup.svg" height="52" alt="owl lockup"></div></div>
+        <div class="block"><p class="lbl">Favicon</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="owl-mark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="owl-mark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="owl-mark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="owl-mark-mono.svg" width="56" height="56" alt="owl mono"><img src="owl-lockup-mono.svg" height="40" alt="owl lockup mono"></div></div>
+      </div>
+      <div class="swatch dark">
+        <p class="tag">On dark</p>
+        <div class="block"><p class="lbl">Mark</p><div class="mark-row"><img src="owl-mark-ondark.svg" width="80" height="80" alt="owl mark on dark"></div></div>
+        <div class="block"><p class="lbl">Lockup</p><div class="lockup-row"><img src="owl-lockup-ondark.svg" height="52" alt="owl lockup on dark"></div></div>
+        <div class="block"><p class="lbl">Favicon</p>
+          <div class="favicons">
+            <figure><span class="fav-frame s16"><img src="owl-mark-ondark.svg" width="16" height="16" alt=""></span><figcaption>16</figcaption></figure>
+            <figure><span class="fav-frame s32"><img src="owl-mark-ondark.svg" width="32" height="32" alt=""></span><figcaption>32</figcaption></figure>
+            <figure><span class="fav-frame s48"><img src="owl-mark-ondark.svg" width="48" height="48" alt=""></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="block"><p class="lbl">Mono &middot; single color</p><div class="mark-row"><img src="owl-mark-mono-ondark.svg" width="56" height="56" alt="owl mono on dark"><img src="owl-lockup-mono-ondark.svg" height="40" alt="owl lockup mono on dark"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Palette: ink <code>#12161F</code>, accent <code>#1FA6A0</code>, paper <code>#F4F4F5</code>.
+      All marks are grid-aligned, optically balanced SVG. Color and mono variants ship per concept;
+      the mono variant is a single-color version that inherits any app theme by swapping one value.
+      Files live in <code>design/logo/</code>.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>
