@@ -48,7 +48,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -64,6 +71,41 @@ class DropboxConnector:
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=True, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="dropbox",
+            title="Dropbox",
+            description="Ingest files from Dropbox via the HTTP API v2 with an OAuth 2 token.",
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="Access token",
+                    kind=FieldKind.SECRET,
+                    help=(
+                        "Dropbox OAuth 2 bearer token (personal, team, or RBAC scoped). "
+                        "Sealed in the secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="path",
+                    label="Folder path",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="/Team Docs",
+                    help="Folder to list recursively. Leave empty to list from the root.",
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://api.dropboxapi.com",
+                    help="Override only for a proxy or self-managed gateway.",
+                ),
             ),
         )
 

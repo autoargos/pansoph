@@ -31,7 +31,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 _BASE = "https://www.googleapis.com/drive/v3"
@@ -59,6 +66,57 @@ class GoogleDriveConnector:
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
                 incremental=True, permission_sync=True, deletions=True, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="google_drive",
+            title="Google Drive",
+            description=(
+                "Ingest files from a Google Drive folder or shared drive over the Drive v3 API."
+            ),
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="OAuth access token",
+                    kind=FieldKind.SECRET,
+                    help=(
+                        "A Google OAuth2 bearer access token with a read scope "
+                        "(drive.readonly or drive.metadata.readonly). Paste the token; "
+                        "the OAuth consent flow is the operator's step. Sealed in the "
+                        "secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="folder_id",
+                    label="Folder ID",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="0ABcdEFGhijKLMnoPQR",
+                    help=(
+                        "Confine the instance to one folder. Leave blank to ingest all "
+                        "reachable files."
+                    ),
+                ),
+                ConfigField(
+                    key="drive_id",
+                    label="Shared drive ID",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    help="Set to narrow the search to one shared drive. Leave blank for My Drive.",
+                ),
+                ConfigField(
+                    key="query",
+                    label="Drive query",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="trashed=false",
+                    help=(
+                        "A Drive v3 files.list search query. ANDed with the folder filter when set."
+                    ),
+                ),
             ),
         )
 

@@ -43,7 +43,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -60,6 +67,35 @@ class SlackConnector:
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=False, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="slack",
+            title="Slack",
+            description="Ingest Slack channels a bot or user token can reach.",
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="Bearer token",
+                    kind=FieldKind.SECRET,
+                    placeholder="xoxb-... or xoxp-...",
+                    help=(
+                        "Slack bot token (xoxb-) or user token (xoxp-). Sealed in the "
+                        "secret store. Needs channels:read, groups:read, channels:history, "
+                        "and groups:history."
+                    ),
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://slack.com",
+                    help="Override only for a proxy or self-managed gateway.",
+                ),
             ),
         )
 

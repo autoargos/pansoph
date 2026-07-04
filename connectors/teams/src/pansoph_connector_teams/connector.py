@@ -60,7 +60,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -76,6 +83,45 @@ class TeamsConnector:
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=False, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="teams",
+            title="Microsoft Teams",
+            description=(
+                "Ingest Microsoft Teams channel messages via the Microsoft Graph API. "
+                "Paste an app-only OAuth2 access token scoped for the team's tenant."
+            ),
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="Access token",
+                    kind=FieldKind.SECRET,
+                    placeholder="Bearer access token (eyJ0eXAiOi...)",
+                    help=(
+                        "Microsoft Graph app-only OAuth2 access token, sent as "
+                        "Authorization: Bearer <token>. The connector does not mint or "
+                        "refresh it. Sealed in the secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="team_id",
+                    label="Team id",
+                    kind=FieldKind.STRING,
+                    placeholder="19:abc123...@thread.tacv2 or the team GUID",
+                    help="The Entra group id of the team whose channels to ingest.",
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://graph.microsoft.com",
+                    help="Override only for a national cloud or a proxy gateway.",
+                ),
             ),
         )
 

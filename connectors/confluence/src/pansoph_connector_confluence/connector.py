@@ -24,7 +24,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -41,6 +48,44 @@ class ConfluenceConnector:
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
                 incremental=True, permission_sync=True, deletions=True, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="confluence",
+            title="Confluence",
+            description="Ingest Confluence Cloud pages using an Atlassian account and API token.",
+            fields=(
+                ConfigField(
+                    key="base_url",
+                    label="Site base URL",
+                    kind=FieldKind.STRING,
+                    placeholder="https://your-domain.atlassian.net",
+                    help="Your Confluence Cloud site URL. The connector calls /wiki under it.",
+                ),
+                ConfigField(
+                    key="email",
+                    label="Account email",
+                    kind=FieldKind.STRING,
+                    placeholder="you@example.com",
+                    help="Atlassian account email, paired with the API token for HTTP Basic auth.",
+                ),
+                ConfigField(
+                    key="token",
+                    label="API token",
+                    kind=FieldKind.SECRET,
+                    help="Atlassian API token for the account. Sealed in the secret store.",
+                ),
+                ConfigField(
+                    key="space_key",
+                    label="Space key",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="ENG",
+                    help="Limit ingestion to one space. Leave blank to list all reachable pages.",
+                ),
             ),
         )
 

@@ -58,7 +58,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -76,6 +83,43 @@ class SharepointConnector:
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=True, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="sharepoint",
+            title="SharePoint and OneDrive",
+            description=(
+                "Ingest files from a SharePoint document library or a OneDrive drive over "
+                "Microsoft Graph, using an app-only or delegated access token."
+            ),
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="Access token",
+                    kind=FieldKind.SECRET,
+                    help=(
+                        "Microsoft Graph OAuth2 access token (Bearer). The operator mints and "
+                        "refreshes it (client credentials flow, Files.Read.All or Sites.Read.All). "
+                        "Sealed in the secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="drive_id",
+                    label="Drive ID",
+                    kind=FieldKind.STRING,
+                    help="The Graph drive id of the SharePoint library or OneDrive to ingest.",
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="Graph base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://graph.microsoft.com",
+                    help="Override only for a sovereign cloud or a proxy. Stop before /v1.0.",
+                ),
             ),
         )
 

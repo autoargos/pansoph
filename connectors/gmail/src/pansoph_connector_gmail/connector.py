@@ -45,7 +45,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -64,6 +71,55 @@ class GmailConnector:
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=False, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="gmail",
+            title="Gmail",
+            description=(
+                "Ingest a Gmail mailbox with an OAuth 2.0 access token. The mailbox is "
+                "private to its owner, so every message is readable only by that owner."
+            ),
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="OAuth access token",
+                    kind=FieldKind.SECRET,
+                    help=(
+                        "A current Gmail OAuth 2.0 bearer access token. Sent as "
+                        "Authorization: Bearer on every request and sealed in the secret "
+                        "store. pansoph does not run the OAuth flow yet, so paste a token."
+                    ),
+                ),
+                ConfigField(
+                    key="user_email",
+                    label="Mailbox owner email",
+                    kind=FieldKind.STRING,
+                    placeholder="alice@example.com",
+                    help=(
+                        "The mailbox owner. Used as the single ACL principal, since a "
+                        "Gmail mailbox is private to its owner with no per message sharing."
+                    ),
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://gmail.googleapis.com",
+                    help="Override only for a proxy or self-managed gateway.",
+                ),
+                ConfigField(
+                    key="max_results",
+                    label="Page size",
+                    kind=FieldKind.INT,
+                    required=False,
+                    placeholder="100",
+                    help="Messages requested per list page (Gmail maxResults).",
+                ),
             ),
         )
 

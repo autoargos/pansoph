@@ -56,7 +56,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 _API_PATH = "/services/data/v60.0"
@@ -80,6 +87,43 @@ class SalesforceConnector:
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=False, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="salesforce",
+            title="Salesforce",
+            description="Ingest records of one Salesforce sObject over the REST API.",
+            fields=(
+                ConfigField(
+                    key="instance_url",
+                    label="Instance URL",
+                    kind=FieldKind.STRING,
+                    placeholder="https://acme.my.salesforce.com",
+                    help="Your org's My Domain base URL. REST calls are made against it.",
+                ),
+                ConfigField(
+                    key="token",
+                    label="OAuth access token",
+                    kind=FieldKind.SECRET,
+                    help=(
+                        "OAuth 2.0 bearer access token. This connector consumes a token you "
+                        "supply, it does not mint or refresh one. Sealed in the secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="object",
+                    label="sObject",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="Case",
+                    help=(
+                        "The sObject to ingest (Case, Account, KnowledgeArticleVersion). "
+                        "Defaults to Case."
+                    ),
+                ),
             ),
         )
 

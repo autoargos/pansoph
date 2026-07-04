@@ -39,7 +39,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 _API_VERSION = "2026-03-10"
@@ -99,6 +106,72 @@ class GithubConnector:
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
                 incremental=True, permission_sync=True, deletions=True, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="github",
+            title="GitHub",
+            description="Ingest textual files from a GitHub repository over the REST API.",
+            fields=(
+                ConfigField(
+                    key="owner",
+                    label="Owner",
+                    kind=FieldKind.STRING,
+                    placeholder="octocat",
+                    help="The user or organization that owns the repository.",
+                ),
+                ConfigField(
+                    key="repo",
+                    label="Repository",
+                    kind=FieldKind.STRING,
+                    placeholder="Hello-World",
+                    help="The repository name, without the owner prefix.",
+                ),
+                ConfigField(
+                    key="token",
+                    label="Access token",
+                    kind=FieldKind.SECRET,
+                    required=False,
+                    help=(
+                        "A bearer token (personal access token, or an org or GitHub App "
+                        "installation token). Optional for public repositories, required "
+                        "for private ones. Sealed in the secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="branch",
+                    label="Branch",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="main",
+                    help="Branch to read. Defaults to the repository's default branch.",
+                ),
+                ConfigField(
+                    key="path",
+                    label="Path prefix",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    help="Only ingest files under this path prefix. Empty ingests the whole repo.",
+                ),
+                ConfigField(
+                    key="max_files",
+                    label="Max files",
+                    kind=FieldKind.INT,
+                    required=False,
+                    placeholder="300",
+                    help="Cap on files ingested per sync, to respect the token's rate limit.",
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://api.github.com",
+                    help="Override only for GitHub Enterprise or a self-managed gateway.",
+                ),
             ),
         )
 

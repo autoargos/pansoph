@@ -15,6 +15,7 @@ from typing import Any
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 from .contract import ChangeEvent, ConnectorMeta, ValidationResult
+from .spec import ConnectorSpec
 
 
 class _Entry:
@@ -40,6 +41,22 @@ class InMemoryConnector:
             capabilities=Capabilities(
                 incremental=True, permission_sync=True, deletions=True, slim_listing=True
             ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        # The in-memory reference connector reads no config and needs no credentials:
+        # __init__ accepts and ignores config, validate always returns ok, and auth is
+        # AuthScheme.none. Its spec is therefore honest with zero fields (and zero
+        # secrets). Do not add fields the connector does not actually read.
+        return ConnectorSpec(
+            name="memory",
+            title="In-memory (reference)",
+            description=(
+                "A built-in reference connector backed by an in-memory dict. Needs no "
+                "network and no credentials. Used for demos, tests, and conformance."
+            ),
+            fields=(),
         )
 
     # --- test/demo helpers ---

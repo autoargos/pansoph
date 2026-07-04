@@ -40,7 +40,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 _LIST_QUERY = (
@@ -62,6 +69,37 @@ class LinearConnector:
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=False, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="linear",
+            title="Linear",
+            description="Ingest issues from a Linear workspace over the GraphQL API.",
+            fields=(
+                ConfigField(
+                    key="token",
+                    label="API key",
+                    kind=FieldKind.SECRET,
+                    help=(
+                        "A Linear personal API key, or 'Bearer <token>' for an OAuth access "
+                        "token. Sent verbatim as the Authorization header. Sealed in the "
+                        "secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://api.linear.app",
+                    help=(
+                        "Override only for a proxy or self-managed gateway. The path is "
+                        "always /graphql."
+                    ),
+                ),
             ),
         )
 

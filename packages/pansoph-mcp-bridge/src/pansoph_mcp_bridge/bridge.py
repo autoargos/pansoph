@@ -14,7 +14,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -32,6 +39,51 @@ class MCPConnector:
             name="mcp",
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(slim_listing=True),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="mcp",
+            title="MCP server",
+            description=(
+                "Bridge any MCP server's resources into pansoph. Resources map to "
+                "documents; the ACL is set here, since MCP carries no access control."
+            ),
+            fields=(
+                ConfigField(
+                    key="server_url",
+                    label="MCP server URL",
+                    kind=FieldKind.STRING,
+                    placeholder="https://host/mcp",
+                    help="Streamable HTTP endpoint of the MCP server to bridge.",
+                ),
+                ConfigField(
+                    key="resource_uri_prefix",
+                    label="Resource URI prefix",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    help=(
+                        "Confine this instance to resources whose URI starts with this "
+                        "prefix, so one server can back several scoped instances. Empty "
+                        "means all resources."
+                    ),
+                ),
+                ConfigField(
+                    key="public",
+                    label="Public to the whole tenant",
+                    kind=FieldKind.BOOL,
+                    required=False,
+                    help="Expose bridged resources to everyone in the tenant.",
+                ),
+                ConfigField(
+                    key="allow_groups",
+                    label="Allowed groups",
+                    kind=FieldKind.LIST,
+                    required=False,
+                    help="Groups allowed to read the bridged resources.",
+                ),
+            ),
         )
 
     def _acl(self) -> AccessControl:

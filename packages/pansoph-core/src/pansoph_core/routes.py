@@ -28,7 +28,7 @@ from sse_starlette.sse import EventSourceResponse
 from . import assembly
 from .audit import audit
 from .connectors import ConnectorManager, health, run_instance
-from .registry import list_adapters
+from .registry import list_adapters, load_adapter
 
 router = APIRouter(prefix="/api")
 
@@ -262,6 +262,75 @@ async def grab(req: GrabRequest, user: Any = Depends(_require_identity)) -> dict
 @router.get("/connectors")
 async def connectors() -> dict[str, list[str]]:
     return {"available": list_adapters("pansoph.connectors")}
+
+
+def _serialize_field(f: Any) -> dict[str, Any]:
+    """Serialize one ConfigField to the UI contract. FieldKind is a StrEnum, so its
+    value is the lowercase wire string (string, int, bool, list, secret, ...)."""
+    out: dict[str, Any] = {
+        "key": f.key,
+        "label": f.label,
+        "kind": f.kind.value,
+        "required": f.required,
+    }
+    # Optional hints are only included when the connector declared them, keeping the
+    # payload small and the form renderer free to skip absent keys.
+    if f.help:
+        out["help"] = f.help
+    if f.placeholder:
+        out["placeholder"] = f.placeholder
+    return out
+
+
+def _serialize_spec(name: str, spec: Any) -> dict[str, Any]:
+    """Serialize a ConnectorSpec to the UI contract. `name` is the registry name (the
+    entry point key), which is what the create-instance call keys off, so it is used
+    rather than spec.name in case the two ever diverge."""
+    return {
+        "name": name,
+        "title": spec.title,
+        "description": spec.description,
+        "fields": [_serialize_field(f) for f in spec.fields],
+    }
+
+
+def _spec_for(name: str) -> Any | None:
+    """Load the connector class for `name` and return its declared ConnectorSpec, or
+    None if the connector does not declare a spec() classmethod."""
+    cls = load_adapter("pansoph.connectors", name)
+    spec_fn = getattr(cls, "spec", None)
+    if spec_fn is None:
+        return None
+    return spec_fn()
+
+
+@router.get("/connectors/specs")
+async def connector_specs() -> dict[str, list[dict[str, Any]]]:
+    """All connector config specs, so the UI can render the add-connector form
+    dynamically instead of a hardcoded map. Public metadata, unauthenticated like the
+    plain /connectors list. Connectors without a spec() are skipped, and the result is
+    sorted by human title."""
+    specs: list[dict[str, Any]] = []
+    for name in list_adapters("pansoph.connectors"):
+        spec = _spec_for(name)
+        if spec is None:
+            continue
+        specs.append(_serialize_spec(name, spec))
+    specs.sort(key=lambda s: s["title"])
+    return {"connectors": specs}
+
+
+@router.get("/connectors/{name}/spec")
+async def connector_spec(name: str) -> dict[str, Any]:
+    """One connector's config spec. 404 when the name is unknown or the connector does
+    not declare a spec(), so the UI can fall back gracefully."""
+    try:
+        spec = _spec_for(name)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"connector {name!r} has no spec")
+    return _serialize_spec(name, spec)
 
 
 @router.get("/adapters")

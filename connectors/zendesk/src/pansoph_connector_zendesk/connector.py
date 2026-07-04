@@ -65,7 +65,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 
@@ -85,6 +92,61 @@ class ZendeskConnector:
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=True, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="zendesk",
+            title="Zendesk Help Center",
+            description=(
+                "Ingest Help Center articles from a Zendesk account, with per article "
+                "ACLs derived from user segments."
+            ),
+            fields=(
+                ConfigField(
+                    key="subdomain",
+                    label="Subdomain",
+                    kind=FieldKind.STRING,
+                    placeholder="acme",
+                    help=(
+                        "The account subdomain in {subdomain}.zendesk.com. Required unless "
+                        "an explicit base URL is set."
+                    ),
+                ),
+                ConfigField(
+                    key="email",
+                    label="Agent email",
+                    kind=FieldKind.STRING,
+                    placeholder="agent@acme.com",
+                    help="The agent email used for API token Basic auth (sent as {email}/token).",
+                ),
+                ConfigField(
+                    key="token",
+                    label="API token",
+                    kind=FieldKind.SECRET,
+                    help="Zendesk API token. Sealed in the secret store, never stored as config.",
+                ),
+                ConfigField(
+                    key="locale",
+                    label="Locale",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="en-us",
+                    help="Help Center locale used when listing articles. Defaults to en-us.",
+                ),
+                ConfigField(
+                    key="base_url",
+                    label="API base URL",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    placeholder="https://acme.zendesk.com",
+                    help=(
+                        "Override the host built from the subdomain. Use for a proxy or a "
+                        "self-managed gateway."
+                    ),
+                ),
             ),
         )
 

@@ -54,7 +54,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pansoph_connector_sdk import ChangeEvent, ConnectorMeta, ValidationResult
+from pansoph_connector_sdk import (
+    ChangeEvent,
+    ConfigField,
+    ConnectorMeta,
+    ConnectorSpec,
+    FieldKind,
+    ValidationResult,
+)
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
 # The project "Users" role, which carries Browse access in a default Jira project.
@@ -100,6 +107,46 @@ class JiraConnector:
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
                 incremental=False, permission_sync=True, deletions=False, slim_listing=True
+            ),
+        )
+
+    @classmethod
+    def spec(cls) -> ConnectorSpec:
+        return ConnectorSpec(
+            name="jira",
+            title="Jira",
+            description="Ingest issues from a Jira Cloud project using an Atlassian API token.",
+            fields=(
+                ConfigField(
+                    key="base_url",
+                    label="Site URL",
+                    kind=FieldKind.STRING,
+                    placeholder="https://acme.atlassian.net",
+                    help="The Jira Cloud site origin, without a trailing path.",
+                ),
+                ConfigField(
+                    key="email",
+                    label="Account email",
+                    kind=FieldKind.STRING,
+                    placeholder="you@example.com",
+                    help="The Atlassian account email paired with the API token for Basic auth.",
+                ),
+                ConfigField(
+                    key="api_token",
+                    label="API token",
+                    kind=FieldKind.SECRET,
+                    help=(
+                        "An Atlassian API token minted at id.atlassian.com. "
+                        "Sealed in the secret store."
+                    ),
+                ),
+                ConfigField(
+                    key="project_key",
+                    label="Project key",
+                    kind=FieldKind.STRING,
+                    placeholder="ENG",
+                    help="The key of the project to ingest, for example ENG.",
+                ),
             ),
         )
 
