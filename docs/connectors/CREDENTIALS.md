@@ -184,7 +184,7 @@ Steps (External Client App):
 3. Click New External Client App.
 4. Under Basic Information, enter a name (for example, `pansoph`), the API name (auto-fills), and your Contact Email. Leave Distribution State as Local.
 5. Expand OAuth Settings and select Enable OAuth.
-6. In Callback URL, enter your redirect URL. If you are running pansoph locally with the default base, use `http://localhost:8080/api/oauth/salesforce/callback`. (This field is required even though pansoph handles the token exchange itself.)
+6. In Callback URL, enter the redirect URL you will use to complete the OAuth flow yourself (for example `http://localhost/callback`). pansoph does NOT perform the Salesforce token exchange, so this is not a pansoph URL; it only has to match the redirect you use when you mint the token out of band.
 7. Under Selected OAuth Scopes, add the read-only-appropriate scopes below.
 8. Leave Require Proof Key for Code Exchange (PKCE) enabled unless your integration requires it off. Click Create.
 9. Open Policies, click Edit, and under App Authorization / refresh settings select Refresh token is valid until revoked. Save.
@@ -285,7 +285,7 @@ Into pansoph: copy the Personal API key and paste it into the API key / token fi
 1. Open https://linear.app/settings/api
 2. In the left sidebar under "Account", click "API", then scroll to "OAuth Applications" and click "Create new OAuth Application".
 3. Fill in the required fields (application name, developer name, and any icon/description).
-4. In "Callback URLs", paste exactly: `http://localhost:8080/api/oauth/linear/callback`
+4. In "Callback URLs", enter the redirect URL you will use to complete the OAuth flow yourself (for example `http://localhost/callback`), not a pansoph URL. pansoph has no Linear Connect flow, so it does not receive this callback.
 5. Click "Save". The page refreshes and shows the "Client ID" and "Client Secret" at the top. Copy both now and store them securely.
 6. When you request authorization, use only the `read` scope (read-only access to workspace data). Do not add `write` or `admin`.
 
