@@ -147,7 +147,7 @@ html[data-theme="light"] body::before {
   box-shadow: 0 0 0 1px var(--accent-line), 0 8px 22px -8px rgba(124,92,255,0.65);
   flex: none;
 }
-.brand-mark svg { width: 19px; height: 19px; }
+.brand-mark svg { width: 23px; height: 23px; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.1; }
 .brand-name {
   font-size: 16px; font-weight: 700; letter-spacing: -0.03em;
@@ -850,11 +850,15 @@ html[data-theme="light"] .theme-toggle svg.sun { display: block; }
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">
-        <!-- lens / aperture mark -->
-        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9"/>
-          <path d="M12 3 L12 12 L18.5 15.5"/>
-          <path d="M3.5 8.5 L12 12 L5.5 18.5"/>
+        <!-- owl mark (selected identity) -->
+        <svg viewBox="0 0 128 128" role="img" aria-label="pansoph owl mark">
+          <path d="M64 16 C92 16 108 34 108 62 C108 92 90 112 64 112 C38 112 20 92 20 62 C20 34 36 16 64 16 Z" fill="none" stroke="#F4F4F5" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M30 52 C34 34 48 30 56 44 M98 52 C94 34 80 30 72 44" fill="none" stroke="#F4F4F5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="47" cy="58" r="16" fill="none" stroke="#F4F4F5" stroke-width="5"/>
+          <circle cx="81" cy="58" r="16" fill="none" stroke="#F4F4F5" stroke-width="5"/>
+          <circle cx="47" cy="58" r="6.5" fill="#F4F4F5"/>
+          <circle cx="81" cy="58" r="6.5" fill="#1FA6A0"/>
+          <path d="M58 74 L70 74 L64 88 Z" fill="#1FA6A0"/>
         </svg>
       </div>
       <div class="brand-text">

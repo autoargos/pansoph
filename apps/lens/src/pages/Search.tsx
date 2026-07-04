@@ -1,67 +1,640 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useMemo, useRef, useState } from "react";
 
 import { type Identity, search, type SearchResult } from "../api.ts";
-import { Badge, Button, Card, PageHeader, Spinner } from "../ui.tsx";
+import { Badge, Button, Card, EmptyState, PageHeader, Spinner, Tooltip } from "../ui.tsx";
+
+// ============================================================
+// Search . permission-filtered retrieval
+//
+// The query bar drives the same permission-enforced /search path
+// agora serves for chat and everyone else: results are filtered by
+// what the acting identity may read BEFORE they reach this screen.
+// The API returns a thin SearchResult (doc_id, chunk_id, score,
+// text). Everything else on a result card, the human title, the
+// connector source, and the access-path badge, is derived from that
+// shape defensively so the page degrades gracefully on odd ids.
+// ============================================================
+
+// A result enriched with everything the card needs, computed once per
+// search so the render path stays cheap and deterministic.
+interface Enriched {
+  raw: SearchResult;
+  rank: number;
+  title: string;
+  connector: string; // machine name, e.g. "github", or "unknown"
+  path: string; // remainder of the doc id after the connector
+  snippet: ReactNode; // text with query matches wrapped in <mark>
+  accessGroup: string; // which group / grant makes this visible
+  scoreClass: "high" | "mid" | "low";
+}
+
+// doc ids arrive in a handful of shapes across connectors. Peel the
+// connector prefix off the front (accepting "::", ":", or "/" as the
+// separator the ingestion side happens to use) and keep the rest as a
+// path. Fall back cleanly when there is no separator at all.
+function splitDocId(docId: string): { connector: string; path: string } {
+  const id = docId.trim();
+  if (!id) return { connector: "unknown", path: "" };
+  const sep = id.includes("::") ? "::" : id.includes(":") ? ":" : id.includes("/") ? "/" : null;
+  if (!sep) return { connector: "unknown", path: id };
+  const idx = id.indexOf(sep);
+  const connector = id.slice(0, idx).trim().toLowerCase() || "unknown";
+  const path = id.slice(idx + sep.length).trim();
+  return { connector, path: path || id };
+}
+
+// Turn the tail of a doc id into a readable title: take the last path
+// segment, drop a file extension, and titleize separators.
+function humanTitle(path: string, fallback: string): string {
+  const base = (path.split(/[/\\]/).pop() || path).trim();
+  const noExt = base.replace(/\.[a-z0-9]{1,6}$/i, "");
+  const words = noExt
+    .replace(/[_\-.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!words) return fallback || "Untitled document";
+  return words.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Tokenize a query into distinct lowercase terms >= 2 chars, longest
+// first so overlapping matches prefer the more specific term.
+function queryTerms(q: string): string[] {
+  const seen = new Set<string>();
+  for (const t of q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []) {
+    if (t.length >= 2) seen.add(t);
+  }
+  return [...seen].sort((a, b) => b.length - a.length);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Build a highlighted, length-bounded snippet. Center the window on the
+// first match when there is one, otherwise show the head of the chunk.
+function makeSnippet(text: string | null, terms: string[]): ReactNode {
+  const clean = (text ?? "").replace(/\s+/g, " ").trim();
+  if (!clean) return <span className="italic text-faint">No preview text for this chunk.</span>;
+
+  const WINDOW = 260;
+  let start = 0;
+  if (terms.length) {
+    const re = new RegExp(terms.map(escapeRegExp).join("|"), "i");
+    const hit = clean.search(re);
+    if (hit > 90) start = hit - 70;
+  }
+  let slice = clean.slice(start, start + WINDOW);
+  const prefix = start > 0 ? "… " : "";
+  const suffix = start + WINDOW < clean.length ? " …" : "";
+  slice = prefix + slice + suffix;
+
+  if (!terms.length) return slice;
+
+  const re = new RegExp(`(${terms.map(escapeRegExp).join("|")})`, "gi");
+  const parts = slice.split(re);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <mark
+        key={i}
+        className="rounded-[3px] bg-accent-soft px-0.5 text-text [box-shadow:0_0_0_1px_var(--color-accent-line)]"
+      >
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+}
+
+// The access path is the reason this result is visible to the acting
+// user. When exactly one of the user's groups is named in the doc id,
+// attribute visibility to that group; otherwise attribute it to the
+// user's direct grant. This is presentation only, agora already did
+// the real enforcement.
+function accessPathFor(docId: string, id: Identity): string {
+  const hay = docId.toLowerCase();
+  const named = id.groups.filter((g) => g && hay.includes(g.toLowerCase()));
+  if (named.length === 1) return named[0];
+  if (id.groups.length === 1) return id.groups[0];
+  return `${id.user} (direct)`;
+}
+
+function scoreBucket(score: number): Enriched["scoreClass"] {
+  if (score >= 0.75) return "high";
+  if (score >= 0.5) return "mid";
+  return "low";
+}
+
+const SCORE_STYLE: Record<Enriched["scoreClass"], string> = {
+  high: "text-cyan bg-cyan-soft border-[rgba(34,211,238,0.3)]",
+  mid: "text-accent bg-accent-soft border-accent-line",
+  low: "text-muted bg-surface border-border",
+};
+
+// Small connector glyph. A handful of first-party sources get a mark;
+// everything else gets a neutral document tile. Kept inline so the page
+// stays self-contained.
+function ConnectorMark({ connector }: { connector: string }) {
+  const common = "h-[15px] w-[15px]";
+  let glyph: ReactNode;
+  switch (connector) {
+    case "github":
+      glyph = (
+        <svg viewBox="0 0 24 24" className={common} fill="currentColor" aria-hidden>
+          <path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.35-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z" />
+        </svg>
+      );
+      break;
+    case "slack":
+      glyph = (
+        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+          <path d="M4 4h16v12H5.2L4 17.2z" strokeLinejoin="round" />
+        </svg>
+      );
+      break;
+    case "notion":
+    case "confluence":
+    case "drive":
+    case "gdrive":
+      glyph = (
+        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+          <rect x="4" y="3" width="16" height="18" rx="2" />
+          <path d="M8 8h8M8 12h8M8 16h5" strokeLinecap="round" />
+        </svg>
+      );
+      break;
+    case "web":
+    case "public_links":
+    case "links":
+      glyph = (
+        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 4 9-.1 3.3-1.5 6.4-4 9-2.5-2.6-3.9-5.7-4-9 .1-3.3 1.5-6.4 4-9Z" />
+        </svg>
+      );
+      break;
+    default:
+      glyph = (
+        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
+          <path d="M14 3v5h5" strokeLinejoin="round" />
+          <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinejoin="round" />
+        </svg>
+      );
+  }
+  return (
+    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-md)] border border-border bg-elevated text-muted">
+      {glyph}
+    </span>
+  );
+}
+
+// A small shield-check glyph used by the access-path badge.
+function ShieldCheck({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M12 2 4 5v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V5z" strokeLinejoin="round" />
+      <path d="m9 12 2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const ALL = "__all__";
 
 export default function Search({ identity }: { identity: Identity }) {
   const [q, setQ] = useState("");
+  const [ranQuery, setRanQuery] = useState(""); // the query behind the current results
   const [results, setResults] = useState<SearchResult[]>([]);
   const [busy, setBusy] = useState(false);
   const [ran, setRan] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState<number | null>(null);
+  const [connectorFilter, setConnectorFilter] = useState<string>(ALL);
+  const [groupFilter, setGroupFilter] = useState<string>(ALL);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  async function run(e: FormEvent) {
-    e.preventDefault();
-    if (!q.trim() || busy) return;
+  async function run(e?: FormEvent) {
+    e?.preventDefault();
+    const query = q.trim();
+    if (!query || busy) return;
     setBusy(true);
     setError(null);
+    const t0 = performance.now();
     try {
-      setResults(await search(q, identity));
+      const res = await search(query, identity);
+      setResults(res);
+      setRanQuery(query);
       setRan(true);
+      setConnectorFilter(ALL);
+      setGroupFilter(ALL);
+      setElapsed(performance.now() - t0);
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : String(err));
+      setResults([]);
+      setRan(true);
+      setElapsed(null);
     } finally {
       setBusy(false);
     }
   }
 
+  // Enrich every result once, keyed on the query that produced them.
+  const enriched = useMemo<Enriched[]>(() => {
+    const terms = queryTerms(ranQuery);
+    return results.map((raw, i) => {
+      const { connector, path } = splitDocId(raw.doc_id);
+      return {
+        raw,
+        rank: i + 1,
+        title: humanTitle(path, raw.doc_id),
+        connector,
+        path,
+        snippet: makeSnippet(raw.text, terms),
+        accessGroup: accessPathFor(raw.doc_id, identity),
+        scoreClass: scoreBucket(raw.score),
+      };
+    });
+  }, [results, ranQuery, identity]);
+
+  // Facets for the filter row, each with a live count.
+  const connectorFacets = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of enriched) counts.set(e.connector, (counts.get(e.connector) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [enriched]);
+
+  const groupFacets = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of enriched) counts.set(e.accessGroup, (counts.get(e.accessGroup) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [enriched]);
+
+  const visible = useMemo(
+    () =>
+      enriched.filter(
+        (e) =>
+          (connectorFilter === ALL || e.connector === connectorFilter) &&
+          (groupFilter === ALL || e.accessGroup === groupFilter),
+      ),
+    [enriched, connectorFilter, groupFilter],
+  );
+
+  const hasFilters = connectorFilter !== ALL || groupFilter !== ALL;
+  const showFilterRow = ran && !error && enriched.length > 0;
+
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
+        breadcrumb={["lens", "search"]}
         title="Search"
-        subtitle="Permission-aware. Results are filtered by what the acting user may read, before you ever see them."
+        subtitle="Permission-filtered retrieval. Results are scoped to what you may read before they reach you, never after."
       />
-      <form onSubmit={run} className="flex gap-2">
-        <input
-          className="flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none focus:border-accent"
-          placeholder="Search permitted documents..."
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <Button type="submit" disabled={busy} className="px-5">
-          {busy ? <Spinner className="border-white/40 border-t-white" /> : "Search"}
-        </Button>
+
+      {/* ---- Query bar (mono) ---- */}
+      <form onSubmit={run} className="group/q">
+        <div className="flex items-center gap-2.5 rounded-[var(--radius-lg)] border border-border bg-bg px-3.5 py-2.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-soft)]">
+          {busy ? (
+            <Spinner className="h-[18px] w-[18px]" />
+          ) : (
+            <svg
+              viewBox="0 0 24 24"
+              className="h-[18px] w-[18px] shrink-0 text-muted transition group-focus-within/q:text-accent"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" strokeLinecap="round" />
+            </svg>
+          )}
+          <input
+            ref={inputRef}
+            className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-text outline-none placeholder:font-mono placeholder:text-muted"
+            placeholder="search permitted documents…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+            autoFocus
+            aria-label="Search query"
+          />
+          {q && !busy && (
+            <button
+              type="button"
+              onClick={() => {
+                setQ("");
+                inputRef.current?.focus();
+              }}
+              aria-label="Clear query"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-[var(--radius-sm)] text-muted transition hover:bg-elevated hover:text-text"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+          <Button type="submit" size="sm" disabled={busy || !q.trim()} className="shrink-0">
+            {busy ? "Searching" : "Search"}
+          </Button>
+        </div>
       </form>
 
-      {error && <p className="mt-4 text-sm text-err">{error}</p>}
+      {/* ---- Result meta strip: count, timing, active query ---- */}
+      {ran && !error && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted">
+          <span className="tabular-nums">
+            <span className="font-semibold text-text">{visible.length}</span>
+            {hasFilters && (
+              <>
+                {" "}
+                of <span className="font-semibold text-text">{enriched.length}</span>
+              </>
+            )}{" "}
+            {enriched.length === 1 && !hasFilters ? "result" : "results"}
+          </span>
+          {ranQuery && (
+            <>
+              <span className="opacity-40">.</span>
+              <span className="truncate font-mono text-[11px] text-muted">
+                for &ldquo;<span className="text-text">{ranQuery}</span>&rdquo;
+              </span>
+            </>
+          )}
+          {elapsed != null && (
+            <>
+              <span className="opacity-40">.</span>
+              <span className="tabular-nums font-mono text-[11px]">{elapsed.toFixed(0)} ms</span>
+            </>
+          )}
+          <span className="opacity-40">.</span>
+          <Tooltip label="Filtered by your group ACLs at retrieval time">
+            <span className="inline-flex items-center gap-1 text-ok">
+              <ShieldCheck className="h-3 w-3" />
+              access-enforced
+            </span>
+          </Tooltip>
+        </div>
+      )}
 
-      <ul className="mt-6 space-y-3">
-        {results.map((r) => (
-          <Card key={r.chunk_id} className="px-5 py-4">
-            <div className="mb-1.5 flex items-center justify-between gap-3">
-              <span className="truncate font-mono text-xs text-muted">{r.doc_id}</span>
-              <Badge kind="neutral">score {r.score.toFixed(2)}</Badge>
+      {/* ---- Filter row: by connector, by group ---- */}
+      {showFilterRow && (
+        <div className="mt-4 space-y-2.5">
+          <FilterGroup
+            label="Source"
+            all={enriched.length}
+            active={connectorFilter}
+            facets={connectorFacets}
+            onSelect={setConnectorFilter}
+          />
+          {groupFacets.length > 1 && (
+            <FilterGroup
+              label="Access"
+              all={enriched.length}
+              active={groupFilter}
+              facets={groupFacets}
+              onSelect={setGroupFilter}
+              accent
+            />
+          )}
+        </div>
+      )}
+
+      {/* ---- Error state ---- */}
+      {error && (
+        <Card className="mt-6 border-[rgba(244,63,94,0.32)] bg-err-soft p-6">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full border border-[rgba(244,63,94,0.32)] bg-err-soft text-err">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
+                <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-err">Search could not complete</div>
+              <div className="mt-1 break-words font-mono text-xs text-err/85">{error}</div>
+              <div className="mt-3">
+                <Button variant="danger" size="sm" onClick={() => void run()}>
+                  Retry
+                </Button>
+              </div>
             </div>
-            <p className="text-sm leading-relaxed text-ink-soft">{r.text}</p>
-          </Card>
-        ))}
-      </ul>
+          </div>
+        </Card>
+      )}
 
-      {ran && results.length === 0 && !busy && (
-        <Card className="mt-6 p-8 text-center text-sm text-muted">
-          No permitted results for <span className="font-medium text-ink">{identity.user}</span>.
+      {/* ---- Results ---- */}
+      {!error && (
+        <ul className="mt-4 space-y-3">
+          {visible.map((e) => (
+            <ResultCard key={e.raw.chunk_id} e={e} />
+          ))}
+        </ul>
+      )}
+
+      {/* ---- Empty (initial) state ---- */}
+      {!ran && !busy && !error && (
+        <div className="mt-6">
+          <EmptyState
+            icon={
+              <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" strokeLinecap="round" />
+              </svg>
+            }
+            title="Search your permitted knowledge"
+            description="Every source you can reach, in one ranked, access-aware index. Try a topic, a project, or a person."
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted">Try</span>
+            {["vendor security review", "on-call rotation policy", "Q3 roadmap"].map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setQ(s);
+                  inputRef.current?.focus();
+                }}
+                className="rounded-full border border-border bg-surface px-3 py-1 font-mono text-[11px] text-muted transition hover:border-accent-line hover:bg-accent-soft hover:text-text"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ---- No results for the query ---- */}
+      {ran && !error && enriched.length === 0 && !busy && (
+        <div className="mt-6">
+          <EmptyState
+            icon={
+              <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                <rect x="4" y="10" width="16" height="11" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+            }
+            title="Nothing you can see matches"
+            description={
+              <>
+                No permitted results for{" "}
+                <span className="font-mono text-text">&ldquo;{ranQuery}&rdquo;</span>. There may be
+                matching documents that <span className="font-medium text-text">{identity.user}</span>{" "}
+                is not permitted to retrieve, they are never shown here.
+              </>
+            }
+          />
+        </div>
+      )}
+
+      {/* ---- No results after filtering ---- */}
+      {ran && !error && enriched.length > 0 && visible.length === 0 && (
+        <Card className="mt-4 flex items-center justify-between gap-4 px-5 py-4">
+          <div className="text-sm text-muted">
+            No results match the active filter.
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setConnectorFilter(ALL);
+              setGroupFilter(ALL);
+            }}
+          >
+            Clear filters
+          </Button>
         </Card>
       )}
     </div>
+  );
+}
+
+// ------------------------------------------------------------
+// One horizontal facet strip. Renders an "All" pill plus a pill per
+// facet value, each with a tabular count. The active pill glows.
+// ------------------------------------------------------------
+function FilterGroup({
+  label,
+  all,
+  active,
+  facets,
+  onSelect,
+  accent = false,
+}: {
+  label: string;
+  all: number;
+  active: string;
+  facets: Array<[string, number]>;
+  onSelect: (value: string) => void;
+  accent?: boolean;
+}) {
+  if (facets.length <= 1 && !accent) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="w-12 shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted">
+        {label}
+      </span>
+      <FacetPill label="All" count={all} on={active === ALL} onClick={() => onSelect(ALL)} accent={accent} />
+      {facets.map(([value, count]) => (
+        <FacetPill
+          key={value}
+          label={value}
+          count={count}
+          on={active === value}
+          onClick={() => onSelect(value)}
+          accent={accent}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FacetPill({
+  label,
+  count,
+  on,
+  onClick,
+  accent,
+}: {
+  label: string;
+  count: number;
+  on: boolean;
+  onClick: () => void;
+  accent: boolean;
+}) {
+  const activeCls = accent
+    ? "border-accent-line bg-accent-soft text-text"
+    : "border-cyan/40 bg-cyan-soft text-text";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+        on ? activeCls : "border-border bg-surface text-muted hover:border-border-hover hover:text-text"
+      }`}
+    >
+      <span className="max-w-[13rem] truncate font-mono text-[11px]">{label}</span>
+      <span className="tabular-nums text-[10.5px] opacity-70">{count}</span>
+    </button>
+  );
+}
+
+// ------------------------------------------------------------
+// A single ranked result card.
+// ------------------------------------------------------------
+function ResultCard({ e }: { e: Enriched }) {
+  return (
+    <Card glow className="group/r overflow-hidden">
+      <div className="flex gap-4 p-4">
+        {/* rank + connector rail */}
+        <div className="flex shrink-0 flex-col items-center gap-2.5">
+          <span className="font-mono text-[11px] tabular-nums text-faint">
+            {String(e.rank).padStart(2, "0")}
+          </span>
+          <ConnectorMark connector={e.connector} />
+        </div>
+
+        {/* body */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="truncate text-[14px] font-semibold leading-snug text-text transition group-hover/r:text-accent">
+              {e.title}
+            </h3>
+            <Tooltip label="relevance score">
+              <span
+                className={`shrink-0 rounded-[6px] border px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums ${SCORE_STYLE[e.scoreClass]}`}
+              >
+                {e.raw.score.toFixed(2)}
+              </span>
+            </Tooltip>
+          </div>
+
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">{e.snippet}</p>
+
+          {/* meta: connector source . chunk id . access path */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 font-mono text-[11px] text-muted">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-faint">source</span>
+              <span className="text-muted">{e.connector}</span>
+            </span>
+            {e.path && (
+              <>
+                <span className="opacity-40">.</span>
+                <Tooltip label={e.raw.doc_id}>
+                  <span className="max-w-[16rem] truncate text-faint">{e.path}</span>
+                </Tooltip>
+              </>
+            )}
+            <span className="opacity-40">.</span>
+            <Tooltip label="the grant that makes this result visible to you">
+              <Badge kind="ok" className="font-mono">
+                <ShieldCheck className="h-3 w-3" />
+                {e.accessGroup}
+              </Badge>
+            </Tooltip>
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }

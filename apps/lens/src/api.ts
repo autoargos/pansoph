@@ -226,3 +226,42 @@ export interface Health {
 export async function health(): Promise<Health> {
   return jget<Health>("/api/health");
 }
+
+// ------------------------------------------------------------
+// Stable aliases. The page layer refers to these connector/system
+// functions by intent-revealing names. They forward to the wire
+// functions above so pages never have to edit this file. Keep both
+// the alias and the underlying name exported.
+// ------------------------------------------------------------
+
+/** List every configured connector instance. Alias of listInstances. */
+export const listConnectorInstances = listInstances;
+
+/** Fetch each connector's declared config spec. Alias of connectorSpecs. */
+export const getConnectorSpecs = connectorSpecs;
+
+/** Service health snapshot for the System page. Alias of health. */
+export const systemHealth = health;
+
+/** Available adapters per port group. Alias of adapters. */
+export const listAdapters = adapters;
+
+/** Backend build/runtime metadata. Alias of meta. */
+export const systemMeta = meta;
+
+/**
+ * The signed-in user's identity, as derived from the OIDC token by auth.ts.
+ * Identity is owned by the auth layer (auth.ts builds it from the token claims),
+ * so this re-exports the Identity type and a small helper to shape one from the
+ * primitive claims. Pages that already receive `identity` as a prop should keep
+ * using that; this exists so a page can reconstruct an Identity without importing
+ * auth.ts directly.
+ */
+export function makeIdentity(
+  user: string,
+  groups: string[],
+  roles: string[],
+  tenant_id = "default",
+): Identity {
+  return { user, groups, roles, tenant_id };
+}

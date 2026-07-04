@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 
+import { Lockup } from "./components/Logo.tsx";
 import { health, type Health, type Identity } from "./api.ts";
 import {
   canManageConnectors,
   groupsOf,
   isAdmin,
   login,
-  logout,
   rolesOf,
   useAuth,
   usernameOf,
@@ -17,7 +17,7 @@ import Chat from "./pages/Chat.tsx";
 import Connectors from "./pages/Connectors.tsx";
 import Search from "./pages/Search.tsx";
 import System from "./pages/System.tsx";
-import { Button } from "./ui.tsx";
+import { Avatar, Button, Kbd, StatusDot } from "./ui.tsx";
 
 interface NavItem {
   to: string;
@@ -26,7 +26,12 @@ interface NavItem {
   icon: string;
 }
 
-const NAV_CHAT: NavItem = { to: "/", label: "Chat", end: true, icon: "M4 5h16M4 12h10M4 19h7" };
+const NAV_CHAT: NavItem = {
+  to: "/",
+  label: "Chat",
+  end: true,
+  icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+};
 const NAV_SEARCH: NavItem = {
   to: "/search",
   label: "Search",
@@ -35,12 +40,12 @@ const NAV_SEARCH: NavItem = {
 const NAV_CONNECTORS: NavItem = {
   to: "/connectors",
   label: "Connectors",
-  icon: "M8 7h8M8 12h8M8 17h5M5 4h14v16H5z",
+  icon: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM17 14v6M14 17h6",
 };
 const NAV_ACCESS: NavItem = {
   to: "/access",
   label: "Access",
-  icon: "M12 3l7 4v5c0 5-3 7.5-7 8-4-.5-7-3-7-8V7zM9.5 12l1.8 1.8L15 10",
+  icon: "M4 10h16v11H4zM8 10V7a4 4 0 0 1 8 0v3",
 };
 const NAV_SYSTEM: NavItem = {
   to: "/system",
@@ -63,7 +68,10 @@ export default function App() {
 
   if (!ready) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted">loading...</div>
+      <div className="flex h-full items-center justify-center text-sm text-muted">
+        <StatusDot kind="run" pulse className="mr-2" />
+        loading...
+      </div>
     );
   }
   if (!user) return <Login />;
@@ -80,22 +88,22 @@ export default function App() {
 
 function Login() {
   return (
-    <div className="flex h-full items-center justify-center bg-canvas">
-      <div className="w-full max-w-sm rounded-[var(--radius-card)] border border-line bg-surface p-8 text-center shadow-sm">
-        <div className="text-2xl font-semibold tracking-tight">
-          pansoph<span className="text-accent"> · lens</span>
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="w-full max-w-sm rounded-[var(--radius-xl)] border border-border bg-surface p-8 text-center shadow-[var(--shadow-float)]">
+        <div className="mb-6 flex justify-center">
+          <Lockup tagline="access-aware knowledge" size={40} />
         </div>
         <p className="mt-2 text-sm text-muted">
           Sign in to your organization. You will only ever see what you are permitted to.
         </p>
         <div className="mt-6">
-          <Button onClick={login} className="w-full">
+          <Button onClick={login} block>
             Sign in
           </Button>
         </div>
-        <p className="mt-5 text-xs text-faint">
-          Demo users: <span className="font-medium text-muted">alice / alice</span> (group g1),{" "}
-          <span className="font-medium text-muted">bob / bob</span> (no group)
+        <p className="mt-5 text-xs text-muted">
+          Demo users: <span className="font-medium text-text">alice / alice</span> (group g1),{" "}
+          <span className="font-medium text-text">bob / bob</span> (no group)
         </p>
       </div>
     </div>
@@ -115,80 +123,98 @@ function Shell({ identity }: { identity: Identity }) {
   const canManage = canManageConnectors(identity.roles);
   const admin = isAdmin(identity.roles);
 
+  const healthLabel = hp == null ? "agora unreachable" : healthy ? "all systems healthy" : "degraded";
+  const healthKind: "ok" | "warn" | "err" = hp == null ? "err" : healthy ? "ok" : "warn";
+
   return (
     <div className="flex h-full">
-      <aside className="flex w-60 shrink-0 flex-col bg-ink text-white/80">
-        <div className="px-5 py-5">
-          <div className="text-lg font-semibold tracking-tight text-white">
-            pansoph<span className="text-accent"> · lens</span>
-          </div>
-          <div className="mt-0.5 text-[11px] text-white/40">access-aware knowledge</div>
+      {/* ---- Sidebar ---- */}
+      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-[color-mix(in_srgb,var(--ob-surface)_86%,transparent)] px-4 pb-4 pt-5 backdrop-blur-md">
+        <div className="px-2 pb-5 pt-1">
+          <Lockup tagline="access-aware knowledge" />
         </div>
-        <nav className="flex flex-1 flex-col gap-1 px-3">
+
+        <div className="px-2 pb-2 pt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+          Workspace
+        </div>
+        <nav className="flex flex-col gap-0.5">
           {nav.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
               end={n.end}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
+                `group relative flex items-center gap-3 rounded-[var(--radius-md)] border px-3 py-2 text-[13.5px] font-medium transition ${
                   isActive
-                    ? "bg-white/10 text-white"
-                    : "text-white/60 hover:bg-white/5 hover:text-white"
+                    ? "border-accent-line bg-accent-soft text-text"
+                    : "border-transparent text-muted hover:bg-elevated hover:text-text"
                 }`
               }
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                className="h-4 w-4"
-              >
-                <path d={n.icon} strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {n.label}
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="absolute -left-px bottom-2 top-2 w-[2.5px] rounded-full bg-accent shadow-[0_0_10px_1px_rgba(124,92,255,0.7)]" />
+                  )}
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    className={`h-[17px] w-[17px] ${isActive ? "text-accent" : "opacity-85"}`}
+                  >
+                    <path d={n.icon} strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  {n.label}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
-        <div className="px-5 py-4 text-[11px] text-white/40">Apache-2.0 · self-hosted</div>
+
+        <div className="flex-1" />
+
+        {/* Permissions-live explainer card, echoing the mockup */}
+        <div className="mb-4 rounded-[var(--radius-lg)] border border-border bg-elevated p-4">
+          <div className="flex items-center gap-2 text-xs font-semibold text-text">
+            <svg viewBox="0 0 24 24" className="h-[15px] w-[15px] text-cyan" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M12 2 4 5v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V5z" strokeLinejoin="round" />
+              <path d="m9 12 2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Permissions live
+          </div>
+          <div className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
+            Every answer is filtered by your group ACLs at retrieval time. Nothing you cannot see
+            reaches the model.
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 border-t border-border px-2 pt-3 text-[11px] text-muted">
+          <span>Apache-2.0</span>
+          <span className="opacity-50">.</span>
+          <span>self-hosted</span>
+        </div>
       </aside>
 
+      {/* ---- Main column ---- */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-line bg-surface px-8 py-3">
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <span className={`inline-block h-2 w-2 rounded-full ${healthy ? "bg-ok" : "bg-err"}`} />
-            {hp == null ? "agora unreachable" : healthy ? "all systems healthy" : "degraded"}
+        <header className="flex h-14 items-center gap-4 border-b border-border bg-[color-mix(in_srgb,var(--ob-bg)_72%,transparent)] px-6 backdrop-blur-md">
+          {/* cmd-K hint (cheap, non-functional affordance) */}
+          <div className="flex h-[34px] min-w-[280px] items-center gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface px-3 text-[13px] text-muted">
+            <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" strokeLinecap="round" />
+            </svg>
+            <span>Search connectors, docs, or run a command</span>
+            <span className="ml-auto flex gap-1">
+              <Kbd>Cmd</Kbd>
+              <Kbd>K</Kbd>
+            </span>
           </div>
-          <div className="flex items-center gap-3 text-xs">
-            <div className="flex items-center gap-1.5 text-muted">
-              <span>signed in as</span>
-              <span className="font-medium text-ink">{identity.user}</span>
-              {identity.roles.map((r) => (
-                <span
-                  key={r}
-                  className="rounded-full bg-ink/10 px-2 py-0.5 text-[11px] font-medium text-ink"
-                  title="management role"
-                >
-                  {r}
-                </span>
-              ))}
-              {identity.groups.map((g) => (
-                <span
-                  key={g}
-                  className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent-ink"
-                  title="document group"
-                >
-                  {g}
-                </span>
-              ))}
-              {identity.groups.length === 0 && <span className="text-faint">no groups</span>}
-            </div>
-            <button onClick={logout} className="rounded-md px-2 py-1 text-muted hover:bg-canvas hover:text-ink">
-              Sign out
-            </button>
-          </div>
+
+          <TopBarRight healthKind={healthKind} healthLabel={healthLabel} identity={identity} />
         </header>
+
         <main className="min-h-0 flex-1 overflow-auto px-8 py-7">
           <Routes>
             <Route path="/" element={<Chat identity={identity} />} />
@@ -199,6 +225,49 @@ function Shell({ identity }: { identity: Identity }) {
           </Routes>
         </main>
       </div>
+    </div>
+  );
+}
+
+// The compact right cluster in the top bar. Per the redesign this is the ONLY
+// identity affordance in the chrome: a health dot, a "dark app" theme note, and a
+// circular avatar button that routes to the Access page (where full identity,
+// groups, and roles live). No group/role chips, no "signed in as" block.
+function TopBarRight({
+  healthKind,
+  healthLabel,
+  identity,
+}: {
+  healthKind: "ok" | "warn" | "err";
+  healthLabel: string;
+  identity: Identity;
+}) {
+  const navigate = useNavigate();
+
+  return (
+    <div className="ml-auto flex items-center gap-4">
+      <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted">
+        <StatusDot kind={healthKind} pulse={healthKind === "ok"} />
+        {healthLabel}
+      </div>
+
+      <div className="flex items-center gap-1.5 text-xs text-muted" title="lens uses the Obsidian dark theme">
+        <svg viewBox="0 0 24 24" className="h-[14px] w-[14px]" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span className="hidden sm:inline">dark</span>
+      </div>
+
+      <span className="h-6 w-px bg-border" />
+
+      <button
+        onClick={() => navigate("/access")}
+        title={`${identity.user} . open Access`}
+        aria-label="Open Access page"
+        className="rounded-full outline-offset-2 transition hover:brightness-110"
+      >
+        <Avatar name={identity.user} size={30} />
+      </button>
     </div>
   );
 }

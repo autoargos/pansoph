@@ -166,6 +166,58 @@
     outline-offset: 3px;
   }
 
+  /* Selected state */
+  .card.selected {
+    border-color: #10b981;
+    box-shadow: 0 0 0 1px #10b981, var(--shadow-lg);
+  }
+
+  .card.selected::before {
+    height: 6px;
+    background: linear-gradient(90deg, #10b981, #2fbfa0);
+    opacity: 1;
+  }
+
+  .selected-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: #0a7a56;
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 999px;
+    padding: 5px 11px 5px 9px;
+    white-space: nowrap;
+  }
+
+  .selected-badge .check {
+    width: 14px;
+    height: 14px;
+    stroke: #10b981;
+    stroke-width: 2.6;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .card-tags {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .alt-note {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-faint);
+    letter-spacing: 0.01em;
+  }
+
   .card-top {
     display: flex;
     align-items: flex-start;
@@ -285,6 +337,16 @@
   .mark.m2 { background: linear-gradient(135deg, #0f6e6e, #2fbfa0); }
   .mark.m3 { background: linear-gradient(135deg, #1a1614, #4b4b52); color: #e5b769; }
 
+  .mark.owl-mark {
+    width: 74px;
+    height: 74px;
+    border-radius: 18px;
+    background: linear-gradient(140deg, #16161e, #0b0b0f);
+    box-shadow: 0 0 0 1px rgba(124, 92, 255, 0.4), 0 12px 30px -12px rgba(124, 92, 255, 0.6);
+  }
+  .mark.owl-mark svg { width: 46px; height: 46px; }
+  .card:hover .mark.owl-mark { transform: translateY(-5px); }
+
   /* Footer */
   footer {
     margin-top: 80px;
@@ -313,15 +375,15 @@
 <body>
   <div class="wrap">
     <header>
-      <span class="eyebrow"><span class="dot"></span>Design Review</span>
-      <h1>Choose the look for <span class="accent">pansoph</span>.</h1>
-      <p class="lede">Four full UI directions and a logo gallery, ready to review. Open any option to see the mockup in full, then pick the one that feels right.</p>
+      <span class="eyebrow"><span class="dot"></span>Design Decision</span>
+      <h1>The look for <span class="accent">pansoph</span> is chosen.</h1>
+      <p class="lede">The direction is <strong>Obsidian</strong> paired with the <strong>Owl</strong> mark. The explored alternatives stay below for reference, so the reasoning behind the choice is never lost.</p>
     </header>
 
     <section class="section">
       <div class="section-head">
         <h2>UI Directions</h2>
-        <span class="count">4 options</span>
+        <span class="count">Obsidian selected &middot; 3 explored</span>
       </div>
 
       <div class="grid">
@@ -331,6 +393,7 @@
             <span class="card-name">Scholar</span>
             <span class="card-arrow" aria-hidden="true">&rarr;</span>
           </div>
+          <div class="card-tags"><span class="alt-note">Explored alternative</span></div>
           <p class="card-desc">Warm paper and ink with a scholarly teal. Calm, readable, and editorial.</p>
           <div class="swatches">
             <div class="swatch"><span class="chip" style="background:#FAF7F2"></span><span class="hex">#FAF7F2</span></div>
@@ -339,11 +402,17 @@
           </div>
         </a>
 
-        <!-- Obsidian -->
-        <a class="card" href="./mockups/obsidian.html" style="--card-accent: #7c5cff;">
+        <!-- Obsidian (SELECTED) -->
+        <a class="card selected" href="./mockups/obsidian.html" style="--card-accent: #7c5cff;">
           <div class="card-top">
             <span class="card-name">Obsidian</span>
             <span class="card-arrow" aria-hidden="true">&rarr;</span>
+          </div>
+          <div class="card-tags">
+            <span class="selected-badge">
+              <svg class="check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              Selected direction
+            </span>
           </div>
           <p class="card-desc">Deep dark surfaces lit by electric violet. Focused, modern, and low-glare.</p>
           <div class="swatches">
@@ -359,6 +428,7 @@
             <span class="card-name">Aurora</span>
             <span class="card-arrow" aria-hidden="true">&rarr;</span>
           </div>
+          <div class="card-tags"><span class="alt-note">Explored alternative</span></div>
           <p class="card-desc">Midnight green with gold and teal accents. Rich, premium, and atmospheric.</p>
           <div class="swatches">
             <div class="swatch"><span class="chip" style="background:#0A1613"></span><span class="hex">#0A1613</span></div>
@@ -373,6 +443,7 @@
             <span class="card-name">Luminous</span>
             <span class="card-arrow" aria-hidden="true">&rarr;</span>
           </div>
+          <div class="card-tags"><span class="alt-note">Explored alternative</span></div>
           <p class="card-desc">Bright white with indigo and emerald. Crisp, airy, and confidently minimal.</p>
           <div class="swatches">
             <div class="swatch"><span class="chip" style="background:#FFFFFF"></span><span class="hex">#FFFFFF</span></div>
@@ -386,27 +457,41 @@
     <section class="section">
       <div class="section-head">
         <h2>Identity</h2>
-        <span class="count">Gallery</span>
+        <span class="count">Owl selected &middot; gallery</span>
       </div>
 
-      <a class="card logo-card" href="./logo/index.html">
+      <a class="card logo-card selected" href="./logo/index.html">
         <div class="logo-text">
           <div class="card-top">
-            <span class="card-name">Logo Gallery</span>
+            <span class="card-name">Owl</span>
           </div>
-          <p class="card-desc">Explore the full set of pansoph logo concepts, marks, and wordmark treatments side by side.</p>
+          <div class="card-tags">
+            <span class="selected-badge">
+              <svg class="check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              Selected logo
+            </span>
+          </div>
+          <p class="card-desc">The eye-of-wisdom owl monogram. Open the gallery to see the full set of explored marks, lockups, and wordmark treatments side by side.</p>
         </div>
         <div class="logo-marks">
-          <span class="mark m1">p</span>
-          <span class="mark m2">p</span>
-          <span class="mark m3">p</span>
+          <span class="mark owl-mark">
+            <svg viewBox="0 0 128 128" role="img" aria-label="pansoph owl mark">
+              <path d="M64 16 C92 16 108 34 108 62 C108 92 90 112 64 112 C38 112 20 92 20 62 C20 34 36 16 64 16 Z" fill="none" stroke="#F4F4F5" stroke-width="5" stroke-linejoin="round"/>
+              <path d="M30 52 C34 34 48 30 56 44 M98 52 C94 34 80 30 72 44" fill="none" stroke="#F4F4F5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="47" cy="58" r="16" fill="none" stroke="#F4F4F5" stroke-width="5"/>
+              <circle cx="81" cy="58" r="16" fill="none" stroke="#F4F4F5" stroke-width="5"/>
+              <circle cx="47" cy="58" r="6.5" fill="#F4F4F5"/>
+              <circle cx="81" cy="58" r="6.5" fill="#1FA6A0"/>
+              <path d="M58 74 L70 74 L64 88 Z" fill="#1FA6A0"/>
+            </svg>
+          </span>
         </div>
       </a>
     </section>
 
     <footer>
       <span class="brand">pansoph</span>
-      <span>Review the options, then choose a direction.</span>
+      <span>Direction locked: Obsidian UI with the Owl mark. Alternatives kept for reference.</span>
     </footer>
   </div>
 </body>
