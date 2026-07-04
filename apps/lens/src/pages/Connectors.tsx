@@ -8,6 +8,7 @@ import {
   type Instance,
   instanceRuns,
   listInstances,
+  oauthAuthorizeUrl,
   type RunInfo,
   type SpecField,
   type SpecFieldKind,
@@ -1021,13 +1022,25 @@ function OAuthConnect({
   // The authorize endpoint is keyed by the OAuth provider (google, slack, atlassian,
   // github). Fall back to the connector name when the provider is not one we recognize.
   const authorizeSlug = provider?.key ?? connector;
-  const href =
-    `/api/oauth/${encodeURIComponent(authorizeSlug)}/authorize` +
-    `?connector=${encodeURIComponent(connector)}` +
-    `&instance=${encodeURIComponent(instanceId)}` +
-    `&tenant=${encodeURIComponent(tenant)}`;
   const label = provider?.label ?? "provider";
   const Glyph = provider?.glyph;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // The authorize endpoint is bearer gated, so a plain link would 401. Fetch the consent
+  // URL with the token, then navigate the browser to the provider. A 400 here means the
+  // provider is not configured yet (its client id/secret env var is unset).
+  async function connect() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const url = await oauthAuthorizeUrl(authorizeSlug, connector, instanceId, tenant);
+      window.location.href = url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "could not start the connect flow");
+      setBusy(false);
+    }
+  }
 
   return (
     <div>
@@ -1036,22 +1049,27 @@ function OAuthConnect({
         authenticate
         <span className="h-px flex-1 bg-border" />
       </div>
-      <a
-        href={href}
-        className="flex w-full items-center justify-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 text-sm font-semibold shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)] transition hover:brightness-105 focus-visible:outline-none active:translate-y-px"
+      <button
+        type="button"
+        onClick={connect}
+        disabled={busy}
+        className="flex w-full items-center justify-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 text-sm font-semibold shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)] transition hover:brightness-105 focus-visible:outline-none active:translate-y-px disabled:opacity-60"
         style={{
           background: provider?.bg ?? "var(--ob-elevated)",
           color: provider?.fg ?? "var(--ob-text)",
           borderColor: provider?.border ?? "var(--ob-border)",
         }}
       >
-        {Glyph ? (
+        {busy ? (
+          <Spinner className="border-white/40 border-t-white" />
+        ) : Glyph ? (
           <Glyph width={18} height={18} />
         ) : (
           <IconLock width={16} height={16} />
         )}
-        Connect with {label}
-      </a>
+        {busy ? "Connecting" : `Connect with ${label}`}
+      </button>
+      {err && <p className="mt-2 text-center text-[11.5px] text-err">{err}</p>}
       <p className="mt-3 text-center text-[11.5px] text-muted">
         Redirects to {label}. pansoph stores a scoped refresh token only
         {editing ? "" : ", once you add the connector"}.

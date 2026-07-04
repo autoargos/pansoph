@@ -218,6 +218,31 @@ export async function syncInstance(id: string): Promise<{ status: string; docs_i
   return (await res.json()) as { status: string; docs_indexed: number; error?: string };
 }
 
+// Start an OAuth connect flow. The authorize endpoint is bearer gated (connecting a
+// source provisions a credential), so the app fetches the provider consent URL with the
+// token and then navigates the browser to it. A plain link would 401 because a top level
+// navigation cannot carry the token.
+export async function oauthAuthorizeUrl(
+  provider: string,
+  connector: string,
+  instance: string,
+  tenant: string,
+): Promise<string> {
+  const query =
+    `?connector=${encodeURIComponent(connector)}` +
+    `&instance=${encodeURIComponent(instance)}` +
+    `&tenant=${encodeURIComponent(tenant)}`;
+  const res = await fetch(`/api/oauth/${encodeURIComponent(provider)}/authorize${query}`, {
+    headers: authHeader(),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail ?? `could not start connect (${res.status})`);
+  }
+  const data = (await res.json()) as { authorize_url: string };
+  return data.authorize_url;
+}
+
 export interface Health {
   ok: boolean;
   checks: Record<string, { ok: boolean; latency_ms?: number; error?: string }>;

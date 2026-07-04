@@ -280,6 +280,13 @@ def _serialize_field(f: Any) -> dict[str, Any]:
         out["help"] = f.help
     if f.placeholder:
         out["placeholder"] = f.placeholder
+    # An OAUTH-kind field carries which provider to connect through and the scopes to
+    # request, so the UI can render the right "Connect with X" button and initiate the
+    # flow. Only present on oauth fields.
+    if getattr(f, "oauth_provider", None):
+        out["oauth_provider"] = f.oauth_provider
+    if getattr(f, "oauth_scopes", None):
+        out["oauth_scopes"] = list(f.oauth_scopes)
     return out
 
 
@@ -427,13 +434,15 @@ async def oauth_authorize(
     instance: str,
     tenant: str = "default",
     user: Any = Depends(_CONNECTOR_ADMIN),
-) -> RedirectResponse:
-    """Start the connect flow: 302 to the provider consent screen.
+) -> dict[str, str]:
+    """Start the connect flow: return the provider consent URL for the app to navigate to.
 
-    Gated to a connector admin, since connecting a source provisions a credential.
-    Records a single-use state (and a PKCE challenge where supported) and redirects
-    to the provider. An unknown provider is a 404; an unconfigured one (missing
-    client id/secret) is a 400 naming the env var to set.
+    Gated to a connector admin, since connecting a source provisions a credential. The
+    app calls this with a bearer token (via fetch) and receives JSON, then sends the
+    browser to `authorize_url`. It returns a URL rather than a 302 because a plain
+    top-level navigation cannot carry the operator's token. Records a single-use state
+    (and a PKCE challenge where supported). An unknown provider is a 404; an unconfigured
+    one (missing client id/secret) is a 400 naming the env var to set.
     """
     from .oauth import ProviderNotConfiguredError, UnknownProviderError
 
@@ -447,7 +456,7 @@ async def oauth_authorize(
     except ProviderNotConfiguredError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     audit("oauth_authorize", actor=user.id, tenant=tenant, provider=provider, instance=instance)
-    return RedirectResponse(url, status_code=302)
+    return {"authorize_url": url}
 
 
 @router.get("/oauth/{provider}/callback")
