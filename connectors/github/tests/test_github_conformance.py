@@ -45,6 +45,25 @@ async def test_github_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
 
 
 @pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_github_acl_fetched_once_across_files(respx_mock: respx.MockRouter) -> None:
+    # Regression: the ACL is repo level, so fetching it (and the repo metadata) per file
+    # doubled API calls and exhausted the unauthenticated rate limit mid-sync. One repo
+    # call must serve many fetches.
+    repo = respx_mock.get(path=_REPO).mock(
+        return_value=httpx.Response(200, json={"default_branch": "main", "private": False})
+    )
+    respx_mock.get(url__regex=rf"{_REPO}/contents/.*").mock(
+        return_value=httpx.Response(200, json={"content": "", "encoding": "base64"})
+    )
+    conn = _factory()
+    for path in ("a.py", "b.py", "c.py"):
+        _, acl = await conn.fetch(conn._ref(path))
+        assert acl.public is True
+    assert repo.call_count == 1
+
+
+@pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
 async def test_github_permissions_private_repo(respx_mock: respx.MockRouter) -> None:

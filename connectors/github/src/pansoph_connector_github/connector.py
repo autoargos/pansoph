@@ -101,6 +101,11 @@ class GithubConnector:
         # `max_files`, so a token's rate limit is respected.
         self._path: str = cfg.get("path", "")
         self._max_files: int = int(cfg.get("max_files", 300))
+        # Per-sync caches. The repo metadata and the repo-level ACL are the same for every
+        # file, so fetch them once instead of once per file. Fetching the ACL per file was
+        # doubling API calls and exhausting the unauthenticated rate limit mid-sync.
+        self._repo_info_cache: dict[str, Any] | None = None
+        self._acl_cache: AccessControl | None = None
         self.meta = ConnectorMeta(
             name="github",
             auth=AuthScheme.api_token,
@@ -267,9 +272,13 @@ class GithubConnector:
         return DocRef(source_doc_id=path, instance_id=self.instance_id)
 
     async def _repo_info(self, client: httpx.AsyncClient) -> dict[str, Any]:
-        resp = await client.get(f"/repos/{self._owner}/{self._repo}")
-        resp.raise_for_status()
-        return resp.json()
+        # Cached for the life of the connector (one sync run), so listing and every fetch
+        # share a single repo metadata call.
+        if self._repo_info_cache is None:
+            resp = await client.get(f"/repos/{self._owner}/{self._repo}")
+            resp.raise_for_status()
+            self._repo_info_cache = resp.json()
+        return self._repo_info_cache
 
     async def _latest_commit_date(self, client: httpx.AsyncClient) -> str | None:
         resp = await client.get(
@@ -322,10 +331,14 @@ class GithubConnector:
         return None
 
     async def _acl(self, client: httpx.AsyncClient) -> AccessControl:
+        # The ACL is repo level, so compute it once per sync and reuse it for every file.
+        if self._acl_cache is not None:
+            return self._acl_cache
         repo = await self._repo_info(client)
         ns = self.instance_id
         if not repo.get("private", False) or repo.get("visibility") == "public":
-            return AccessControl(public=True, principal_ns=ns)
+            self._acl_cache = AccessControl(public=True, principal_ns=ns)
+            return self._acl_cache
         users = [
             login
             async for login in self._paginate_field(
@@ -341,7 +354,8 @@ class GithubConnector:
                 client, f"/repos/{self._owner}/{self._repo}/teams", {"per_page": 100}, "slug"
             )
         ]
-        return AccessControl(allow_users=users, allow_groups=groups, principal_ns=ns)
+        self._acl_cache = AccessControl(allow_users=users, allow_groups=groups, principal_ns=ns)
+        return self._acl_cache
 
     async def _paginate_field(
         self, client: httpx.AsyncClient, path: str, params: dict[str, Any], field: str
