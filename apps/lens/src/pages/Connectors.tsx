@@ -1,115 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  connectorTypes,
+  type ConnectorSpec,
+  connectorSpecs,
   createInstance,
   deleteInstance,
   type Instance,
   instanceRuns,
   listInstances,
   type RunInfo,
+  type SpecField,
+  type SpecFieldKind,
   syncInstance,
 } from "../api.ts";
 import { Badge, Button, Card, Dot, Field, PageHeader, relativeTime, Spinner } from "../ui.tsx";
 
-// What each connector type needs. Drives the Add form so it shows the right fields
-// instead of a raw JSON box.
-interface FieldDef {
-  key: string;
-  label: string;
-  placeholder?: string;
-  help?: string;
-  kind?: "text" | "number" | "lines" | "csv" | "checkbox";
-}
-interface ConnDef {
-  label: string;
-  blurb: string;
-  fields: FieldDef[];
+// Fields whose value is a checkbox in the form. A single source of truth so the value
+// bookkeeping and the config builder agree.
+function isBoolField(kind: SpecFieldKind): boolean {
+  return kind === "bool";
 }
 
-const CONNECTORS: Record<string, ConnDef> = {
-  github: {
-    label: "GitHub",
-    blurb: "A repository's docs and code.",
-    fields: [
-      { key: "owner", label: "Owner", placeholder: "facebook" },
-      { key: "repo", label: "Repository", placeholder: "react" },
-      {
-        key: "token",
-        label: "Token",
-        placeholder: "github_pat_…",
-        help: "Optional for public repos. Needed for private repos or to avoid rate limits.",
-      },
-      { key: "path", label: "Path filter", placeholder: "docs", help: "Optional. Limit to a folder." },
-      { key: "max_files", label: "Max files", placeholder: "300", kind: "number" },
-    ],
-  },
-  weblink: {
-    label: "Public links",
-    blurb: "Any directly-fetchable URLs.",
-    fields: [
-      { key: "urls", label: "URLs (one per line)", placeholder: "https://example.com/page", kind: "lines" },
-      { key: "public", label: "Public to everyone", kind: "checkbox" },
-      { key: "allow_groups", label: "Restrict to groups", placeholder: "g1, g2", kind: "csv" },
-    ],
-  },
-  google_drive: {
-    label: "Google Drive",
-    blurb: "Files and Docs from Drive.",
-    fields: [
-      {
-        key: "token",
-        label: "OAuth access token",
-        placeholder: "ya29.…",
-        help: "From the OAuth Playground with scope drive.readonly.",
-      },
-      {
-        key: "folder_id",
-        label: "Folder ID",
-        placeholder: "1AbC…",
-        help: "Optional. Confine this instance to a single folder.",
-      },
-      {
-        key: "drive_id",
-        label: "Shared drive ID",
-        placeholder: "0AbC…",
-        help: "Optional. Set when the folder lives in a shared drive.",
-      },
-      { key: "query", label: "Query", placeholder: "trashed=false", help: "Optional extra filter." },
-    ],
-  },
-  confluence: {
-    label: "Confluence",
-    blurb: "Pages from a Confluence Cloud site.",
-    fields: [
-      { key: "base_url", label: "Base URL", placeholder: "https://your-site.atlassian.net" },
-      { key: "email", label: "Email", placeholder: "you@company.com" },
-      { key: "token", label: "API token", placeholder: "ATATT…", help: "id.atlassian.com → API tokens." },
-      { key: "space_key", label: "Space key", placeholder: "ENG", help: "Optional." },
-    ],
-  },
-  granola: {
-    label: "Granola",
-    blurb: "Meeting notes via Granola's MCP server.",
-    fields: [{ key: "server_url", label: "Granola MCP URL", placeholder: "https://…/mcp" }],
-  },
-  mcp: {
-    label: "MCP bridge",
-    blurb: "Any MCP server that exposes resources.",
-    fields: [
-      { key: "server_url", label: "MCP server URL", placeholder: "http://mcp-sample:8000/mcp" },
-      {
-        key: "resource_uri_prefix",
-        label: "Resource URI prefix",
-        placeholder: "notes://",
-        help: "Optional. Confine this instance to resources under this prefix.",
-      },
-      { key: "public", label: "Public to everyone", kind: "checkbox" },
-      { key: "allow_groups", label: "Restrict to groups", placeholder: "g1", kind: "csv" },
-    ],
-  },
-  memory: { label: "In-memory (test)", blurb: "A built-in test connector.", fields: [] },
-};
+// Fields the browser should mask. Secrets never round-trip through the bundle as plain
+// text, and the backend never returns their values, so these render empty every time.
+function isSecretField(kind: SpecFieldKind): boolean {
+  return kind === "secret" || kind === "secret_file" || kind === "oauth";
+}
 
 const SCHEDULES: Array<[string, number]> = [
   ["Manual", 0],
@@ -145,27 +61,27 @@ function fmtDuration(s: number | null): string {
   return s < 1 ? `${Math.round(s * 1000)}ms` : `${s.toFixed(1)}s`;
 }
 
-function configToValues(connector: string, config: Record<string, unknown>): Record<string, string> {
+function configToValues(spec: ConnectorSpec | undefined, config: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const f of CONNECTORS[connector]?.fields ?? []) {
-    if (f.kind === "checkbox") continue;
+  for (const f of spec?.fields ?? []) {
+    if (isBoolField(f.kind) || isSecretField(f.kind)) continue;
     const v = config[f.key];
-    if (Array.isArray(v)) out[f.key] = v.join(f.kind === "lines" ? "\n" : ", ");
+    if (Array.isArray(v)) out[f.key] = v.join("\n");
     else if (v != null) out[f.key] = String(v);
   }
   return out;
 }
 
-function configToChecks(connector: string, config: Record<string, unknown>): Record<string, boolean> {
+function configToChecks(spec: ConnectorSpec | undefined, config: Record<string, unknown>): Record<string, boolean> {
   const out: Record<string, boolean> = {};
-  for (const f of CONNECTORS[connector]?.fields ?? []) {
-    if (f.kind === "checkbox") out[f.key] = Boolean(config[f.key]);
+  for (const f of spec?.fields ?? []) {
+    if (isBoolField(f.kind)) out[f.key] = Boolean(config[f.key]);
   }
   return out;
 }
 
-function Avatar({ connector }: { connector: string }) {
-  const letter = (CONNECTORS[connector]?.label ?? connector).slice(0, 1).toUpperCase();
+function Avatar({ title }: { title: string }) {
+  const letter = title.slice(0, 1).toUpperCase();
   return (
     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-sm font-semibold text-accent-ink">
       {letter}
@@ -175,7 +91,7 @@ function Avatar({ connector }: { connector: string }) {
 
 export default function Connectors({ canManage }: { canManage: boolean }) {
   const [instances, setInstances] = useState<Instance[]>([]);
-  const [types, setTypes] = useState<string[]>([]);
+  const [specs, setSpecs] = useState<ConnectorSpec[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Instance | null>(null);
@@ -183,10 +99,17 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunInfo[]>([]);
 
+  // Human title per registry name, so a card shows "GitHub" not "github". Falls back to
+  // the raw name for an instance whose connector no longer declares a spec.
+  const titleOf = useMemo(() => {
+    const map = new Map(specs.map((s) => [s.name, s.title]));
+    return (name: string): string => map.get(name) ?? name;
+  }, [specs]);
+
   async function refresh() {
-    const [inst, ty] = await Promise.all([listInstances(), connectorTypes()]);
+    const [inst, sp] = await Promise.all([listInstances(), connectorSpecs()]);
     setInstances(inst);
-    setTypes(ty);
+    setSpecs(sp);
     setLoading(false);
   }
 
@@ -246,7 +169,7 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
             return (
               <Card key={inst.id} className="overflow-hidden">
                 <div className="flex items-center gap-4 px-5 py-4">
-                  <Avatar connector={inst.connector} />
+                  <Avatar title={titleOf(inst.connector)} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium">{inst.name}</span>
@@ -372,7 +295,7 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
 
       {(adding || editing) && (
         <ConnectorForm
-          types={types}
+          specs={specs}
           editing={editing}
           onClose={() => {
             setAdding(false);
@@ -390,27 +313,28 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
 }
 
 function ConnectorForm({
-  types,
+  specs,
   editing,
   onClose,
   onSaved,
 }: {
-  types: string[];
+  specs: ConnectorSpec[];
   editing: Instance | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const ordered = useMemo(
-    () => types.filter((t) => t in CONNECTORS).sort((a, b) => (a === "github" ? -1 : b === "github" ? 1 : 0)),
-    [types],
-  );
-  const [connector, setConnector] = useState(editing?.connector ?? ordered[0] ?? "github");
+  // The backend already returns specs sorted by title, so preserve that order.
+  const [connector, setConnector] = useState(editing?.connector ?? specs[0]?.name ?? "");
   const [name, setName] = useState(editing?.name ?? "");
+  const def = useMemo<ConnectorSpec | undefined>(
+    () => specs.find((s) => s.name === connector),
+    [specs, connector],
+  );
   const [values, setValues] = useState<Record<string, string>>(() =>
-    editing ? configToValues(editing.connector, editing.config) : {},
+    editing ? configToValues(specs.find((s) => s.name === editing.connector), editing.config) : {},
   );
   const [checks, setChecks] = useState<Record<string, boolean>>(() =>
-    editing ? configToChecks(editing.connector, editing.config) : {},
+    editing ? configToChecks(specs.find((s) => s.name === editing.connector), editing.config) : {},
   );
   const [schedule, setSchedule] = useState(editing?.schedule_seconds ?? 0);
   const [cronMode, setCronMode] = useState(!!editing?.schedule_cron);
@@ -420,27 +344,26 @@ function ConnectorForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const def = CONNECTORS[connector];
-
   function changeType(t: string) {
     setConnector(t);
     setValues({});
     setChecks({});
   }
 
+  // Build the config object with the type each field kind implies: bool a boolean, int a
+  // number, list a string array (split on newlines), everything else a string.
   function buildConfig(): Record<string, unknown> {
     const config: Record<string, unknown> = {};
-    for (const f of def.fields) {
-      const raw = (values[f.key] ?? "").trim();
-      if (f.kind === "checkbox") {
+    for (const f of def?.fields ?? []) {
+      if (isBoolField(f.kind)) {
         if (checks[f.key]) config[f.key] = true;
-      } else if (f.kind === "number") {
-        if (raw) config[f.key] = parseInt(raw, 10);
-      } else if (f.kind === "lines") {
+        continue;
+      }
+      const raw = (values[f.key] ?? "").trim();
+      if (f.kind === "int") {
+        if (raw) config[f.key] = Number(raw);
+      } else if (f.kind === "list") {
         const arr = raw.split("\n").map((s) => s.trim()).filter(Boolean);
-        if (arr.length) config[f.key] = arr;
-      } else if (f.kind === "csv") {
-        const arr = raw.split(",").map((s) => s.trim()).filter(Boolean);
         if (arr.length) config[f.key] = arr;
       } else if (raw) {
         config[f.key] = raw;
@@ -453,7 +376,7 @@ function ConnectorForm({
     setBusy(true);
     setError(null);
     try {
-      const finalName = name.trim() || def.label;
+      const finalName = name.trim() || def?.title || connector;
       await createInstance({
         connector,
         name: finalName,
@@ -484,7 +407,7 @@ function ConnectorForm({
     >
       <Card className="max-h-[88vh] w-full max-w-md overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold">{editing ? "Edit connector" : "Add connector"}</h2>
-        <p className="mb-4 mt-0.5 text-sm text-muted">{def?.blurb}</p>
+        <p className="mb-4 mt-0.5 text-sm text-muted">{def?.description}</p>
         <div className="space-y-3">
           <Field label="Type">
             <select
@@ -493,9 +416,9 @@ function ConnectorForm({
               className={`${inputCls} disabled:opacity-60`}
               disabled={!!editing}
             >
-              {ordered.map((t) => (
-                <option key={t} value={t}>
-                  {CONNECTORS[t].label}
+              {specs.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.title}
                 </option>
               ))}
             </select>
@@ -506,42 +429,11 @@ function ConnectorForm({
               className={inputCls}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={`e.g. ${def?.label}`}
+              placeholder={`e.g. ${def?.title ?? connector}`}
             />
           </Field>
 
-          {def?.fields.map((f) =>
-            f.kind === "checkbox" ? (
-              <label key={f.key} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={!!checks[f.key]}
-                  onChange={(e) => setChecks({ ...checks, [f.key]: e.target.checked })}
-                />
-                {f.label}
-              </label>
-            ) : (
-              <Field key={f.key} label={f.label}>
-                {f.kind === "lines" ? (
-                  <textarea
-                    className={`${inputCls} font-mono text-xs`}
-                    rows={3}
-                    value={values[f.key] ?? ""}
-                    onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-                    placeholder={f.placeholder}
-                  />
-                ) : (
-                  <input
-                    className={inputCls}
-                    value={values[f.key] ?? ""}
-                    onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-                    placeholder={f.placeholder}
-                  />
-                )}
-                {f.help && <span className="mt-1 block text-xs text-faint">{f.help}</span>}
-              </Field>
-            ),
-          )}
+          {def?.fields.map((f) => <SpecFieldInput key={f.key} field={f} values={values} checks={checks} setValues={setValues} setChecks={setChecks} inputCls={inputCls} />)}
 
           <Field label="Scope">
             <select
@@ -620,5 +512,68 @@ function ConnectorForm({
         </div>
       </Card>
     </div>
+  );
+}
+
+// One form control, chosen from the field's declared kind. This is the whole of the
+// spec-driven rendering: string renders text, int renders number, bool renders a checkbox,
+// list renders a newline textarea, and secret / secret_file / oauth render a masked
+// password input (oauth has no interactive flow yet, so it is entered by hand for now).
+function SpecFieldInput({
+  field,
+  values,
+  checks,
+  setValues,
+  setChecks,
+  inputCls,
+}: {
+  field: SpecField;
+  values: Record<string, string>;
+  checks: Record<string, boolean>;
+  setValues: (v: Record<string, string>) => void;
+  setChecks: (v: Record<string, boolean>) => void;
+  inputCls: string;
+}) {
+  const { key, label, kind, required, help, placeholder } = field;
+  const legend = required ? label : `${label} (optional)`;
+
+  if (isBoolField(kind)) {
+    return (
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={!!checks[key]}
+          onChange={(e) => setChecks({ ...checks, [key]: e.target.checked })}
+        />
+        {label}
+      </label>
+    );
+  }
+
+  const control =
+    kind === "list" ? (
+      <textarea
+        className={`${inputCls} font-mono text-xs`}
+        rows={3}
+        value={values[key] ?? ""}
+        onChange={(e) => setValues({ ...values, [key]: e.target.value })}
+        placeholder={placeholder}
+      />
+    ) : (
+      <input
+        className={inputCls}
+        type={isSecretField(kind) ? "password" : kind === "int" ? "number" : "text"}
+        autoComplete={isSecretField(kind) ? "off" : undefined}
+        value={values[key] ?? ""}
+        onChange={(e) => setValues({ ...values, [key]: e.target.value })}
+        placeholder={placeholder}
+      />
+    );
+
+  return (
+    <Field label={legend}>
+      {control}
+      {help && <span className="mt-1 block text-xs text-faint">{help}</span>}
+    </Field>
   );
 }

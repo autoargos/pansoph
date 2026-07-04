@@ -139,6 +139,38 @@ export async function connectorTypes(): Promise<string[]> {
   return (await jget<{ available: string[] }>("/api/connectors")).available;
 }
 
+// A connector's declared config schema, surfaced by the backend so the Add form can be
+// rendered from the source of truth instead of a hardcoded map. See the ConnectorSpec /
+// FieldKind dataclasses in pansoph-connector-sdk.
+export type SpecFieldKind =
+  | "string"
+  | "int"
+  | "bool"
+  | "list"
+  | "secret"
+  | "secret_file"
+  | "oauth";
+
+export interface SpecField {
+  key: string;
+  label: string;
+  kind: SpecFieldKind;
+  required: boolean;
+  help?: string;
+  placeholder?: string;
+}
+
+export interface ConnectorSpec {
+  name: string;
+  title: string;
+  description: string;
+  fields: SpecField[];
+}
+
+export async function connectorSpecs(): Promise<ConnectorSpec[]> {
+  return (await jget<{ connectors: ConnectorSpec[] }>("/api/connectors/specs")).connectors;
+}
+
 export async function listInstances(): Promise<Instance[]> {
   return (await jget<{ instances: Instance[] }>("/api/connectors/instances")).instances;
 }
