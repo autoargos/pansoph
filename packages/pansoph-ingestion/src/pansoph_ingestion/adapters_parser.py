@@ -9,6 +9,8 @@ hierarchy. Docling is an optional dependency (install pansoph-ingestion[docling]
 from __future__ import annotations
 
 import io
+import re
+from html.parser import HTMLParser
 
 from pansoph_types import RawDoc, Section
 
@@ -19,7 +21,13 @@ class DoclingParser:
     async def parse(self, raw: RawDoc) -> ParsedDoc:
         # Fast path: the connector already gave us text.
         if raw.text is not None:
-            sections = _split_markdown(raw.text)
+            text = raw.text
+            # HTML is not "already textual": a raw web page is mostly markup, script, and
+            # style. Left as is it becomes one enormous chunk of tags that poisons both
+            # retrieval and the answer prompt. Strip it to readable text first.
+            if _looks_like_html(raw):
+                text = _html_to_text(text)
+            sections = _split_markdown(text)
             return ParsedDoc(title=raw.title, lang=raw.lang, sections=sections)
 
         if raw.content is None:
@@ -59,3 +67,66 @@ def _split_markdown(text: str) -> list[Section]:
             buf.append(line)
     flush()
     return sections or [Section(text=text.strip())]
+
+
+def _looks_like_html(raw: RawDoc) -> bool:
+    """True when the connector handed us HTML rather than plain text or markdown."""
+    mime = (getattr(raw, "mime", "") or "").lower()
+    if "html" in mime:
+        return True
+    head = (raw.text or "")[:512].lstrip().lower()
+    return head.startswith(("<!doctype html", "<html")) or ("<body" in head and "<" in head)
+
+
+# Elements whose text content is never document content (scripts, styling, metadata).
+_DROP_TAGS = frozenset(
+    {"script", "style", "noscript", "head", "svg", "template", "iframe", "canvas"}
+)
+# Block-level tags: emit a newline so words from adjacent blocks do not run together.
+_BLOCK_TAGS = frozenset(
+    {"p", "div", "br", "li", "tr", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6"}
+)
+
+
+class _TextExtractor(HTMLParser):
+    """Pull readable text out of an HTML document, dropping script/style/head noise.
+
+    Stdlib only (no new dependency): good enough to turn a fetched web page into clean
+    text for chunking and embedding. Not a full readability extractor, but it removes the
+    markup and non-content that was flooding the model.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._drop_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: object) -> None:
+        if tag in _DROP_TAGS:
+            self._drop_depth += 1
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _DROP_TAGS and self._drop_depth > 0:
+            self._drop_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._drop_depth == 0:
+            piece = data.strip()
+            if piece:
+                self.parts.append(piece + " ")
+
+
+def _html_to_text(html: str) -> str:
+    """Strip HTML to readable text, collapsing runs of whitespace."""
+    parser = _TextExtractor()
+    try:
+        parser.feed(html)
+        text = "".join(parser.parts)
+    except Exception:
+        # Never let a malformed page break ingestion: fall back to a crude tag strip.
+        text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
+    return text.strip()
