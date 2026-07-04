@@ -339,15 +339,35 @@ def _attach_auth(connector: Any, tenant_id: str, provider: Any = None) -> None:
     connector.token_source = provider.token_source(tenant_id, requirement)
 
 
+def _connector_spec(connector: str) -> Any | None:
+    """Return a connector's declared ConnectorSpec, or None when it declares none.
+
+    Resolves the connector through the registry (never importing it here) and reads
+    its `spec()` classmethod. Swallows a load or spec error into None so a missing or
+    old spec never blocks creation or the oauth flow; callers treat None as "no
+    declared fields".
+    """
+    try:
+        cls = load_adapter("pansoph.connectors", connector)
+    except Exception:  # noqa: BLE001  an unknown connector is handled by the caller
+        return None
+    spec_fn = getattr(cls, "spec", None)
+    if spec_fn is None:
+        return None
+    try:
+        return spec_fn()
+    except Exception:  # noqa: BLE001  a broken spec must never block creation
+        return None
+
+
 def _connector_secret_keys(connector: str) -> tuple[str, ...]:
     """The secret-kind field keys a connector declares in its ConnectorSpec, or () when it
     declares no spec (the transitional case until every connector adopts one)."""
-    cls = load_adapter("pansoph.connectors", connector)
-    spec_fn = getattr(cls, "spec", None)
-    if spec_fn is None:
+    spec = _connector_spec(connector)
+    if spec is None:
         return ()
     try:
-        return tuple(spec_fn().secret_keys())
+        return tuple(spec.secret_keys())
     except Exception:  # noqa: BLE001  a missing or old spec must never block creation
         return ()
 

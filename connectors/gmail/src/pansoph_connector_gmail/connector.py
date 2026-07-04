@@ -8,12 +8,16 @@ Implemented against the Gmail API (REST v1). Verified against the official docs:
                https://developers.google.com/gmail/api/guides/filtering (q search)
   API version: v1
   Base URL:    https://gmail.googleapis.com/gmail/v1 (config base_url override).
-  Auth:        OAuth 2.0 bearer access token, operator provided. The token is sent
-               as "Authorization: Bearer <token>" on every request. pansoph does not
-               run the OAuth flow; the operator supplies a current access token in
-               config under "token". The mailbox owner is config "user_email", and
-               the API path uses the special userId "me" to mean that authenticated
-               mailbox.
+  Auth:        OAuth 2.0 bearer access token. The connector declares an OAUTH config
+               field (key "token", oauth_provider "google", scope gmail.readonly), so
+               the in-app Google OAuth flow (access_type=offline, prompt=consent) mints
+               and seals the token into that field; a current access token may also be
+               pasted by hand into the same field. Verified against Google Identity
+               OAuth 2.0 web server docs on 2026-07-04:
+               https://developers.google.com/identity/protocols/oauth2/web-server
+               The token is sent as "Authorization: Bearer <token>" on every request.
+               The mailbox owner is config "user_email", and the API path uses the
+               special userId "me" to mean that authenticated mailbox.
   Pagination:  users.messages.list returns up to maxResults ids per page and a
                nextPageToken. Follow nextPageToken until it is absent.
   Incremental: Gmail exposes two mechanisms. The strongest is users.history.list
@@ -86,12 +90,16 @@ class GmailConnector:
             fields=(
                 ConfigField(
                     key="token",
-                    label="OAuth access token",
-                    kind=FieldKind.SECRET,
+                    label="Gmail (OAuth)",
+                    kind=FieldKind.OAUTH,
+                    oauth_provider="google",
+                    oauth_scopes=("https://www.googleapis.com/auth/gmail.readonly",),
                     help=(
-                        "A current Gmail OAuth 2.0 bearer access token. Sent as "
-                        "Authorization: Bearer on every request and sealed in the secret "
-                        "store. pansoph does not run the OAuth flow yet, so paste a token."
+                        "Connect Gmail with Google OAuth 2.0 (read only, "
+                        "gmail.readonly). The in-app flow seals the access token (and a "
+                        "refresh token) into this field. You can still paste a current "
+                        "bearer access token by hand; it is sealed in the secret store "
+                        "and sent as Authorization: Bearer on every request."
                     ),
                 ),
                 ConfigField(

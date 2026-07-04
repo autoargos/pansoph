@@ -158,6 +158,29 @@ def build_secret_store() -> Any:
     )
 
 
+def build_oauth_flow() -> Any:
+    """Build the OAuthFlow used by the connect-a-source routes.
+
+    Wires the durable Postgres state store, the configured secret store, a fresh
+    httpx client, and the connector manager, using the public base URL an operator
+    configures so the redirect_uri matches what is registered with each provider.
+    Built per call (cheap) so a config change is picked up without a restart.
+    """
+    import httpx
+
+    from .connectors import ConnectorManager
+    from .oauth import OAuthFlow, PostgresStateStore
+
+    dsn = _postgres_dsn()
+    return OAuthFlow(
+        manager=ConnectorManager(dsn),
+        state_store=PostgresStateStore(dsn),
+        secret_store=build_secret_store(),
+        http=httpx.AsyncClient(),
+        public_base_url=_env("PANSOPH_PUBLIC_BASE_URL", "http://localhost:8080"),
+    )
+
+
 _credential_provider: Any = None
 
 

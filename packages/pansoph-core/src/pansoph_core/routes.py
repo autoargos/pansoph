@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import RedirectResponse
 from pansoph_authz import TENANT_EVERYONE, Principal, membership_tuples, tuples_for_acl
 from pansoph_ingestion.chunking import chunk_sections
 from pansoph_retrieval.pipeline import retrieve
@@ -407,6 +408,83 @@ async def sync_instance(instance_id: str, user: Any = Depends(_CONNECTOR_ADMIN))
 @router.get("/connectors/instances/{instance_id}/runs")
 async def instance_runs(instance_id: str) -> dict[str, Any]:
     return {"runs": await _manager().runs_for(instance_id)}
+
+
+# --- OAuth "connect a source" flow ---
+#
+# An operator connects an oauth-capable connector through a provider consent screen
+# instead of pasting a token. The two endpoints are the exact contract the lens UI
+# depends on: authorize 302s to the provider, callback seals the returned tokens
+# into the named instance and 302s back to the connectors page. The heavy lifting
+# lives in pansoph_core.oauth; these handlers only map errors to HTTP and issue the
+# redirects. See pansoph_core/oauth/flow.py.
+
+
+@router.get("/oauth/{provider}/authorize")
+async def oauth_authorize(
+    provider: str,
+    connector: str,
+    instance: str,
+    tenant: str = "default",
+    user: Any = Depends(_CONNECTOR_ADMIN),
+) -> RedirectResponse:
+    """Start the connect flow: 302 to the provider consent screen.
+
+    Gated to a connector admin, since connecting a source provisions a credential.
+    Records a single-use state (and a PKCE challenge where supported) and redirects
+    to the provider. An unknown provider is a 404; an unconfigured one (missing
+    client id/secret) is a 400 naming the env var to set.
+    """
+    from .oauth import ProviderNotConfiguredError, UnknownProviderError
+
+    flow = assembly.build_oauth_flow()
+    try:
+        url = await flow.authorize(
+            provider=provider, connector=connector, instance=instance, tenant=tenant
+        )
+    except UnknownProviderError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProviderNotConfiguredError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit("oauth_authorize", actor=user.id, tenant=tenant, provider=provider, instance=instance)
+    return RedirectResponse(url, status_code=302)
+
+
+@router.get("/oauth/{provider}/callback")
+async def oauth_callback(
+    provider: str, code: str | None = None, state: str | None = None, error: str | None = None
+) -> RedirectResponse:
+    """Handle the provider redirect: validate state, exchange, seal, 302 back.
+
+    The provider calls this endpoint (the user's browser is redirected here), so it
+    cannot carry the operator's bearer token; the security check is the single-use
+    `state`, not a role. A user-denied consent arrives as `error` and is redirected
+    back with the reason rather than 500ing. On success the tokens are sealed into
+    the instance and the browser is sent to /connectors?connected={instanceId}.
+    """
+    from .oauth import (
+        CodeExchangeError,
+        ProviderNotConfiguredError,
+        StateError,
+        UnknownProviderError,
+    )
+
+    if error:
+        return RedirectResponse(f"/connectors?oauth_error={error}", status_code=302)
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="callback requires code and state")
+
+    flow = assembly.build_oauth_flow()
+    try:
+        instance_id = await flow.handle_callback(provider=provider, code=code, state=state)
+    except (StateError, UnknownProviderError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProviderNotConfiguredError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except CodeExchangeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    audit("oauth_callback", actor="oauth", tenant="", provider=provider, instance=instance_id)
+    return RedirectResponse(f"/connectors?connected={instance_id}", status_code=302)
 
 
 @router.get("/health")

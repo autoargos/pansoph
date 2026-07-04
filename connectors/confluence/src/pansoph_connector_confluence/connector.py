@@ -4,9 +4,27 @@ Implemented against the Confluence Cloud REST API.
 
   API docs:    https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content/
                https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content-restrictions/
-  Auth:        HTTP Basic with an Atlassian account email and an API token
-               (config: "base_url", "email", "token"). Creating the API token is the
-               operator's step; this connector does not run an OAuth flow.
+  Auth:        Two paths, both supported.
+               (1) OAuth 2.0 (3LO): the in-app Connect flow (provider "atlassian")
+                   mints a Bearer access token sealed into config key "oauth_token".
+                   When present, the connector sends "Authorization: Bearer <token>".
+                   Verified against
+                   https://developer.atlassian.com/cloud/confluence/oauth-2-3lo-apps/
+                   and the Confluence scope reference
+                   https://developer.atlassian.com/cloud/confluence/scopes-for-oauth-2-3LO-and-forge-apps/
+                   on 2026-07-04. Read scopes: read:confluence-content.all,
+                   read:confluence-space.summary, read:content.restriction:confluence,
+                   plus offline_access for refresh.
+               (2) HTTP Basic (manual paste) with an Atlassian account email and an
+                   API token (config: "base_url", "email", "token"). Creating the API
+                   token is the operator's step.
+  OAuth base:  A 3LO token is NOT scoped to a site origin. After consent the caller
+               resolves the cloudid via
+               https://api.atlassian.com/oauth/token/accessible-resources and
+               addresses the API at
+               https://api.atlassian.com/ex/confluence/{cloudid}. When an oauth_token
+               is configured, set base_url to that ex/confluence/{cloudid} origin.
+               This connector reads base_url as-is.
   Incremental: paginate content with start/limit; the version timestamp drives
                freshness (full re-list for the demo).
   ACL model:   a page's read restrictions map to the ACL. Restricted users become
@@ -34,6 +52,18 @@ from pansoph_connector_sdk import (
 )
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
+# Read-only OAuth 2.0 (3LO) scopes for the in-app Connect flow (provider
+# "atlassian"). Verified 2026-07-04 against the Confluence scope reference.
+# read:confluence-content.all covers page bodies, read:confluence-space.summary
+# covers space info, read:content.restriction:confluence covers the page read
+# restrictions the ACL expands, and offline_access yields a rotating refresh token.
+_OAUTH_SCOPES: tuple[str, ...] = (
+    "read:confluence-content.all",
+    "read:confluence-space.summary",
+    "read:content.restriction:confluence",
+    "offline_access",
+)
+
 
 class ConfluenceConnector:
     def __init__(self, instance_id: str, config: dict[str, Any] | None = None) -> None:
@@ -42,6 +72,7 @@ class ConfluenceConnector:
         self._base = str(cfg.get("base_url", "")).rstrip("/")
         self._email = cfg.get("email", "")
         self._token = cfg.get("token", "")
+        self._oauth_token = cfg.get("oauth_token", "")
         self._space = cfg.get("space_key", "")
         self.meta = ConnectorMeta(
             name="confluence",
@@ -66,9 +97,23 @@ class ConfluenceConnector:
                     help="Your Confluence Cloud site URL. The connector calls /wiki under it.",
                 ),
                 ConfigField(
+                    key="oauth_token",
+                    label="Connect with Atlassian",
+                    kind=FieldKind.OAUTH,
+                    required=False,
+                    oauth_provider="atlassian",
+                    oauth_scopes=_OAUTH_SCOPES,
+                    help=(
+                        "Sign in with Atlassian to mint a read-only OAuth token. "
+                        "Alternative to the email plus API token below. Sealed in "
+                        "the secret store."
+                    ),
+                ),
+                ConfigField(
                     key="email",
                     label="Account email",
                     kind=FieldKind.STRING,
+                    required=False,
                     placeholder="you@example.com",
                     help="Atlassian account email, paired with the API token for HTTP Basic auth.",
                 ),
@@ -76,7 +121,11 @@ class ConfluenceConnector:
                     key="token",
                     label="API token",
                     kind=FieldKind.SECRET,
-                    help="Atlassian API token for the account. Sealed in the secret store.",
+                    required=False,
+                    help=(
+                        "Atlassian API token for the account. Sealed in the secret "
+                        "store. Not needed if you connected with Atlassian above."
+                    ),
                 ),
                 ConfigField(
                     key="space_key",
@@ -90,16 +139,27 @@ class ConfluenceConnector:
         )
 
     def validate(self, config: dict[str, Any]) -> ValidationResult:
-        missing = [k for k in ("base_url", "email", "token") if not config.get(k)]
-        if missing:
-            return ValidationResult(ok=False, error=f"missing: {', '.join(missing)}")
+        if not config.get("base_url"):
+            return ValidationResult(ok=False, error="missing: base_url")
+        # Auth is satisfied either by an OAuth token or by an email plus API token.
+        has_oauth = bool(config.get("oauth_token"))
+        has_basic = bool(config.get("email")) and bool(config.get("token"))
+        if not has_oauth and not has_basic:
+            return ValidationResult(
+                ok=False,
+                error="missing auth: connect with Atlassian, or set email and token",
+            )
         return ValidationResult(ok=True)
 
     def _client(self) -> httpx.AsyncClient:
-        basic = base64.b64encode(f"{self._email}:{self._token}".encode()).decode()
-        return httpx.AsyncClient(
-            base_url=self._base, headers={"Authorization": f"Basic {basic}"}, timeout=30.0
-        )
+        # Prefer the OAuth Bearer token when the Connect flow sealed one; otherwise
+        # fall back to Basic auth with the manually pasted email plus API token.
+        if self._oauth_token:
+            auth = f"Bearer {self._oauth_token}"
+        else:
+            basic = base64.b64encode(f"{self._email}:{self._token}".encode()).decode()
+            auth = f"Basic {basic}"
+        return httpx.AsyncClient(base_url=self._base, headers={"Authorization": auth}, timeout=30.0)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
         async with self._client() as client:

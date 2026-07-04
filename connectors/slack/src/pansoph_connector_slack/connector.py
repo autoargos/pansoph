@@ -80,12 +80,22 @@ class SlackConnector:
                 ConfigField(
                     key="token",
                     label="Bearer token",
-                    kind=FieldKind.SECRET,
+                    kind=FieldKind.OAUTH,
+                    oauth_provider="slack",
+                    oauth_scopes=(
+                        "channels:read",
+                        "channels:history",
+                        "groups:read",
+                        "groups:history",
+                        "users:read",
+                    ),
                     placeholder="xoxb-... or xoxp-...",
                     help=(
-                        "Slack bot token (xoxb-) or user token (xoxp-). Sealed in the "
-                        "secret store. Needs channels:read, groups:read, channels:history, "
-                        "and groups:history."
+                        "Connect with Slack to mint a bot token via the in-app OAuth "
+                        "flow, or paste a bot token (xoxb-) or user token (xoxp-) "
+                        "directly. Either way it is sealed in the secret store. Needs "
+                        "channels:read, groups:read, channels:history, groups:history, "
+                        "and users:read."
                     ),
                 ),
                 ConfigField(

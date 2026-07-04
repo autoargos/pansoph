@@ -5,11 +5,15 @@ Implemented against the Google Drive API v3.
   API docs:    https://developers.google.com/drive/api/reference/rest/v3/files/list
                https://developers.google.com/drive/api/reference/rest/v3/changes/list
                https://developers.google.com/drive/api/reference/rest/v3/permissions/list
-  Auth:        OAuth2 bearer access token (config: "token"). The token must have a
-               read scope (drive.readonly or drive.metadata.readonly + file read).
-               Obtaining the token (OAuth consent or a service account with domain
-               delegation) is the operator's step; this connector does not run the
-               OAuth flow.
+  Auth:        OAuth2 bearer access token (config: "token"). The connector declares
+               an OAUTH config field (oauth_provider "google", scope drive.readonly),
+               so the in-app Google OAuth flow (access_type=offline, prompt=consent)
+               mints and seals the token; a token may also be pasted by hand into the
+               same field. Verified against the Google Identity OAuth 2.0 web server
+               docs and the Drive scopes doc on 2026-07-04:
+               https://developers.google.com/identity/protocols/oauth2/web-server
+               https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+               A service account with domain delegation remains a valid alternative.
   Incremental: the changes feed (changes.list with a saved startPageToken).
   Scope:       an instance is confined to one folder with the `folder_id` config
                (query operator "'<id>' in parents") and, for a shared drive, the
@@ -80,13 +84,15 @@ class GoogleDriveConnector:
             fields=(
                 ConfigField(
                     key="token",
-                    label="OAuth access token",
-                    kind=FieldKind.SECRET,
+                    label="Google Drive (OAuth)",
+                    kind=FieldKind.OAUTH,
+                    oauth_provider="google",
+                    oauth_scopes=("https://www.googleapis.com/auth/drive.readonly",),
                     help=(
-                        "A Google OAuth2 bearer access token with a read scope "
-                        "(drive.readonly or drive.metadata.readonly). Paste the token; "
-                        "the OAuth consent flow is the operator's step. Sealed in the "
-                        "secret store."
+                        "Connect Google Drive with Google OAuth 2.0 (read only, "
+                        "drive.readonly). The in-app flow seals the access token (and a "
+                        "refresh token) into this field. You can still paste a current "
+                        "bearer access token by hand; it is sealed in the secret store."
                     ),
                 ),
                 ConfigField(

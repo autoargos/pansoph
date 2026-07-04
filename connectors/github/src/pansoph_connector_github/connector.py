@@ -133,12 +133,20 @@ class GithubConnector:
                 ConfigField(
                     key="token",
                     label="Access token",
-                    kind=FieldKind.SECRET,
+                    kind=FieldKind.OAUTH,
                     required=False,
+                    oauth_provider="github",
+                    # Read-oriented default scopes. `repo` is the only scope that reads
+                    # PRIVATE repository contents (GitHub has no read-only private-repo
+                    # scope); read:org and read:user are read-only and back the
+                    # collaborator/team ACL sync. Verified 2026-07-04 against
+                    # https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps
+                    oauth_scopes=("repo", "read:org", "read:user"),
                     help=(
-                        "A bearer token (personal access token, or an org or GitHub App "
-                        "installation token). Optional for public repositories, required "
-                        "for private ones. Sealed in the secret store."
+                        "Connect with GitHub to mint a bearer token, or paste one by hand "
+                        "(a personal access token, or an org or GitHub App installation "
+                        "token). Optional for public repositories, required for private "
+                        "ones. Sealed in the secret store under the same key either way."
                     ),
                 ),
                 ConfigField(

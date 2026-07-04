@@ -10,10 +10,29 @@ official docs:
                https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/ (ADF)
   Base URL:    https://{domain}.atlassian.net/rest/api/3 (config base_url is the
                site origin, e.g. "https://acme.atlassian.net").
-  Auth:        Basic auth. The credential is base64("{email}:{api_token}") sent as
-               "Authorization: Basic <b64>". The api_token is an Atlassian API
-               token minted by the account at id.atlassian.com. The connector does
-               not assume a scope; it maps whatever the credential can reach.
+  Auth:        Two paths, both supported.
+               (1) OAuth 2.0 (3LO): the in-app Connect flow (provider "atlassian")
+                   mints a Bearer access token sealed into config key "oauth_token".
+                   When present, the connector sends "Authorization: Bearer <token>".
+                   Verified against
+                   https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/
+                   and the Jira scope reference
+                   https://developer.atlassian.com/cloud/jira/platform/scopes-for-oauth-2-3LO-and-forge-apps/
+                   on 2026-07-04. Read scopes: read:jira-work, read:jira-user,
+                   read:project-role:jira, plus offline_access for refresh.
+               (2) Basic auth (manual paste): the credential is
+                   base64("{email}:{api_token}") sent as "Authorization: Basic
+                   <b64>". The api_token is an Atlassian API token minted by the
+                   account at id.atlassian.com.
+               The connector does not assume a scope; it maps whatever the
+               credential can reach.
+  OAuth base:  A 3LO token is NOT scoped to a site origin. After consent the caller
+               must resolve the cloudid via
+               https://api.atlassian.com/oauth/token/accessible-resources and address
+               the API at https://api.atlassian.com/ex/jira/{cloudid}. When an
+               oauth_token is configured, set base_url to that ex/jira/{cloudid}
+               origin. This connector reads base_url as-is, so the operator (or a
+               future discovery step) supplies the correct base for the OAuth path.
   Search:      IMPORTANT. The old GET/POST /rest/api/3/search is REMOVED and
                returns 410 Gone. Use POST /rest/api/3/search/jql with a JSON body
                {"jql": ..., "fields": [...], "maxResults": 100, "nextPageToken":
@@ -69,6 +88,18 @@ from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDo
 # who can see the project's issues.
 _BROWSE_ROLE_ID = "10002"
 
+# Read-only OAuth 2.0 (3LO) scopes for the in-app Connect flow (provider
+# "atlassian"). Verified 2026-07-04 against the Jira scope reference. Classic
+# read:jira-work covers issue search and reads; read:jira-user covers user lookups;
+# granular read:project-role:jira covers the project-role actors the ACL maps;
+# offline_access yields a (rotating) refresh token.
+_OAUTH_SCOPES: tuple[str, ...] = (
+    "read:jira-work",
+    "read:jira-user",
+    "read:project-role:jira",
+    "offline_access",
+)
+
 
 def _adf_text(node: Any) -> str:
     """Flatten an Atlassian Document Format tree into plain text.
@@ -101,6 +132,7 @@ class JiraConnector:
         self._base_url: str = cfg.get("base_url", "")
         self._email: str = cfg.get("email", "")
         self._api_token: str = cfg.get("api_token", "")
+        self._oauth_token: str = cfg.get("oauth_token", "")
         self._project_key: str = cfg.get("project_key", "")
         self.meta = ConnectorMeta(
             name="jira",
@@ -125,9 +157,23 @@ class JiraConnector:
                     help="The Jira Cloud site origin, without a trailing path.",
                 ),
                 ConfigField(
+                    key="oauth_token",
+                    label="Connect with Atlassian",
+                    kind=FieldKind.OAUTH,
+                    required=False,
+                    oauth_provider="atlassian",
+                    oauth_scopes=_OAUTH_SCOPES,
+                    help=(
+                        "Sign in with Atlassian to mint a read-only OAuth token. "
+                        "Alternative to the email plus API token below. Sealed in "
+                        "the secret store."
+                    ),
+                ),
+                ConfigField(
                     key="email",
                     label="Account email",
                     kind=FieldKind.STRING,
+                    required=False,
                     placeholder="you@example.com",
                     help="The Atlassian account email paired with the API token for Basic auth.",
                 ),
@@ -135,9 +181,11 @@ class JiraConnector:
                     key="api_token",
                     label="API token",
                     kind=FieldKind.SECRET,
+                    required=False,
                     help=(
                         "An Atlassian API token minted at id.atlassian.com. "
-                        "Sealed in the secret store."
+                        "Sealed in the secret store. Not needed if you connected "
+                        "with Atlassian above."
                     ),
                 ),
                 ConfigField(
@@ -152,11 +200,17 @@ class JiraConnector:
 
     # --- contract ---
     def validate(self, config: dict[str, Any]) -> ValidationResult:
-        missing = [
-            k for k in ("base_url", "email", "api_token", "project_key") if not config.get(k)
-        ]
+        missing = [k for k in ("base_url", "project_key") if not config.get(k)]
         if missing:
             return ValidationResult(ok=False, error=f"missing config: {', '.join(missing)}")
+        # Auth is satisfied either by an OAuth token or by an email plus API token.
+        has_oauth = bool(config.get("oauth_token"))
+        has_basic = bool(config.get("email")) and bool(config.get("api_token"))
+        if not has_oauth and not has_basic:
+            return ValidationResult(
+                ok=False,
+                error="missing auth: connect with Atlassian, or set email and api_token",
+            )
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
@@ -218,9 +272,15 @@ class JiraConnector:
 
     # --- helpers ---
     def _client(self) -> httpx.AsyncClient:
-        token = base64.b64encode(f"{self._email}:{self._api_token}".encode()).decode("ascii")
+        # Prefer the OAuth Bearer token when the Connect flow sealed one; otherwise
+        # fall back to Basic auth with the manually pasted email plus API token.
+        if self._oauth_token:
+            auth = f"Bearer {self._oauth_token}"
+        else:
+            basic = base64.b64encode(f"{self._email}:{self._api_token}".encode()).decode("ascii")
+            auth = f"Basic {basic}"
         headers = {
-            "Authorization": f"Basic {token}",
+            "Authorization": auth,
             "Accept": "application/json",
         }
         return httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=30.0)
