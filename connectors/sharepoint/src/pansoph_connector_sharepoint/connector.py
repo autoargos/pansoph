@@ -43,10 +43,17 @@ Implemented against the Microsoft Graph v1.0 API. Verified against the official 
                tombstone. The same item id may appear more than once across a delta
                feed; the runtime keys by source_doc_id and the last occurrence wins.
   ACL model:   each driveItem carries a permissions collection. A sharing link with
-               scope "anonymous" is public to the world; scope "organization" is a
-               tenant-wide link, which we treat as public within the instance namespace
-               (see the caveat below). Scopes "existingAccess" and "users" grant nothing
-               beyond the item's existing per-identity grants, so they never set public.
+               scope "anonymous" is public to the world, so it maps to public=True. Per
+               the sharingLink docs (Scope options), scope "organization" means "anyone
+               signed into your organization (tenant) can use the link to get access":
+               that is a tenant member WHO HOLDS THE LINK, and it excludes B2B guests. It
+               is NOT all tenant members. AccessControl is UNION-only (public OR
+               allow_users OR allow_groups, minus deny) and cannot express the AND of
+               "tenant member" and "holds the link", so we fail closed and map
+               "organization" to a stable namespaced membership group,
+               _ORG_MEMBER_GROUP, rather than to public=True (see caveat 1). Scopes
+               "existingAccess" and "users" grant nothing beyond the item's existing
+               per-identity grants, so they never set public.
                Direct grants live in grantedToV2 (and the grantedToIdentitiesV2 array for
                link permissions) as a SharePoint identity set: a user, group, siteUser,
                siteGroup, or sharePointGroup. Users map to allow_users, groups map to
@@ -54,17 +61,34 @@ Implemented against the Microsoft Graph v1.0 API. Verified against the official 
                resource is grant-only: grantedToV2, grantedToIdentitiesV2, link, roles),
                so deny stays empty.
   Verified on: 2026-07-05 (delta, deleted, permission, and sharingLink resources
-               re-verified against the v1.0 reference on this date; the endpoints and
-               facts are unchanged from the prior 2026-06-20 verification).
+               re-verified against the v1.0 reference on this date; the sharingLink Scope
+               options table was re-read to confirm "organization" is link-bearing tenant
+               members excluding guests, which drove the org-scope mapping fix below. The
+               endpoints and facts are otherwise unchanged from the prior 2026-06-20
+               verification).
 
 ACL caveats (security-relevant, read before changing the mapping):
-  1. "organization" scope links are treated as public. They are visible to every member
-     of the tenant, not the whole internet, but within a single-tenant pansoph instance
-     every principal in the namespace is a tenant member, so public=True is the faithful
-     mapping for the principals this instance can see. If a future instance spans guests
-     or multiple tenants, revisit this so a tenant-wide link is not treated as
-     world-public across namespaces.
-  2. Group expansion is deferred. A grant to a group or SharePoint group is mapped to that
+  1. "organization" scope links fail closed to a namespaced membership group, never to
+     public=True. Over-sharing is a security bug; under-sharing is only a UX bug, so when
+     the source expresses a "broad but conditional" audience (all tenant members AND holds
+     the link, minus guests) that pansoph's UNION-only AccessControl cannot express, we map
+     to the narrower side. An org-scope link becomes a grant to _ORG_MEMBER_GROUP
+     ("sharepoint:org-members"), a synthetic membership group the identity layer is meant to
+     materialize to the tenant's member principals (which is itself already narrower than
+     the true "members who hold the link", and correctly excludes guests). Until that group
+     is materialized it contains no one, so the grant reaches no principal: the document
+     under-shares, which is safe. It NEVER maps to public=True, because public=True would let
+     can_see() return True for every principal in the namespace, including guests and members
+     who never received the link and cannot open the item in SharePoint. That is the exact
+     over-share this fix closes.
+  2. Source-side Deny and broken inheritance are a Graph fidelity limit, not surfaced here.
+     The driveItem permissions collection is grant-only. SharePoint classic "Deny" permission
+     levels and limited-access / broken-inheritance states are NOT exposed by this collection,
+     so an item that carries a surfaced grant plus an unsurfaced source-side Deny will be
+     over-granted relative to SharePoint. The connector cannot detect this from the Graph
+     permissions API, so deny stays empty; closing it would require a different API surface
+     (SharePoint REST role assignments) and is out of this connector's reach.
+  3. Group expansion is deferred. A grant to a group or SharePoint group is mapped to that
      group's direct identifier in allow_groups. Resolving a group to its transitive member
      users (and nested groups) is left to a later authz-layer pass, which already owns the
      ACL-to-tuple expansion. The connector records the direct identity faithfully so that
@@ -94,6 +118,16 @@ from pansoph_connector_sdk import (
     ValidationResult,
 )
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+
+# Stable id of the synthetic membership group an "organization" scope sharing link maps to.
+# Per the sharingLink docs, org scope is "anyone signed into your organization (tenant) can
+# use the link", i.e. a tenant member WHO HOLDS THE LINK, excluding B2B guests. pansoph's
+# UNION-only AccessControl cannot express that intersection, so org-scope links fail closed
+# to this group instead of public=True (see the module ACL caveat 1). The identity layer is
+# expected to materialize this group to the tenant's member principals; until it does, the
+# group contains no one and the grant reaches no principal, so the document under-shares,
+# which is safe. This id must stay stable so the identity layer can bind to it.
+_ORG_MEMBER_GROUP = "sharepoint:org-members"
 
 
 class SharepointConnector:
@@ -246,10 +280,15 @@ class SharepointConnector:
         groups: list[str] = []
         for perm in resp.json().get("value", []):
             scope = perm.get("link", {}).get("scope")
-            # "anonymous" is public to the world; "organization" is a tenant-wide link,
-            # treated as public within this instance namespace (see module caveat 1).
-            if scope in ("anonymous", "organization"):
+            # "anonymous" is genuinely world-readable, so it is the only scope that sets
+            # public=True. "organization" is link-bearing tenant members excluding guests
+            # (an AND the UNION-only AccessControl cannot express), so it fails closed to a
+            # namespaced membership group that under-shares until the identity layer
+            # materializes it (see module ACL caveat 1). Never map org-scope to public=True.
+            if scope == "anonymous":
                 public = True
+            elif scope == "organization":
+                groups.append(_ORG_MEMBER_GROUP)
             for ident in self._identities(perm):
                 self._classify(ident, users, groups)
         return AccessControl(

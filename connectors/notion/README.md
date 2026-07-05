@@ -4,19 +4,35 @@ A pansoph connector for Notion.
 
 Implemented against the latest official Notion API documentation. See the header of
 `src/pansoph_connector_notion/connector.py` for the verified endpoints, the mandatory
-`Notion-Version` header, the bearer auth, cursor pagination, the deletion signal, and
-the verified date (2026-07-05).
+`Notion-Version` header, the bearer auth, cursor pagination, why deletions are not
+declared, and the verified date (2026-07-05).
 
 It passes the shared conformance suite (`assert_conforms` from
 `pansoph-connector-sdk`), wired in `tests/test_notion_conformance.py`.
 
 ## What it ingests
 
-- `list_changes` pages through `POST /v1/search` filtered to pages, yielding one
-  `DocRef` per shared page. A page that Notion reports as `in_trash` or `is_archived`
-  is yielded as a tombstone (`deleted=True`) and never ingested as live content.
+- `list_changes` pages through `POST /v1/search` filtered to pages, yielding one live
+  `DocRef` per shared page.
 - `fetch` reads `GET /v1/blocks/{id}/children` and joins the `plain_text` of every
   block's rich text into a plain text document.
+
+## Deletions: no bulk feed, so the capability is `False`
+
+`capabilities.deletions` is `False`, and that is honest. `POST /v1/search`
+**excludes trashed pages**: a page moved to trash (or un-shared from the connection)
+simply stops appearing in search results, it is never returned carrying
+`in_trash=True`
+([post-search](https://developers.notion.com/reference/post-search); confirmed by
+[notion-sdk-js #524](https://github.com/makenotion/notion-sdk-js/issues/524)). Notion
+exposes no "list deleted objects" feed, and `list_changes` receives only a cursor,
+never the prior synced id set, so the connector cannot emit a tombstone from a single
+poll. Declaring `True` would promise a tombstone stream the API can never produce, so
+instead the runtime purges removals by reconciling the full-scan listing against the
+previously synced set (search-absence is the removal signal). A live re-fetch of a
+trashed or un-shared page `404`s and is surfaced, so revoked content is never served,
+and a stale index entry carries only the integration-scoped grant, so it under-shares
+rather than leaks.
 
 ## Access control: the integration is the principal
 

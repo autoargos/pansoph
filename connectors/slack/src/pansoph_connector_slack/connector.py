@@ -11,6 +11,8 @@ Implemented against the Slack Web API. Verified against the official docs:
                https://docs.slack.dev/reference/methods/conversations.members/
                https://docs.slack.dev/apis/web-api/pagination (cursor pagination)
                https://docs.slack.dev/authentication/tokens (token types)
+               Guest access (load bearing for the public-channel ACL, see below):
+               https://slack.com/help/articles/202518103-Guest-roles-in-Slack
                Deletion signals (not consumed, see below):
                https://api.slack.com/events/channel_deleted
                https://api.slack.com/events/group_deleted
@@ -48,19 +50,33 @@ Implemented against the Slack Web API. Verified against the official docs:
                ACL members lookup needs the same read scopes.
   Pagination:  cursor based. Pass limit, read response_metadata.next_cursor, and
                re pass it as cursor. Stop when next_cursor is empty.
-  ACL model:   a document is a channel. A public channel (is_private false) maps to
-               public. A private channel, im, or mpim maps to its member user ids
-               (conversations.members). Slack exposes NO per channel groups, so
-               allow_groups is always empty for this source, and Slack has no per
-               channel deny concept, so deny is always empty. The ACL therefore
-               reflects exactly the membership the credential can see. If Slack
-               reports ok=false for either the info or the members lookup (a channel
-               the credential cannot read, or a private channel the bot has not been
-               invited to, which returns not_in_channel per the conversations.members
-               reference), _acl RAISES rather than producing a public or empty grant.
-               A bot token cannot self join a private channel and must be invited
-               (using-the-conversations-api), so not_in_channel is a real, expected
-               membership boundary and must fail closed, never publish.
+  ACL model:   a document is a channel. A public channel (is_private false) is NOT
+               world readable in Slack, so it must NOT map to public. Slack single
+               channel and multi channel GUESTS must be explicitly added to a channel
+               and cannot read arbitrary public channels (guest-roles help article,
+               verified 2026-07-05), and pansoph's public grant resolves to the tenant
+               everyone group, which can include principals with no Slack membership at
+               all. Mapping a public channel to public=True would therefore over-share
+               to guests and to non-Slack tenant users, an AND (readable to full
+               members only) that pansoph's UNION-only AccessControl cannot express.
+               We fail closed to the narrower side: a public channel maps to the
+               namespaced membership group _WORKSPACE_MEMBER_GROUP ("slack:member"),
+               the set of FULL workspace members. Until the identity layer materializes
+               that group's membership it grants no one, which under-shares (a UX bug),
+               never over-shares (a security bug). A private channel, im, or mpim maps
+               to its member user ids (conversations.members). Slack exposes NO per
+               channel usergroups, so allow_groups otherwise carries only that single
+               membership group, and Slack has no per channel deny concept, so deny is
+               always empty. If Slack reports ok=false for either the info or the
+               members lookup (a channel the credential cannot read, or a private
+               channel the bot has not been invited to, which returns not_in_channel
+               per the conversations.members reference), _acl RAISES rather than
+               producing a public or empty grant. A bot token cannot self join a
+               private channel and must be invited (using-the-conversations-api), so
+               not_in_channel is a real, expected membership boundary and must fail
+               closed, never publish. is_private is defaulted to True (private) when
+               absent on an ok=true conversations.info, so the one code path that could
+               emit a broad grant fails closed, not open.
 
   Capabilities (honest as declared):
     incremental=False.  list_changes walks the full conversations.list every run.
@@ -118,6 +134,21 @@ from pansoph_types import (
 # cursor to be a non-empty string, and since incremental sync is off this token is
 # never used as a cross-run resume point, it only satisfies the type contract.
 _LIST_TOKEN: str = "slack:list"  # noqa: S105  not a secret, a page level list token
+
+# Stable namespaced id for the group of FULL Slack workspace members. A public
+# channel is readable by full members but NOT by single/multi-channel guests (who
+# must be explicitly added to a channel, guest-roles help article verified
+# 2026-07-05), so a public channel maps to allow_groups=[_WORKSPACE_MEMBER_GROUP]
+# instead of public=True. This is the fail-closed side of an AND (readable to full
+# members only) that pansoph's UNION-only AccessControl cannot express: the pansoph
+# tenant-everyone group a public grant resolves to can include principals with no
+# Slack membership at all, so public=True would over-share. The identity layer MUST
+# materialize membership of this group (the workspace's full members, e.g. via
+# users.list filtered to non-guest accounts) for the grant to reach anyone. Until it
+# does, an unmaterialized group grants no one, which under-shares (safe) rather than
+# over-shares (a leak). The "slack:" prefix namespaces it to this source so it cannot
+# collide with an imported source group name.
+_WORKSPACE_MEMBER_GROUP: str = "slack:member"
 
 
 class SlackApiError(RuntimeError):
@@ -406,12 +437,24 @@ class SlackConnector:
         # public grant for a channel the credential cannot even resolve. Fail closed.
         info = self._ok(info_resp, "conversations.info")
         channel = info.get("channel", {})
-        if not channel.get("is_private", False):
-            return AccessControl(public=True, principal_ns=ns)
-        members = [m async for m in self._members(client, channel_id)]
-        # Slack exposes no per channel groups, so allow_groups stays empty, and Slack
-        # has no per channel deny, so deny stays empty.
-        return AccessControl(allow_users=members, principal_ns=ns)
+        # SECURITY: default is_private to True (private) when the field is absent. Slack
+        # always returns is_private on an ok=true conversations.info, but if it is ever
+        # missing we treat the channel as private, the NARROWER audience. Defaulting to
+        # public here would be a fail-open leak, so we fail closed.
+        if channel.get("is_private", True):
+            members = [m async for m in self._members(client, channel_id)]
+            # Slack exposes no per channel deny, so deny stays empty.
+            return AccessControl(allow_users=members, principal_ns=ns)
+        # SECURITY: a public channel is NOT world readable in Slack. Guests cannot read
+        # arbitrary public channels and pansoph's public grant resolves to the tenant
+        # everyone group, which can include non-Slack principals. So we map to the
+        # full-member group, never public=True. The group id is namespaced per instance
+        # (slack:member:{instance_id}), because the authz layer renders a group in the
+        # tenant namespace and would otherwise alias two Slack workspaces in one tenant
+        # onto a single node, leaking workspace A's public docs to workspace B's members.
+        # This under-shares until the identity layer materializes the group, which is
+        # safe; public=True would over-share, which is a leak.
+        return AccessControl(allow_groups=[f"{_WORKSPACE_MEMBER_GROUP}:{ns}"], principal_ns=ns)
 
     async def _members(self, client: httpx.AsyncClient, channel_id: str) -> AsyncIterator[str]:
         cursor: str | None = None

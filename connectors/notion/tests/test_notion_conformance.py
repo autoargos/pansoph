@@ -21,7 +21,6 @@ from pansoph_connector_notion.connector import NotionConnector
 from pansoph_connector_sdk import assert_conforms
 from pansoph_connector_sdk.verify.categories.contract import check_discovery, check_spec
 from pansoph_connector_sdk.verify.categories.permissions import check_permissions
-from pansoph_connector_sdk.verify.categories.sync import check_deletions
 
 _FIX = Path(__file__).parent / "fixtures" / "permissions"
 
@@ -124,16 +123,20 @@ async def test_notion_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
 
 @pytest.mark.conformance
 @respx.mock(assert_all_called=False)
-async def test_notion_trashed_pages_surface_as_tombstones(respx_mock: respx.MockRouter) -> None:
-    """in_trash / is_archived pages become deleted DocRefs, not live docs."""
+async def test_notion_search_results_are_all_live_refs(respx_mock: respx.MockRouter) -> None:
+    """POST /v1/search returns only live pages, so every ref is live (never deleted).
+
+    The real Notion search endpoint EXCLUDES trashed pages, so a result set never
+    carries in_trash=True. The connector must therefore emit only live refs and never
+    a tombstone from a poll. See test_notion_conformance regression below.
+    """
     respx_mock.post(path="/v1/search").mock(
         return_value=httpx.Response(
             200,
             json={
                 "results": [
-                    {"id": "live", "object": "page", "in_trash": False, "is_archived": False},
-                    {"id": "trashed", "object": "page", "in_trash": True, "is_archived": False},
-                    {"id": "archived", "object": "page", "in_trash": False, "is_archived": True},
+                    {"id": "a", "object": "page"},
+                    {"id": "b", "object": "page"},
                 ],
                 "has_more": False,
                 "next_cursor": None,
@@ -142,25 +145,97 @@ async def test_notion_trashed_pages_surface_as_tombstones(respx_mock: respx.Mock
     )
     conn = _factory()
     seen = {ref.source_doc_id: ref.deleted async for ref, _ in conn.list_changes(None)}
-    assert seen == {"live": False, "trashed": True, "archived": True}
+    assert seen == {"a": False, "b": False}
 
 
 @pytest.mark.conformance
+async def test_notion_does_not_declare_deletions_capability() -> None:
+    """deletions is honestly False: Notion exposes no usable bulk deletion feed."""
+    conn = _factory()
+    assert conn.meta.capabilities.deletions is False
+
+
+@pytest.mark.conformance
+@pytest.mark.permission
 @respx.mock(assert_all_called=False)
-async def test_notion_deletions_category(respx_mock: respx.MockRouter) -> None:
-    """The shared deletions check: a trashed page must surface as a tombstone."""
-    respx_mock.post(path="/v1/search").mock(
+async def test_regress_2026_07_05_notion_no_phantom_deletion_tombstone(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Pins the deletion-honesty non-leak from the 2026-07-05 over-share audit.
+
+    The leak: capabilities.deletions was True, backed only by an _is_trashed check on
+    POST /v1/search results. But the real Notion API EXCLUDES trashed pages from
+    search (https://developers.notion.com/reference/post-search, confirmed by
+    makenotion/notion-sdk-js issue #524), so the tombstone path was dead in
+    production, True-but-never-firing. A page trashed or un-shared in Notion would
+    just vanish from search, emit no tombstone, and persist in the index under its old
+    grant, so a revoked document could still be retrieved. That violates pansoph
+    non-negotiable rule 1 (revocations must propagate; a stale read must never leak a
+    revoked document).
+
+    This test reconstructs the exact scenario against the REAL API behavior and pins
+    the fix so the phantom capability cannot silently return:
+
+    1. Run 1 lists p_live and p_gone as live. p_gone is then trashed in Notion.
+    2. Run 2 models the real search response: the trashed page is ABSENT (not present
+       with in_trash=True). The connector yields only p_live, no tombstone, because it
+       does not claim a capability the API cannot back.
+    3. capabilities.deletions is False, so the runtime knows it must reconcile the
+       full-scan listing to purge p_gone rather than trust a dead tombstone feed.
+    4. Fail-closed guard: even before reconciliation, the stale p_gone doc carries
+       only the integration-scoped grant, so no end-user principal is granted it. Any
+       principal that is not the integration bot is DENIED. It under-shares (safe),
+       never over-shares.
+    """
+    conn = _factory()
+
+    # Run 1: both pages live.
+    run1 = respx_mock.post(path="/v1/search").mock(
         return_value=httpx.Response(
             200,
             json={
-                "results": [{"id": "gone", "object": "page", "in_trash": True}],
+                "results": [
+                    {"id": "p_live", "object": "page"},
+                    {"id": "p_gone", "object": "page"},
+                ],
                 "has_more": False,
                 "next_cursor": None,
             },
         )
     )
-    conn = _factory()
-    await check_deletions(conn, deleted_state=None)
+    run1_ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert run1_ids == ["p_live", "p_gone"]
+
+    # Run 2: p_gone is trashed, so the real search response OMITS it entirely. It is
+    # never returned carrying in_trash=True.
+    run1.mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [{"id": "p_live", "object": "page"}],
+                "has_more": False,
+                "next_cursor": None,
+            },
+        )
+    )
+    run2 = [(ref.source_doc_id, ref.deleted) async for ref, _ in conn.list_changes(None)]
+
+    # The trashed page produces NO tombstone: the connector never fabricates a delete
+    # the API cannot signal. It is simply absent, to be purged by reconciliation.
+    assert run2 == [("p_live", False)]
+    assert all(not deleted for _, deleted in run2), "no phantom tombstone may be emitted"
+
+    # The capability is honestly False, so the runtime reconciles instead of trusting
+    # a dead tombstone feed.
+    assert conn.meta.capabilities.deletions is False
+
+    # Fail-closed: the stale p_gone doc, if left in the index, grants only the
+    # integration principal. A real end user (not the bot) is DENIED, so it
+    # under-shares rather than leaking a revoked document.
+    stale_acl = await conn.list_acls(conn._ref("p_gone"))
+    assert stale_acl.public is False
+    assert stale_acl.allow_users == ["bot-acme"]
+    assert "end-user-eve" not in stale_acl.allow_users
 
 
 @pytest.mark.conformance

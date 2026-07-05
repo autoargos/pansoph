@@ -223,6 +223,42 @@ async def test_github_acl_internal_repo_maps_to_enterprise_group(
 
 
 @pytest.mark.conformance
+@pytest.mark.permission
+@respx.mock(assert_all_called=False)
+async def test_github_trimmed_body_does_not_leak_as_public(respx_mock: respx.MockRouter) -> None:
+    # Regression (fail-closed public inference): base_url is configurable for GitHub
+    # Enterprise or a self-managed gateway, so an untrusted intermediary could return a
+    # trimmed GET /repos body that OMITS both `visibility` and `private` on the
+    # ACL-decision path. The old code derived public from `not repo.get("private",
+    # False)`, so a MISSING `private` field became public=True and published a private
+    # repo to the tenant-everyone group, an over-share. The fix requires an explicit
+    # visibility == "public"; a trimmed/ambiguous body must fall to the narrower
+    # collaborators path and must NEVER be public. Named so the leak cannot silently
+    # return.
+    respx_mock.get(path=_REPO).mock(
+        # No `visibility`, no `private`: the exact trimmed body from the verdict.
+        return_value=httpx.Response(200, json={"default_branch": "main"})
+    )
+    only_collab = respx_mock.get(path=f"{_REPO}/collaborators").mock(
+        return_value=httpx.Response(200, json=[{"login": "octocat"}])
+    )
+    respx_mock.get(path=f"{_REPO}/teams").mock(
+        return_value=httpx.Response(200, json=[{"slug": "core-team"}])
+    )
+    conn = _factory()
+    acl = await conn.list_acls(conn._ref("README.md"))
+
+    assert acl.public is False, (
+        "a trimmed/ambiguous repo body must NOT be inferred public (over-share leak)"
+    )
+    # It fails closed to the narrower collaborators audience, under-sharing safely.
+    assert acl.allow_users == ["octocat"]
+    assert acl.allow_groups == ["core-team"]
+    assert acl.principal_ns == "octocat"
+    assert only_collab.call_count == 1, "ambiguous body must resolve via the private path"
+
+
+@pytest.mark.conformance
 @respx.mock(assert_all_called=False)
 async def test_github_list_resources_orgs_then_repos(respx_mock: respx.MockRouter) -> None:
     # Top level: the authenticated user (synthetic owner) plus the orgs the credential

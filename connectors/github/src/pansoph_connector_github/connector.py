@@ -41,12 +41,18 @@ Implemented against the GitHub REST API. Verified against the official docs:
                file whose status is "removed" in a commit is surfaced as a deleted
                DocRef (a tombstone), so a poll-based sync purges removed files.
   Rate limit:  5000 requests per hour authenticated; surfaced, not hidden.
-  ACL model:   a public repo maps to public. An internal repo (GitHub Enterprise)
-               maps to a synthetic enterprise-members group, because every enterprise
-               member can read it, and NOT to public. A private repo maps to the
-               collaborators (users) and teams (groups) that the credential can see,
+  ACL model:   the map fails closed. Only an EXPLICIT public signal (visibility ==
+               "public") maps to public; a missing or ambiguous visibility/private is
+               NEVER treated as public, since base_url is configurable and a trimmed
+               body on the ACL path could otherwise publish a private repo. An internal
+               repo (GitHub Enterprise) maps to a synthetic enterprise-members group,
+               because every enterprise member can read it, and NOT to public. A private
+               repo, or any body without the explicit public/internal signal, maps to
+               the collaborators (users) and teams (groups) that the credential can see,
                namespaced by the instance. Because access is RBAC controlled, the ACL
-               reflects the credential's actual reach, not an assumption.
+               reflects the credential's actual reach, not an assumption. Over-sharing
+               is a security bug; under-sharing is only a UX bug (pansoph CLAUDE.md
+               rule 1), so every ambiguous case resolves to the narrower audience.
   Verified on: 2026-07-05.
 
 Credential scope note: every configured instance carries its own credential and
@@ -545,9 +551,21 @@ class GithubConnector:
         repo = await self._repo_info(client)
         ns = self.instance_id
         visibility = repo.get("visibility")
-        # A public repo (visibility "public", or the legacy private=False shape) is
-        # readable by anyone.
-        if visibility == "public" or not repo.get("private", False):
+        # Fail closed on the ACL-decision path: only an EXPLICIT public signal makes a
+        # repo world-readable. GitHub's GET /repos/{owner}/{repo} always returns the
+        # required boolean `private` and a `visibility` of public, private, or internal
+        # (https://docs.github.com/en/rest/repos/repos, verified 2026-07-05), but
+        # `base_url` is configurable for GitHub Enterprise or a self-managed gateway, so
+        # an untrusted intermediary could return a trimmed body on this path. We must
+        # never infer public from an absence: a missing or ambiguous visibility/private
+        # (for example a body that omits both) must NOT map to public. Deriving public
+        # from `not repo.get("private", False)` would treat a MISSING `private` as
+        # public and publish a genuinely private repo to the tenant-everyone group, an
+        # over-share. Only visibility == "public" grants the public audience; every
+        # other shape falls through to the narrower collaborators path below.
+        # Over-sharing is a security bug; under-sharing a truly public repo (its
+        # collaborators still see it) is only a UX bug. See pansoph CLAUDE.md rule 1.
+        if visibility == "public":
             self._acl_cache = AccessControl(public=True, principal_ns=ns)
             return self._acl_cache
         # An internal repo (GitHub Enterprise) carries private=true and
@@ -562,7 +580,9 @@ class GithubConnector:
                 allow_groups=[self._enterprise_members_group()], principal_ns=ns
             )
             return self._acl_cache
-        # A private repo: collaborators (users) and teams (groups) the credential sees.
+        # A private repo, or any body that did not carry the explicit public/internal
+        # signal above (the fail-closed default): collaborators (users) and teams
+        # (groups) the credential sees. A partial credential under-shares, never over.
         users = [
             login
             async for login in self._paginate_field(

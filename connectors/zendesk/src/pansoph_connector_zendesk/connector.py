@@ -67,47 +67,66 @@ Implemented against the Zendesk Help Center API. Verified against the official d
   ACL model:   a Help Center article carries `user_segment_id`. A null segment means
                the article is visible to everyone, which maps to public. A non null
                segment is fetched from `/api/v2/help_center/user_segments/{id}.json`
-               and its full restriction set determines reach. See the mapping table
-               below. Zendesk user segments are additive allow lists, so the connector
-               produces no deny entries.
-  Verified on: 2026-07-05.
+               and its restriction set determines reach. See the mapping table below.
+               Zendesk user segments are additive allow lists, so the connector produces
+               no deny entries.
+  Verified on: 2026-07-05, against the current official docs. The user_segments API
+               reference confirms the field semantics: `tags` (user must have ALL),
+               `or_tags` (at least one), `group_ids`, `organization_ids`, and
+               `added_user_ids` ("The ids of users added specifically to this user
+               segment, regardless of matching tags or other criteria"). The support doc
+               "Creating user segments for help center user permissions"
+               (https://support.zendesk.com/hc/en-us/articles/4408837707290) confirms the
+               combination rule: different attribute types work TOGETHER to narrow the
+               segment (AND across categories), values within one type follow that type's
+               match rule (OR / all), and individual users are added as an exception that
+               bypasses the filters.
 
 ACL mapping (Zendesk user segment -> pansoph AccessControl):
 
   user_segment_id is null/None      -> public = True
 
-  For a non-null segment, every restriction the segment expresses is mapped. A
-  principal is granted only if it satisfies at least one mapped grant (the resolver
-  ORs grants), so nothing is widened beyond what the segment allows:
+  A segment combines the NARROWING attribute types (group_ids, organization_ids,
+  or_tags, tags) with AND ACROSS types and OR WITHIN a type. pansoph AccessControl is a
+  pure OR over allow_groups, so it can express at most ONE narrowing category faithfully.
+  The mapping therefore counts how many narrowing categories the segment restricts on:
 
-    user_type == "staff"              -> allow_groups += ["staff"]   (only when the
-                                         segment has no other restriction; a
-                                         group-restricted staff segment maps to the
-                                         group ids, not to all staff)
-    user_type == "signed_in_users"    -> allow_groups += ["signed_in"] ONLY when
-                                         group_ids, organization_ids, tags, or_tags,
-                                         and added_user_ids are ALL empty; a
-                                         restricted signed_in segment is never
-                                         collapsed to all signed-in users
-    group_ids = [g, ...]              -> allow_groups += ["group:{g}", ...]
-    organization_ids = [o, ...]       -> allow_groups += ["org:{o}", ...]
-    or_tags = [t, ...]                -> allow_groups += ["tag:{t}", ...] (a user with
-                                         at least one of these tags is granted; OR maps
-                                         directly onto the resolver's OR-over-groups)
-    tags = [t, ...] (AND, non-empty)  -> the segment requires the user to hold ALL of
-                                         these tags. The pansoph allow_groups resolver
-                                         is OR-only and cannot express a conjunction, so
-                                         mapping the individual tags would OVER-GRANT
-                                         (any single tag would match). To avoid leaking
-                                         a tag-conjunction-restricted article, this
-                                         connector FAILS CLOSED: it emits a single
-                                         unsatisfiable sentinel group that no roster
-                                         principal can hold, so the article is denied to
-                                         everyone the connector cannot prove is allowed.
-                                         Under-granting is safe; over-granting is a leak.
-    added_user_ids = [u, ...]         -> allow_users += ["user:{u}", ...] (individual
-                                         users granted access regardless of the other
-                                         criteria, per the user_segment doc)
+    ZERO narrowing categories:
+      user_type == "staff"            -> allow_groups = ["staff"]
+      user_type == "signed_in_users"  -> allow_groups = ["signed_in"]
+      (the broad base-audience marker is the whole grant; it is emitted ONLY here, never
+       alongside a narrowing category, so a restricted segment is never widened to all
+       staff / all signed-in users)
+
+    EXACTLY ONE narrowing category (faithful, expressible as an OR):
+      group_ids = [g, ...]            -> allow_groups = ["group:{g}", ...]
+      organization_ids = [o, ...]     -> allow_groups = ["org:{o}", ...]
+      or_tags = [t, ...]              -> allow_groups = ["tag:{t}", ...] (at least one)
+      tags = [t, ...] (AND)           -> FAIL CLOSED with _TAGS_AND_UNSATISFIABLE. The
+                                         user must hold ALL listed tags; the OR resolver
+                                         cannot express that conjunction, so mapping each
+                                         tag would over-grant. Under-granting is safe.
+
+    TWO OR MORE narrowing categories (a real cross-category AND):
+      any two of {group_ids, organization_ids, or_tags, tags}
+                                      -> FAIL CLOSED with
+                                         _CROSS_CATEGORY_AND_UNSATISFIABLE. Zendesk ANDs
+                                         the categories (e.g. org 9 AND tag vip), but the
+                                         OR resolver would grant anyone matching EITHER,
+                                         an over-grant / leak. So the connector emits only
+                                         the unsatisfiable cross-category sentinel (an
+                                         unmaterialized namespaced group that grants no
+                                         one) rather than the OR union. Never map to the
+                                         broader side. The identity layer may later
+                                         materialize the sentinel to the true intersection
+                                         of principals; until then it under-shares safely.
+
+  added_user_ids = [u, ...]           -> allow_users += ["user:{u}", ...], ALWAYS, in
+                                         addition to whatever the categories map to
+                                         (including under a fail-closed grant). These are
+                                         individual users the segment grants "regardless
+                                         of matching tags or other criteria", so they are
+                                         provably allowed and unioned in, not a widening.
 
 No deny entries are ever produced, because a Zendesk user segment only grants access.
 
@@ -144,6 +163,18 @@ from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDo
 # conjunction is denied to everyone rather than over-granted. See the ACL mapping note
 # in the module docstring.
 _TAGS_AND_UNSATISFIABLE = "unsatisfiable:tags_and"
+
+# The sentinel group used to fail closed for a cross-category AND restriction, i.e. a
+# segment that narrows across two or more attribute types (any two of group_ids,
+# organization_ids, or_tags, tags). Zendesk combines different attribute types with AND
+# (see the ACL mapping note below), but pansoph AccessControl is a pure OR over
+# allow_groups and cannot express a conjunction across categories. Flattening the
+# categories into one allow_groups list would grant anyone who matches EITHER category,
+# an over-grant / leak. This sentinel is an unsatisfiable, namespaced group that no
+# roster principal holds, so the article is denied to everyone rather than leaked. It is
+# a stable id the identity layer may later materialize to the true intersection of
+# principals; until it is materialized it grants no one, which under-shares safely.
+_CROSS_CATEGORY_AND_UNSATISFIABLE = "unsatisfiable:cross_category_and"
 
 
 class ZendeskConnector:
@@ -407,10 +438,15 @@ class ZendeskConnector:
     def _segment_grants(segment: dict[str, Any]) -> dict[str, list[str]]:
         """Map a Zendesk user_segment object to allow_groups and allow_users.
 
-        Every restriction the segment expresses is mapped, so no principal is granted
-        beyond what the segment allows and no legitimately granted principal is dropped.
-        See the ACL mapping table in the module docstring for the doc-grounded rules.
-        Order is fixed so the result is deterministic.
+        Zendesk combines the narrowing attribute types (group_ids, organization_ids,
+        or_tags, tags) with AND across types and OR within a type, so a segment that
+        restricts across two or more of them means the user must satisfy ALL of those
+        categories. pansoph AccessControl is a pure OR over allow_groups and cannot
+        express a conjunction across categories, so this method fails closed on any real
+        cross-category AND (see _CROSS_CATEGORY_AND_UNSATISFIABLE and the module docstring
+        ACL mapping table). A single narrowing category maps faithfully. added_user_ids
+        are unioned in regardless, because the source grants them regardless of the
+        filters. Order is fixed so the result is deterministic.
         """
         user_type = segment.get("user_type")
         group_ids = segment.get("group_ids") or []
@@ -419,35 +455,67 @@ class ZendeskConnector:
         or_tags = segment.get("or_tags") or []
         added_user_ids = segment.get("added_user_ids") or []
 
-        has_other_restriction = bool(
-            group_ids or organization_ids or tags or or_tags or added_user_ids
-        )
+        # The narrowing attribute types Zendesk ANDs across. group_ids imply the staff
+        # base and organization_ids imply the signed-in base, so those never add a
+        # constraint beyond user_type. But a "staff" base combined with a tag or org
+        # category IS a real, inexpressible AND: Zendesk tags and organizations are
+        # shared with end users, so "staff who also hold tag X" is NOT the same audience
+        # as tag:X (which would grant non-staff tag holders). So staff counts as a
+        # narrowing category whenever it is paired with an org or tag restriction, and the
+        # segment then fails closed rather than dropping the staff constraint.
+        # added_user_ids is an explicit exception unioned in, not a narrowing filter, so
+        # it never counts. See the official docs cited in the module docstring.
+        staff_restrictive = user_type == "staff" and bool(organization_ids or or_tags or tags)
+        narrowing_categories = [
+            bool(group_ids),
+            bool(organization_ids),
+            bool(or_tags),
+            bool(tags),
+            staff_restrictive,
+        ]
+        narrowing_count = sum(narrowing_categories)
+
+        # added_user_ids: individual users granted access regardless of other criteria
+        # (per the user_segments doc: "regardless of matching tags or other criteria").
+        # Always unioned in, including under a fail-closed grant, since these named users
+        # are provably allowed by the source.
+        allow_users = [f"user:{u}" for u in added_user_ids]
+
+        if narrowing_count >= 2:
+            # Real cross-category AND. The OR resolver cannot express the intersection,
+            # so fail closed: emit only the unsatisfiable cross-category sentinel rather
+            # than flatten the categories into an over-broad OR. Under-sharing is safe;
+            # over-sharing is a leak. added_user_ids are still granted (explicit
+            # exceptions the source grants regardless of the filters).
+            return {
+                "allow_groups": [_CROSS_CATEGORY_AND_UNSATISFIABLE],
+                "allow_users": allow_users,
+            }
 
         allow_groups: list[str] = []
-        # user_type marker first. "signed_in" (all signed-in users) is emitted ONLY when
-        # the segment carries no other restriction, so a restricted signed_in segment is
-        # never widened to every signed-in user. A "staff" marker is likewise only the
-        # broad "all staff" grant when the segment has no narrower restriction.
-        if user_type == "staff" and not has_other_restriction:
-            allow_groups.append("staff")
-        elif user_type == "signed_in_users" and not has_other_restriction:
-            allow_groups.append("signed_in")
-
-        allow_groups.extend(f"group:{g}" for g in group_ids)
-        allow_groups.extend(f"org:{o}" for o in organization_ids)
-        # or_tags is an OR restriction: a user with at least one listed tag is granted.
-        # That maps directly onto the resolver's OR-over-allow_groups, so each tag is a
-        # group principal.
-        allow_groups.extend(f"tag:{t}" for t in or_tags)
-        # tags is an AND (conjunction) restriction: the user must hold ALL listed tags.
-        # allow_groups is OR-only and cannot express a conjunction, so mapping each tag
-        # would over-grant (any single tag would match). Fail closed with an
-        # unsatisfiable sentinel so the article is denied to everyone the connector
-        # cannot prove is allowed, rather than leaked to holders of a single tag.
-        if tags:
+        if narrowing_count == 0:
+            # No narrowing category: the base audience marker is the whole grant. These
+            # broad markers are emitted ONLY here, never alongside a narrowing category,
+            # so a restricted segment is never widened to all staff / all signed-in users.
+            if user_type == "staff":
+                allow_groups.append("staff")
+            elif user_type == "signed_in_users":
+                allow_groups.append("signed_in")
+        elif group_ids:
+            # Single narrowing category: group membership (OR within the category).
+            allow_groups.extend(f"group:{g}" for g in group_ids)
+        elif organization_ids:
+            # Single narrowing category: organization membership (OR within the category).
+            allow_groups.extend(f"org:{o}" for o in organization_ids)
+        elif or_tags:
+            # Single narrowing category: or_tags is an OR restriction (at least one tag),
+            # which maps directly onto the resolver's OR-over-allow_groups.
+            allow_groups.extend(f"tag:{t}" for t in or_tags)
+        else:
+            # Single narrowing category: tags is an AND (conjunction) restriction, the
+            # user must hold ALL listed tags. allow_groups is OR-only and cannot express
+            # a conjunction, so mapping each tag would over-grant (any single tag would
+            # match). Fail closed with the tags-AND sentinel.
             allow_groups.append(_TAGS_AND_UNSATISFIABLE)
-
-        # added_user_ids: individual users granted access regardless of other criteria.
-        allow_users = [f"user:{u}" for u in added_user_ids]
 
         return {"allow_groups": allow_groups, "allow_users": allow_users}

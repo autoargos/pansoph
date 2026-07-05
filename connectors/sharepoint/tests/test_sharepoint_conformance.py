@@ -20,7 +20,9 @@ import respx
 from pansoph_connector_sdk.conformance import assert_conforms
 from pansoph_connector_sdk.verify.categories.contract import check_discovery, check_spec
 from pansoph_connector_sdk.verify.categories.permissions import check_permissions
-from pansoph_connector_sharepoint.connector import SharepointConnector
+from pansoph_connector_sdk.verify.principals import Principal, can_see
+from pansoph_connector_sharepoint.connector import _ORG_MEMBER_GROUP, SharepointConnector
+from pansoph_types import DocRef
 
 _FIX = Path(__file__).parent / "fixtures" / "permissions"
 _CONFIG = {"token": "x", "drive_id": "D1", "base_url": "https://graph.microsoft.com"}
@@ -151,6 +153,71 @@ async def test_sharepoint_incremental_uses_saved_cursor(respx_mock: respx.MockRo
 
     assert route.called, "incremental sync must GET the saved deltaLink, not root/delta"
     assert [r.source_doc_id for r in refs] == ["I2"]
+
+
+@pytest.mark.conformance
+@pytest.mark.permission
+@respx.mock(assert_all_called=False)
+async def test_sharepoint_org_scope_link_does_not_leak_to_all_tenant_members(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Regression: an "organization" scope sharing link must NOT map to public=True.
+
+    Org scope means "tenant members WHO HOLD THE LINK" (excluding B2B guests), not all
+    tenant members. The prior mapping set public=True, which let can_see() return True for
+    every principal in the namespace, including a tenant member who never received the link
+    and a guest. This pins the fail-closed mapping: the item is granted only to the
+    namespaced membership group _ORG_MEMBER_GROUP (which under-shares until the identity
+    layer materializes it), public stays False, and a link-less principal is DENIED. If
+    org-scope ever regresses to public=True this test fails, so the leak cannot return.
+    """
+    respx_mock.get(path="/v1.0/drives/D1/items/ORG/permissions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"value": [{"link": {"scope": "organization", "type": "view"}}]},
+        )
+    )
+    conn = _factory()
+    acl = await conn.list_acls(DocRef(source_doc_id="ORG", instance_id="contoso"))
+
+    # The over-share this fix closes: org-scope must never be world/tenant public.
+    assert acl.public is False
+    # It fails closed to the stable namespaced membership group, nothing broader.
+    assert acl.allow_groups == [_ORG_MEMBER_GROUP]
+    assert acl.allow_users == []
+
+    # A tenant member who lacks the link (and thus lacks the materialized group) is DENIED,
+    # which is exactly the principal the previous public=True mapping leaked to.
+    link_less_member = Principal(user_id="bob@contoso.com", groups=[])
+    assert can_see(acl, link_less_member) is False
+    # A B2B guest, whom org scope excludes entirely, is likewise DENIED.
+    guest = Principal(user_id="guest@partner.com", groups=[])
+    assert can_see(acl, guest) is False
+    # Only a principal the identity layer has placed in the org-members group can see it.
+    materialized_member = Principal(user_id="alice@contoso.com", groups=[_ORG_MEMBER_GROUP])
+    assert can_see(acl, materialized_member) is True
+
+
+@pytest.mark.conformance
+@pytest.mark.permission
+@respx.mock(assert_all_called=False)
+async def test_sharepoint_anonymous_scope_link_stays_public(
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Guard the other side: "anonymous" scope is genuinely world-readable, so it must
+    still map to public=True. This keeps the fail-closed org-scope fix from over-correcting
+    anonymous links into an under-share."""
+    respx_mock.get(path="/v1.0/drives/D1/items/PUB/permissions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"value": [{"link": {"scope": "anonymous", "type": "view"}}]},
+        )
+    )
+    conn = _factory()
+    acl = await conn.list_acls(DocRef(source_doc_id="PUB", instance_id="contoso"))
+
+    assert acl.public is True
+    assert _ORG_MEMBER_GROUP not in acl.allow_groups
 
 
 @pytest.mark.conformance

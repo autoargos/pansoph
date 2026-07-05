@@ -6,12 +6,22 @@ its member user ids, with no groups and no deny (Slack exposes neither per chann
 
 The shared assert_conforms harness is wired here (test_slack_assert_conforms), so the
 connector is gated by the same contract every other connector is, not only by the
-weaker per-category checks. Two regression tests pin the security fixes: an
-ok=false conversations.info must never produce a public grant (the ACL leak), and an
-ok=false conversations.members must raise rather than persist an empty member set (the
-silent under-share). Both are grounded in the Slack ok-envelope: failures arrive as
-HTTP 200 with {"ok": false, "error": "..."} (docs.slack.dev/apis/web-api/, verified
-2026-07-05).
+weaker per-category checks. Regression tests pin the security fixes:
+
+  - test_slack_public_channel_never_maps_to_public: a public channel must NEVER map to
+    public=True (the over-share leak), it maps to the namespaced full-member group,
+    which under-shares until the identity layer materializes it. Grounded in the Slack
+    guest-roles rules: guests must be explicitly added to a channel and cannot read
+    arbitrary public channels (slack.com/help/articles/202518103, verified 2026-07-05).
+  - test_slack_missing_is_private_fails_closed_to_private: a missing is_private on an
+    ok=true conversations.info defaults to private (the narrower side), not public.
+  - test_slack_info_ok_false_never_leaks_public: an ok=false conversations.info must
+    raise, never produce a public grant.
+  - test_slack_members_not_in_channel_raises: an ok=false conversations.members must
+    raise rather than persist an empty member set (silent under-share).
+
+The ok-envelope cases are grounded in the Slack contract: failures arrive as HTTP 200
+with {"ok": false, "error": "..."} (docs.slack.dev/apis/web-api/, verified 2026-07-05).
 """
 
 from __future__ import annotations
@@ -24,7 +34,11 @@ import respx
 from pansoph_connector_sdk import assert_conforms
 from pansoph_connector_sdk.verify.categories.contract import check_discovery, check_spec
 from pansoph_connector_sdk.verify.categories.permissions import check_permissions
-from pansoph_connector_slack.connector import SlackApiError, SlackConnector
+from pansoph_connector_slack.connector import (
+    _WORKSPACE_MEMBER_GROUP,
+    SlackApiError,
+    SlackConnector,
+)
 
 _FIX = Path(__file__).parent / "fixtures" / "permissions"
 
@@ -267,6 +281,73 @@ async def test_slack_members_not_in_channel_raises(respx_mock: respx.MockRouter)
     with pytest.raises(SlackApiError) as exc:
         await conn.list_acls(conn._ref("C2"))
     assert exc.value.code == "not_in_channel"
+
+
+@pytest.mark.conformance
+@pytest.mark.permission
+@respx.mock(assert_all_called=False)
+async def test_slack_public_channel_never_maps_to_public(respx_mock: respx.MockRouter) -> None:
+    # REGRESSION (over-share leak, connector.py:409-410 in the audited version). The old
+    # code mapped a public channel (is_private=False) to AccessControl(public=True),
+    # which pansoph-authz translates into a reader grant to the tenant-everyone group,
+    # i.e. EVERY principal in the tenant. But a Slack public channel is NOT world
+    # readable: single/multi-channel GUESTS must be explicitly added to a channel and
+    # cannot read arbitrary public channels (guest-roles help article, verified
+    # 2026-07-05), and pansoph tenant-everyone can include principals with no Slack
+    # membership at all. So a principal who cannot read the channel in Slack would get
+    # read access in pansoph -> over-broad grant. The fix fails closed to the narrower
+    # side: a public channel maps to the namespaced full-member group, which UNDER-shares
+    # (grants no one until the identity layer materializes it) rather than over-shares.
+    #
+    # This pins the non-leak: public MUST be False (public is exactly the flag the authz
+    # mapper keys off to grant tenant-everyone, so public=False denies the previously
+    # leaked tenant-everyone/guest/non-Slack principal), the only grant is the
+    # unmaterialized membership group, and there is no direct-user grant.
+    respx_mock.get(path="/api/conversations.info").mock(
+        return_value=httpx.Response(
+            200, json={"ok": True, "channel": {"id": "C1", "is_private": False}}
+        )
+    )
+    conn = _factory()
+    acl = await conn.list_acls(conn._ref("C1"))
+    assert acl.public is False
+    assert acl.allow_users == []
+    # The grant is the full-member group, namespaced PER INSTANCE. The bare
+    # "slack:member" would alias two Slack workspaces in one tenant onto one authz node
+    # (the mapper renders a group in the tenant namespace), leaking workspace A's public
+    # docs to workspace B's members once the group is materialized. The per-instance id
+    # keeps them distinct.
+    assert acl.allow_groups == [f"{_WORKSPACE_MEMBER_GROUP}:{conn.instance_id}"]
+    assert acl.allow_groups[0].startswith("slack:member:")
+    assert acl.allow_groups != [_WORKSPACE_MEMBER_GROUP]
+
+
+@pytest.mark.conformance
+@pytest.mark.permission
+@respx.mock(assert_all_called=False)
+async def test_slack_missing_is_private_fails_closed_to_private(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # REGRESSION (fail-open default). When is_private is absent on an ok=true
+    # conversations.info, the old code (channel.get("is_private", False)) defaulted to
+    # PUBLIC and emitted a public grant. Slack always returns is_private, but this was
+    # the one path that failed open. The fix defaults to private (the narrower side), so
+    # a missing field routes into the member-user path (conversations.members), never a
+    # broad grant. Here members returns a concrete user set and public stays False.
+    respx_mock.get(path="/api/conversations.info").mock(
+        return_value=httpx.Response(200, json={"ok": True, "channel": {"id": "C9"}})
+    )
+    respx_mock.get(path="/api/conversations.members").mock(
+        return_value=httpx.Response(
+            200,
+            json={"ok": True, "members": ["U7"], "response_metadata": {"next_cursor": ""}},
+        )
+    )
+    conn = _factory()
+    acl = await conn.list_acls(conn._ref("C9"))
+    assert acl.public is False
+    assert acl.allow_groups == []
+    assert acl.allow_users == ["U7"]
 
 
 @pytest.mark.conformance

@@ -24,6 +24,12 @@ Implemented against the official Notion API. Verified against the official docs:
                  data_sources model; user+bot permissions managed at database level;
                  page-level access rules via Person/Created-by properties on
                  Business/Enterprise)
+               https://developers.notion.com/reference/trash-page (trash semantics;
+                 "archived" is a deprecated alias for "in_trash" as of 2026-03-11; the
+                 API cannot permanently delete, and there is no bulk deletion feed)
+               https://github.com/makenotion/notion-sdk-js/issues/524 (confirms POST
+                 /v1/search excludes trashed pages: there is no way to query
+                 archived/in_trash items via search)
   API version: Notion-Version 2025-09-03 (sent as a mandatory header on every request).
   Auth:        bearer token. Config "token" carries an internal integration token
                (or an OAuth access token). Sent as "Authorization: Bearer <token>".
@@ -39,11 +45,33 @@ Implemented against the official Notion API. Verified against the official docs:
                intra-listing next_cursor as its public cursor, because the contract
                forbids reusing an intra-listing page token across runs; it yields a
                stable full-scan sentinel instead.
-  Deletions:   yes. Notion's search response carries in_trash and is_archived on
-               every page object. A page that is in_trash or is_archived is the
-               source's real deletion signal for a poll-based sync, so the connector
-               emits a tombstone (DocRef with deleted=True) for it and never ingests
-               it as a live document. capabilities.deletions is True.
+  Deletions:   no bulk feed. capabilities.deletions is False, and that is honest.
+               POST /v1/search EXCLUDES trashed pages: a page moved to trash (or
+               un-shared from the connection) simply STOPS appearing in search
+               results, it is never returned carrying in_trash=True. Notion exposes
+               no "list deleted objects" feed and no search filter for trash state
+               (https://developers.notion.com/reference/post-search returns only
+               live, shared objects; confirmed by makenotion/notion-sdk-js issue #524,
+               "No way to query archived/in_trash items"). The only per-object trash
+               signal is GET /v1/pages/{id} returning in_trash=true (or 404), which
+               requires already knowing the id. list_changes receives only an opaque
+               cursor, never the prior synced id set, so the connector cannot diff a
+               listing or re-probe removed ids from inside a single poll. Declaring
+               deletions=True here would be a lie: it would promise a tombstone stream
+               that the real API can never produce, and the runtime would trust that
+               dead stream instead of reconciling, leaving a trashed/revoked doc in
+               the index forever. So deletions=False, which tells the runtime to purge
+               removals by reconciling the full-scan listing against the previously
+               synced set (search-absence IS the removal signal), not by trusting a
+               tombstone feed. Note also that "archived" is a deprecated alias for
+               "in_trash" as of Notion-Version 2026-03-11
+               (https://developers.notion.com/reference/trash-page); it never meant a
+               still-readable page, so mapping is_archived to deletion was doubly wrong.
+               Fail-closed guard: a stale doc left in the index carries only the
+               integration-scoped grant (allow_users=[integration principal]), which
+               no end user is, so it under-shares rather than leaks; and a live
+               re-fetch of a trashed/un-shared page 404s server-side and is surfaced
+               by _raise_for_notion, so revoked content is never served.
   Rate limit:  ~3 requests/second per connection; 429 carries a Retry-After header.
                The runtime owns backoff; the connector surfaces the 429 code rather
                than swallowing it.
@@ -138,9 +166,16 @@ class NotionConnector:
                 # permission_sync is True: list_acls returns the integration-scoped
                 # ACL for a page, which is the faithful minimal grant.
                 permission_sync=True,
-                # deletions is True: search carries in_trash/is_archived per page, so
-                # a trashed or archived page surfaces as a tombstone.
-                deletions=True,
+                # deletions is False, and that is honest: POST /v1/search EXCLUDES
+                # trashed pages, so a removed page just disappears from the listing
+                # and the API never hands back a page carrying in_trash=True. Notion
+                # exposes no bulk deletion feed, and list_changes gets only a cursor
+                # (never the prior synced id set), so the connector cannot emit a
+                # tombstone from a single poll. Declaring True would promise a stream
+                # the real API can never produce; the runtime instead reconciles the
+                # full-scan listing against the previously synced set. See the module
+                # header "Deletions" section.
+                deletions=False,
                 slim_listing=True,
             ),
         )
@@ -207,10 +242,11 @@ class NotionConnector:
         complete listing, but it never surfaces that intra-listing token as its
         public cursor; every yielded ref carries the stable full-scan sentinel.
 
-        A page whose search object reports in_trash or is_archived is trashed in
-        Notion. That is the source's real deletion signal for a poll-based sync, so
-        the connector yields a tombstone (DocRef with deleted=True) for it and does
-        not ingest it as a live document.
+        This yields only live refs, never a tombstone: POST /v1/search excludes
+        trashed pages, so a removed page is simply absent from the listing rather
+        than returned carrying in_trash=True. capabilities.deletions is False and the
+        runtime purges removals by reconciling this full-scan listing against the
+        previously synced set. See the module header "Deletions" section.
         """
         # A run that resumes from the full-scan sentinel is a no-op replay: the
         # connector already returned the complete listing, so there is nothing new to
@@ -232,11 +268,10 @@ class NotionConnector:
                     page_id = page.get("id")
                     if not page_id:
                         continue
-                    if self._is_trashed(page):
-                        # Tombstone: a trashed or archived page is a removal signal.
-                        yield self._ref(page_id, deleted=True), _FULL_SCAN_CURSOR
-                    else:
-                        yield self._ref(page_id), _FULL_SCAN_CURSOR
+                    # Search never returns trashed pages, so every result is live.
+                    # A removed page is detected by its ABSENCE here, reconciled by
+                    # the runtime, not by a tombstone the API cannot produce.
+                    yield self._ref(page_id), _FULL_SCAN_CURSOR
                 if not payload.get("has_more"):
                     break
                 body["start_cursor"] = payload.get("next_cursor")
@@ -276,12 +311,6 @@ class NotionConnector:
 
     def _ref(self, page_id: str, deleted: bool = False) -> DocRef:
         return DocRef(source_doc_id=page_id, instance_id=self.instance_id, deleted=deleted)
-
-    @staticmethod
-    def _is_trashed(page: dict[str, Any]) -> bool:
-        # Notion search carries both booleans on every page object. Either one means
-        # the page is not live content.
-        return bool(page.get("in_trash")) or bool(page.get("is_archived"))
 
     async def _resolve_principal(self, client: httpx.AsyncClient) -> str:
         """Resolve the integration principal id, caching it for the instance.

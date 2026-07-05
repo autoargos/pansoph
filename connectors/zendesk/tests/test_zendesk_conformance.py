@@ -18,6 +18,7 @@ from pansoph_connector_sdk import assert_conforms
 from pansoph_connector_sdk.verify.categories.contract import check_discovery, check_spec
 from pansoph_connector_sdk.verify.categories.permissions import check_permissions
 from pansoph_connector_sdk.verify.categories.sync import check_deletions
+from pansoph_connector_sdk.verify.principals import Principal, can_see
 from pansoph_connector_zendesk.connector import ZendeskConnector
 from pansoph_types import DocRef
 
@@ -355,6 +356,119 @@ async def test_zendesk_permissions(respx_mock: respx.MockRouter) -> None:
         source_acl=_FIX / "principals.json",
         principals=_FIX / "principals.json",
         expected=_FIX / "expected.json",
+    )
+
+
+@pytest.mark.conformance
+@pytest.mark.permission
+@respx.mock(assert_all_called=False)
+async def test_zendesk_cross_category_and_segment_fails_closed_no_or_leak(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # Regression for the cross-category AND over-share leak. Segment 80 restricts
+    # signed_in users by organization_ids=[9] AND or_tags=["vip"]: the Zendesk reach is
+    # signed-in users who are in org 9 AND hold the vip tag. The old mapping flattened
+    # this into allow_groups=["org:9", "tag:vip"], and the pure-OR resolver then granted
+    # ANY vip-tagged user (even in a different org) and ANY org-9 member (even without
+    # the vip tag). That is an over-grant / leak. The connector must now fail closed:
+    # emit only the unsatisfiable cross-category sentinel, granting neither side.
+    respx_mock.get(path="/api/v2/help_center/articles/8.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "article": {
+                    "id": 8,
+                    "title": "H",
+                    "body": "cross-category secret",
+                    "user_segment_id": 80,
+                    "html_url": "h",
+                    "draft": False,
+                }
+            },
+        )
+    )
+    respx_mock.get(path="/api/v2/help_center/user_segments/80.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "user_segment": {
+                    "user_type": "signed_in_users",
+                    "group_ids": [],
+                    "organization_ids": [9],
+                    "or_tags": ["vip"],
+                }
+            },
+        )
+    )
+    conn = _factory()
+    _raw, acl = await conn.fetch(DocRef(source_doc_id="8", instance_id="acme"))
+
+    # The mapping must not leak either narrowing category into the union.
+    assert acl.public is False
+    assert acl.allow_groups == ["unsatisfiable:cross_category_and"], (
+        "a cross-category AND segment must fail closed, not flatten to an OR union"
+    )
+    assert "org:9" not in acl.allow_groups
+    assert "tag:vip" not in acl.allow_groups
+
+    # The exact previously-leaked principal: a vip-tagged user in a DIFFERENT org. Under
+    # the old OR mapping this principal was granted; it must now be DENIED.
+    leaked_principal = Principal(user_id="vip_other_org", groups=["tag:vip"])
+    assert not can_see(acl, leaked_principal), (
+        "vip-tagged principal outside org 9 must NOT see a segment requiring org 9 AND vip"
+    )
+
+
+@pytest.mark.conformance
+@pytest.mark.permission
+async def test_zendesk_staff_plus_tag_segment_fails_closed(respx_mock: respx.MockRouter) -> None:
+    # Regression for the residual staff-base leak found in re-verify. A segment
+    # {user_type: "staff", or_tags: ["vip"]} means "agents/admins who ALSO hold the vip
+    # tag" (user_type is an AND base constraint). The prior fix did not count user_type as
+    # a narrowing category, so this had narrowing_count==1 and mapped to allow_groups=
+    # ["tag:vip"], DROPPING the staff constraint. But Zendesk tags are shared across staff
+    # AND end users, so tag:vip grants a non-staff end user with the vip tag, who cannot
+    # read the staff-only article. The fix counts staff as narrowing when paired with a
+    # tag/org category, so this fails closed.
+    respx_mock.get(path="/api/v2/help_center/articles/9.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "article": {
+                    "id": 9,
+                    "title": "S",
+                    "body": "staff-only vip note",
+                    "user_segment_id": 81,
+                    "html_url": "h",
+                    "draft": False,
+                }
+            },
+        )
+    )
+    respx_mock.get(path="/api/v2/help_center/user_segments/81.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={"user_segment": {"user_type": "staff", "group_ids": [], "or_tags": ["vip"]}},
+        )
+    )
+    conn = _factory()
+    _raw, acl = await conn.fetch(DocRef(source_doc_id="9", instance_id="acme"))
+
+    assert acl.public is False
+    assert acl.allow_groups == ["unsatisfiable:cross_category_and"], (
+        "staff AND tag is inexpressible in the OR model and must fail closed"
+    )
+    assert "tag:vip" not in acl.allow_groups, "the staff base constraint must not be dropped"
+    # A non-staff end user holding the vip tag: reachable under the old drop-staff mapping,
+    # must now be denied.
+    end_user = Principal(user_id="enduser_vip", groups=["tag:vip"])
+    assert not can_see(acl, end_user), (
+        "a non-staff vip-tagged end user must not see a staff segment"
+    )
+    # The other leaked side: an org-9 member without the vip tag must also be denied.
+    org_only_principal = Principal(user_id="org9_no_tag", groups=["org:9"])
+    assert not can_see(acl, org_only_principal), (
+        "org-9 principal without the vip tag must NOT see a segment requiring org 9 AND vip"
     )
 
 

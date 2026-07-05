@@ -1,4 +1,6 @@
 [
   {"user_id": "alice", "groups": ["jira-users"]},
+  {"user_id": "bob", "groups": ["jira-users"]},
+  {"user_id": "carol", "groups": ["security-team"]},
   {"user_id": "ext", "groups": []}
 ]

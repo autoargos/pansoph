@@ -1,4 +1,4 @@
 [
-  {"user_id": "alice", "groups": ["eng"]},
+  {"user_id": "alice", "groups": ["eng-gid"]},
   {"user_id": "bob", "groups": ["sales"]}
 ]

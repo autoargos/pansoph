@@ -6,6 +6,8 @@ Implemented against the Linear GraphQL API. Verified against the official docs:
   Pagination:    https://linear.app/developers/pagination
   Filtering:     https://linear.app/developers/filtering
   Private teams: https://linear.app/docs/private-teams
+  Member roles:  https://linear.app/docs/members-roles
+  Guest accounts:https://linear.app/changelog/2022-07-14-guest-accounts
   Webhooks:      https://linear.app/developers/webhooks
                  https://linear.app/docs/api-and-webhooks
   Verified on:   2026-07-05.
@@ -42,23 +44,38 @@ Implemented against the Linear GraphQL API. Verified against the official docs:
                    not be able to see issues associated with the team." Only the
                    team's members may see the issue, so the ACL is
                    allow_groups=[team_id] (the private team acts as the closed group).
-                 - NON-PRIVATE (workspace) team: its issues are visible to ALL
-                   workspace members, not only the team's members. Within this
-                   instance's ACL namespace every principal is a workspace member, so
-                   the faithful mapping is public=True (workspace-visible), NOT
-                   allow_groups=[team_id], which would wrongly hide the issue from
-                   workspace members who are not on that team.
+                 - OPEN (non-private) team: its issues are visible to every FULL
+                   workspace member (Owner / Admin / Team Owner / Member), whether or
+                   not they have joined that team. It is NOT visible to every
+                   workspace PRINCIPAL, because Linear Guests are workspace principals
+                   too (paid seats that appear in member management, per
+                   https://linear.app/docs/members-roles) yet a guest "will not be
+                   able to see or discover any other teams in the workspace or have
+                   access to those issues" (guest-accounts changelog, 2022-07-14).
+                   So an open team's real audience is "all full members but not
+                   guests." pansoph's AccessControl is UNION-only and cannot express
+                   that as public=True: public=True short-circuits can_see to True for
+                   EVERY principal in the namespace, which grants the issue to guests
+                   who cannot read it in Linear (an over-share / fail-open leak). Per
+                   pansoph CLAUDE.md rule 1, over-sharing is a security bug, so we fail
+                   closed and map an open team to the namespaced full-members group
+                   _WORKSPACE_MEMBERS_GROUP instead of public=True. That group under-
+                   shares (grants no one) until the identity layer materializes it with
+                   the workspace's full members (excluding guests), which is the safe
+                   direction. See _acl.
                Linear exposes no per-issue viewer list, so there are no per-issue
                allow_users and no deny at the issue level. The connector reads
-               Team.private to make the split; without it a public-team issue would
+               Team.private to make the split; without it an open-team issue would
                over-deny.
 
 Credential scope note: every configured instance carries its own credential and its
 own ACL namespace (principal_ns = instance_id). One instance may be a personal key
 over one user's workspace, another an OAuth token over an org. They never collide,
-and each maps ACLs at the granularity its credential grants. public=True here means
-"visible to every principal in this instance's namespace" (workspace-wide), not
-globally public. See pansoph CLAUDE.md section 6.
+and each maps ACLs at the granularity its credential grants. Group ids (a private
+team_id, or the reserved _WORKSPACE_MEMBERS_GROUP for open teams) are resolved within
+this instance's namespace only, never globally. This connector never emits public=True
+for a Linear issue: no Linear issue is visible to every workspace principal, because
+guests are principals who are excluded. See pansoph CLAUDE.md section 6 and rule 1.
 
 The runtime owns retries, backoff, and resumable sync, so a method only describes
 how to talk to Linear for one page or one document.
@@ -86,9 +103,23 @@ _LIST_QUERY = (
     "query($after: String) { issues(first: 100, after: $after, orderBy: updatedAt) "
     "{ nodes { id title updatedAt } pageInfo { hasNextPage endCursor } } }"
 )
-# team.private drives the ACL split (private team -> group scoped, public team ->
-# workspace visible), so it must be fetched, not assumed.
+# team.private drives the ACL split (private team -> team group, open team ->
+# full-members group), so it must be fetched, not assumed.
 _FETCH_QUERY = "query($id:String!){ issue(id:$id){ id title description team { id key private } } }"
+
+# Stable, reserved, namespaced id for a Linear workspace's FULL members, i.e. every
+# principal EXCEPT guests (Owner / Admin / Team Owner / Member per
+# https://linear.app/docs/members-roles). An OPEN (non-private) team's issues are
+# visible to full members but NOT to guests (guest-accounts changelog, 2022-07-14:
+# a guest "will not be able to see or discover any other teams in the workspace or
+# have access to those issues"). pansoph's UNION-only AccessControl cannot express
+# "all full members but not guests" as public=True without leaking to guest
+# principals, so an open team maps to this group instead (fail closed, CLAUDE.md rule
+# 1). The identity layer MUST materialize this group with the workspace's full members
+# (excluding guests); until it does, the group grants no one, so the issue under-shares,
+# which is the safe direction. The "linear:" prefix and this reserved suffix cannot
+# collide with a Linear team id (a UUID), so it never shadows a real team group.
+_WORKSPACE_MEMBERS_GROUP = "linear:workspace-members"
 
 
 class LinearConnector:
@@ -220,17 +251,30 @@ class LinearConnector:
         return data.get("issue", {}) or {}
 
     def _acl(self, issue: dict[str, Any]) -> AccessControl:
-        # Faithful to https://linear.app/docs/private-teams:
-        #   private team  -> only members see it -> allow_groups=[team_id]
-        #   public  team  -> all workspace members see it -> public=True
-        # Reading team.private is what prevents over-denying a public-team issue.
+        # Faithful to https://linear.app/docs/private-teams and the guest role
+        # (https://linear.app/docs/members-roles, guest-accounts changelog 2022-07-14):
+        #   private team -> only its members see it     -> allow_groups=[team_id]
+        #   open    team -> every FULL member (not guests) sees it
+        #                                                -> allow_groups=[members group]
+        # An open team is NEVER public=True: guests are workspace principals who cannot
+        # see open teams, and public=True would leak the issue to them. Mapping to the
+        # full-members group fails closed (it under-shares until the identity layer
+        # materializes the group), per CLAUDE.md rule 1. Reading team.private is what
+        # prevents over-denying an open-team issue to full members not on the team.
         team: dict[str, Any] = issue.get("team") or {}
         team_id: str | None = team.get("id")
         ns = self.instance_id
-        if not team.get("private", False):
-            # Non-private team: visible to every workspace member, which in this
-            # instance's namespace is every principal, so public=True is faithful.
-            return AccessControl(public=True, principal_ns=ns)
-        # Private team: closed to non-members; the team is the allowed group.
-        groups: list[str] = [team_id] if team_id else []
-        return AccessControl(allow_groups=groups, principal_ns=ns)
+        if not team_id:
+            # No resolvable team: a null/inaccessible issue, a deleted issue, or a
+            # GraphQL partial error returning data.issue=null under HTTP 200. Fail
+            # closed. Granting the open-team members group here would leak a private or
+            # unreadable issue to every full member, so an unresolvable issue grants
+            # no one.
+            return AccessControl(allow_groups=[], principal_ns=ns)
+        if team.get("private", True):
+            # Private team (also the default when the flag is absent, failing closed on
+            # the privacy axis): closed to non-members; the team is the allowed group.
+            return AccessControl(allow_groups=[team_id], principal_ns=ns)
+        # Open (non-private) team: visible to full workspace members but not guests.
+        # Map to the reserved full-members group, never public=True.
+        return AccessControl(allow_groups=[_WORKSPACE_MEMBERS_GROUP], principal_ns=ns)

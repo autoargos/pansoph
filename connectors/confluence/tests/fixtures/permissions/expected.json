@@ -1,3 +1,3 @@
 {
-  "p1": {"public": false, "allow_groups": ["eng"], "allow_users": ["alice"], "deny": []}
+  "p1": {"public": false, "allow_groups": ["eng-gid"], "allow_users": ["alice"], "deny": []}
 }

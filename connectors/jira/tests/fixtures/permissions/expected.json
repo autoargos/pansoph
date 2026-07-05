@@ -1,3 +1,5 @@
 {
-  "ENG-1": {"public": false, "allow_groups": ["jira-users"], "allow_users": ["alice"], "deny": []}
+  "ENG-1": {"public": false, "allow_groups": ["jira-users"], "allow_users": ["alice"], "deny": []},
+  "ENG-9": {"public": false, "allow_groups": ["security-team"], "allow_users": ["carol"], "deny": []},
+  "ENG-13": {"public": false, "allow_groups": [], "allow_users": [], "deny": []}
 }
