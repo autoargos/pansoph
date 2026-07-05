@@ -133,6 +133,17 @@ def build_authz() -> Any:
     return _build("pansoph.authz", _env("PANSOPH_AUTHZ_ADAPTER", "spicedb"), _AUTHZ_KWARGS)
 
 
+def build_acl_log() -> Any:
+    """Build the durable AclLog: the last-written ACL per document, for revocation
+    diffing on re-sync. Postgres-backed, keyed by doc_id, never scanned, so it adds no
+    hot-path cost. Imported directly (not via the registry) because it is an internal
+    ingestion detail, not a user-swappable port surface like the vector store or authz.
+    """
+    from pansoph_ingestion.adapters_acl_log import PostgresAclLog
+
+    return PostgresAclLog(_postgres_dsn())
+
+
 def build_llm() -> Any:
     return _build("pansoph.llms", _env("PANSOPH_LLM_ADAPTER", "openai_compatible"), _LLM_KWARGS)
 

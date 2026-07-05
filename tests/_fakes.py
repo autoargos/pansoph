@@ -28,7 +28,15 @@ class FakeVectorStore:
         self.last_limit: int | None = None
 
     async def upsert(self, hits: list[SearchHit], vectors: list[list[float]]) -> None:
+        # Replace-by-chunk so a re-upsert of a document does not duplicate its chunks,
+        # mirroring the real ON CONFLICT (chunk_id) DO UPDATE.
+        incoming = {h.chunk_id for h in hits}
+        self.rows = [r for r in self.rows if r.chunk_id not in incoming]
         self.rows.extend(hits)
+
+    async def delete_by_doc_id(self, doc_id: str) -> None:
+        # Purge every chunk of a document. Idempotent, like the real DELETE.
+        self.rows = [r for r in self.rows if r.doc_id != doc_id]
 
     async def hybrid_search(
         self, query_vector: list[float], query_text: str, flt: VectorFilter, limit: int

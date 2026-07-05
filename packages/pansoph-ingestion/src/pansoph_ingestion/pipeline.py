@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import time
 
-from pansoph_authz import AuthzPort, ConsistencyToken, narrow, tuples_for_acl
+from pansoph_authz import AuthzPort, ConsistencyToken, diff_acls, narrow, tuples_for_acl
 from pansoph_connector_sdk import Connector
 from pansoph_retrieval.ports import Embedder, SearchHit, VectorStore
-from pansoph_types import DocRef, Document
+from pansoph_types import AccessControl, DocRef, Document
 
+from .acl_log import AclLog
 from .chunking import chunk_sections
 from .ports import LLM, Parser
 
@@ -39,6 +40,7 @@ class IngestionPipeline:
         embedder: Embedder,
         vector_store: VectorStore,
         authz: AuthzPort,
+        acl_log: AclLog | None = None,
         llm: LLM | None = None,
         contextualize: bool = False,
     ) -> None:
@@ -47,6 +49,10 @@ class IngestionPipeline:
         self._embedder = embedder
         self._vector_store = vector_store
         self._authz = authz
+        # The last-written ACL per document, for revocation diffing. When absent, the
+        # pipeline falls back to a blind full write (the pre-Phase-2 behavior), which
+        # still adds grants but cannot detect a contraction. Production wires it.
+        self._acl_log = acl_log
         self._llm = llm
         self._contextualize = contextualize and llm is not None
 
@@ -64,16 +70,24 @@ class IngestionPipeline:
         scope_type: str = "org",
         scope_ref: str = "",
     ) -> str:
-        """Sync everything changed since `cursor`. Returns the next cursor."""
+        """Sync everything changed since `cursor`. Returns the next cursor.
+
+        A tombstone (a DocRef with deleted=True) is a removal: the document is purged
+        from the vector store and its reader tuples deleted, so a source deletion stops
+        the document being retrievable. Every other ref is an upsert.
+        """
         next_cursor = cursor or ""
         async for ref, cur in self._connector.list_changes(cursor):
-            await self.ingest_one(
-                connector_name=connector_name,
-                tenant_id=tenant_id,
-                ref=ref,
-                scope_type=scope_type,
-                scope_ref=scope_ref,
-            )
+            if ref.deleted:
+                await self.delete_one(connector_name=connector_name, ref=ref)
+            else:
+                await self.ingest_one(
+                    connector_name=connector_name,
+                    tenant_id=tenant_id,
+                    ref=ref,
+                    scope_type=scope_type,
+                    scope_ref=scope_ref,
+                )
             next_cursor = cur
         return next_cursor
 
@@ -100,14 +114,11 @@ class IngestionPipeline:
         embed_texts = await self._embed_texts(parsed.title, chunks)
         vectors = await self._embedder.embed(embed_texts)
 
-        # Write authz tuples first so the chunks can store the consistency token of
-        # this exact ACL write, which retrieval threads back into the bulk check.
-        # Two-level namespace: groups are tenant scoped (so identity groups resolve
-        # across instances), users and the public wildcard stay instance scoped (so
-        # two instances never collide). The mapper does this split; we pass both ids.
-        token = await self._authz.write_tuples(
-            tuples_for_acl(doc_id, ref.instance_id, acl, tenant_id=tenant_id)
-        )
+        # Reconcile authz tuples first so the chunks can store the consistency token of
+        # this exact ACL write, which retrieval threads back into the bulk check. Users
+        # and groups are both namespaced by tenant (a person is one principal per tenant),
+        # so a direct-user grant resolves against the tenant-scoped query subject.
+        token, acl_version = await self._apply_acl(doc_id, ref.instance_id, tenant_id, acl)
         written_at = time.time()
         hits = [
             SearchHit(
@@ -117,7 +128,7 @@ class IngestionPipeline:
                 tenant_id=tenant_id,
                 allow_groups=list(acl.allow_groups),
                 deny=list(acl.deny),
-                acl_version=1,
+                acl_version=acl_version,
                 text=chunk,
                 consistency_token=str(token),
                 acl_written_at=written_at,
@@ -126,6 +137,66 @@ class IngestionPipeline:
         ]
         await self._vector_store.upsert(hits, vectors)
         return token
+
+    async def _apply_acl(
+        self, doc_id: str, instance_id: str, tenant_id: str, new_acl: AccessControl
+    ) -> tuple[ConsistencyToken, int]:
+        """Reconcile the authz tuples for a document to its new (narrowed) ACL and return
+        the freshest consistency token plus the monotonic acl_version.
+
+        Without an AclLog, this is the legacy blind write: it adds every grant but
+        cannot see a revocation. With one, it diffs against the last ACL written, deletes
+        the revoked tuples FIRST (the dangerous contraction), then writes the added ones,
+        and bumps acl_version only when the ACL actually changed, so cache invalidation
+        keyed on acl_version is meaningful.
+        """
+        new_tuples = tuples_for_acl(doc_id, instance_id, new_acl, tenant_id=tenant_id)
+        if self._acl_log is None:
+            token = await self._authz.write_tuples(new_tuples)
+            return token, 1
+
+        prior = await self._acl_log.get(doc_id)
+        if prior is None:
+            token = await self._authz.write_tuples(new_tuples)
+            version = 1
+        elif prior.acl == new_acl:
+            # Unchanged ACL: rewrite (idempotent) to refresh the token, keep the version.
+            token = await self._authz.write_tuples(new_tuples)
+            version = prior.acl_version
+        else:
+            to_write, to_delete = diff_acls(
+                doc_id, instance_id, prior.acl, new_acl, tenant_id=tenant_id
+            )
+            # Revocations first: a stale read must never see a removed grant.
+            if to_delete:
+                token = await self._authz.delete_tuples(to_delete)
+            if to_write:
+                token = await self._authz.write_tuples(to_write)
+            if not to_delete and not to_write:
+                token = await self._authz.write_tuples(new_tuples)
+            version = prior.acl_version + 1
+
+        await self._acl_log.put(doc_id, new_acl, tenant_id, version)
+        return token, version
+
+    async def delete_one(self, *, connector_name: str, ref: DocRef) -> None:
+        """Purge a tombstoned document: remove its chunks from the vector store and delete
+        its reader tuples, so a source deletion stops it being retrievable. Idempotent, so
+        a replayed deletion step is safe. Content is never fetched for a tombstone.
+        """
+        doc_id = Document.make_id(connector_name, ref.instance_id, ref.source_doc_id)
+        await self._vector_store.delete_by_doc_id(doc_id)
+        if self._acl_log is not None:
+            prior = await self._acl_log.get(doc_id)
+            if prior is not None:
+                # Reconstruct exactly the tuples written last time (same tenant
+                # namespacing) so the delete matches what SpiceDB holds.
+                tuples = tuples_for_acl(
+                    doc_id, ref.instance_id, prior.acl, tenant_id=prior.tenant_id
+                )
+                if tuples:
+                    await self._authz.delete_tuples(tuples)
+                await self._acl_log.delete(doc_id)
 
     async def _embed_texts(self, title: str | None, chunks: list[str]) -> list[str]:
         """Optionally prepend generated context to each chunk before embedding."""

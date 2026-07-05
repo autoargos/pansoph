@@ -73,3 +73,13 @@ class VectorStore(Protocol):
         `limit` is already the overfetched count (3 to 5 times the final need).
         """
         ...
+
+    async def delete_by_doc_id(self, doc_id: str) -> None:
+        """Purge every chunk of one document from the store (a deletion or tombstone).
+
+        Keyed by the stable global doc_id, so all of a document's chunks go together.
+        Idempotent: purging a doc_id that is not present is a no-op, so a retried or
+        replayed deletion step never fails. This is the vector-store half of a
+        revocation; the authz half is `AuthzPort.delete_tuples`.
+        """
+        ...

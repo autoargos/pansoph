@@ -34,11 +34,20 @@ def register_sync_workflow(
     async def _ingest_step(ref: DocRef) -> None:
         await pipeline.ingest_one(connector_name=connector_name, tenant_id=tenant_id, ref=ref)
 
+    @DBOS.step()
+    async def _delete_step(ref: DocRef) -> None:
+        # A tombstone is a durable step too, so a crash mid-purge resumes rather than
+        # leaving a half-deleted document indexed but tuple-less (or vice versa).
+        await pipeline.delete_one(connector_name=connector_name, ref=ref)
+
     @DBOS.workflow()
     async def _sync(cursor: str | None = None) -> str:
         next_cursor = cursor or ""
         async for ref, cur in pipeline.connector.list_changes(cursor):
-            await _ingest_step(ref)
+            if ref.deleted:
+                await _delete_step(ref)
+            else:
+                await _ingest_step(ref)
             next_cursor = cur
         return next_cursor
 

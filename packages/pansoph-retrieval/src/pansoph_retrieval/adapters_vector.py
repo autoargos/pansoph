@@ -100,6 +100,15 @@ class PgVectorScaleStore:
         finally:
             await conn.close()
 
+    async def delete_by_doc_id(self, doc_id: str) -> None:
+        """Purge every chunk of a document. Idempotent: DELETE of an absent doc_id is a
+        no-op, so a replayed tombstone step never fails."""
+        conn = await self._connect()
+        try:
+            await conn.execute("DELETE FROM pansoph_chunks WHERE doc_id = %s", (doc_id,))
+        finally:
+            await conn.close()
+
     async def hybrid_search(
         self, query_vector: list[float], query_text: str, flt: VectorFilter, limit: int
     ) -> list[SearchHit]:
@@ -216,6 +225,28 @@ class QdrantStore:
                     )
                     for hit, vec in zip(hits, vectors, strict=True)
                 ],
+            )
+        finally:
+            await client.close()
+
+    async def delete_by_doc_id(self, doc_id: str) -> None:
+        """Purge every chunk of a document by a payload filter on doc_id. Idempotent:
+        a filter matching nothing deletes nothing, so a replayed tombstone never fails."""
+        from qdrant_client import models
+
+        client = self._client()
+        try:
+            await client.delete(
+                collection_name=self._collection,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="doc_id", match=models.MatchValue(value=doc_id)
+                            )
+                        ]
+                    )
+                ),
             )
         finally:
             await client.close()

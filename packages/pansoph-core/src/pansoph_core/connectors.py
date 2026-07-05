@@ -54,9 +54,10 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 CREATE INDEX IF NOT EXISTS sync_runs_instance ON sync_runs (instance_id, started_at DESC);
 """
 
-# The granularity an instance covers. Orthogonal to the source ACL: scope is a
-# management concept (who owns and administers this instance), the source ACL still
-# governs who may read its documents.
+# The granularity an instance covers, which also NARROWS its documents' audience: an
+# individual/group scope intersects the source ACL so only that user/group can read the
+# ingested documents (guarded knowledge base). org leaves the source ACL unchanged.
+# Applied in ingestion via narrow(); scope can only remove reach, never add it.
 _SCOPE_TYPES = {"org", "group", "individual"}
 
 
@@ -287,12 +288,14 @@ async def run_instance(manager: ConnectorManager, instance: dict[str, Any]) -> d
     embedder = assembly.build_embedder()
     vector = assembly.build_vector_store()
     authz = assembly.build_authz()
+    acl_log = assembly.build_acl_log()
     pipeline = IngestionPipeline(
         connector=_build_connector(instance),
         parser=parser,
         embedder=embedder,
         vector_store=vector,
         authz=authz,
+        acl_log=acl_log,
     )
     count = 0
     next_cursor = instance.get("cursor")
@@ -300,13 +303,18 @@ async def run_instance(manager: ConnectorManager, instance: dict[str, Any]) -> d
     scope_ref = instance.get("scope_ref") or ""
     try:
         async for ref, cur in pipeline.connector.list_changes(instance.get("cursor")):
-            await pipeline.ingest_one(
-                connector_name=instance["connector"],
-                tenant_id=instance["tenant_id"],
-                ref=ref,
-                scope_type=scope_type,
-                scope_ref=scope_ref,
-            )
+            if ref.deleted:
+                # A tombstone purges the document from the vector store and deletes its
+                # reader tuples, so a source deletion stops it being retrievable.
+                await pipeline.delete_one(connector_name=instance["connector"], ref=ref)
+            else:
+                await pipeline.ingest_one(
+                    connector_name=instance["connector"],
+                    tenant_id=instance["tenant_id"],
+                    ref=ref,
+                    scope_type=scope_type,
+                    scope_ref=scope_ref,
+                )
             count += 1
             next_cursor = cur
         await manager.record_run_finish(run_id, "success", count, None)
