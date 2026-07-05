@@ -297,8 +297,10 @@ export default function Chat({ identity }: { identity: Identity }) {
   const chipRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
   const flashTimer = useRef<number | null>(null);
 
-  // Keep the newest turn in view as tokens stream in.
+  // Keep the newest turn in view as tokens stream in. Skip the empty state, otherwise
+  // this scrolls the tall welcome hero up out of view on first paint.
   useEffect(() => {
+    if (messages.length === 0) return;
     const el = threadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
@@ -568,7 +570,11 @@ function EmptyAsk({
   busy: boolean;
 }) {
   return (
-    <div className="flex min-h-full flex-col items-center justify-center py-8 text-center">
+    // items centered horizontally; my-auto on the inner block centers it vertically when
+    // it fits and lets the top stay reachable (scroll) when it does not. Plain
+    // justify-center clips the top of tall content in an overflow container.
+    <div className="flex min-h-full flex-col items-center py-8 text-center">
+      <div className="my-auto flex w-full flex-col items-center">
       <span
         className="mb-5 grid h-14 w-14 place-items-center rounded-[16px] text-white"
         style={{
@@ -632,6 +638,7 @@ function EmptyAsk({
             </svg>
           </button>
         ))}
+      </div>
       </div>
     </div>
   );

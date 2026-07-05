@@ -253,3 +253,70 @@ select:focus-visible,
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------
+   Light theme. Toggled by setting data-theme="light" on <html>.
+   Overrides both the raw --ob-* vars (used in a few inline styles)
+   and the Tailwind @theme --color-* tokens (used by every utility),
+   so the whole app flips with one attribute.
+   ------------------------------------------------------------ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ob-bg: #f7f8fb;
+  --ob-surface: #ffffff;
+  --ob-elevated: #ffffff;
+  --ob-border: #e5e7ec;
+  --ob-border-hover: #d3d6de;
+  --ob-text: #17171d;
+  --ob-muted: #5b6070;
+  --ob-accent: #6d4aff;
+  --ob-cyan: #0891b2;
+  --ob-accent-soft: rgba(109, 74, 255, 0.1);
+  --ob-accent-line: rgba(109, 74, 255, 0.32);
+  --ob-cyan-soft: rgba(8, 145, 178, 0.1);
+  --ob-ok: #059669;
+  --ob-ok-soft: rgba(5, 150, 105, 0.12);
+  --ob-warn: #b45309;
+  --ob-warn-soft: rgba(180, 83, 9, 0.12);
+  --ob-err: #e11d48;
+  --ob-err-soft: rgba(225, 29, 72, 0.1);
+  --ob-shadow: 0 20px 50px -22px rgba(20, 22, 45, 0.22);
+  --ob-glow: 0 0 0 1px var(--ob-accent-line), 0 10px 26px -12px rgba(109, 74, 255, 0.4);
+
+  /* Tailwind @theme tokens (utilities reference these via var()) */
+  --color-bg: #f7f8fb;
+  --color-surface: #ffffff;
+  --color-elevated: #ffffff;
+  --color-border: #e5e7ec;
+  --color-border-hover: #d3d6de;
+  --color-text: #17171d;
+  --color-accent: #6d4aff;
+  --color-accent-line: rgba(109, 74, 255, 0.32);
+  --color-cyan: #0891b2;
+  --color-cyan-soft: rgba(8, 145, 178, 0.1);
+  --color-ok: #059669;
+  --color-ok-soft: rgba(5, 150, 105, 0.12);
+  --color-warn: #b45309;
+  --color-warn-soft: rgba(180, 83, 9, 0.12);
+  --color-err: #e11d48;
+  --color-err-soft: rgba(225, 29, 72, 0.1);
+  --color-canvas: #f7f8fb;
+  --color-ink: #17171d;
+  --color-ink-soft: #2c2d38;
+  --color-muted: #5b6070;
+  --color-faint: #969aa6;
+  --color-line: #e5e7ec;
+  --color-accent-ink: #5a34d6;
+  --color-accent-soft: rgba(109, 74, 255, 0.1);
+
+  --shadow-glow: 0 0 0 1px rgba(109, 74, 255, 0.32), 0 10px 26px -12px rgba(109, 74, 255, 0.4);
+  --shadow-float: 0 20px 50px -22px rgba(20, 22, 45, 0.22);
+}
+
+/* Softer, lighter ambient glow field for the light theme */
+:root[data-theme="light"] body::before {
+  background:
+    radial-gradient(720px 420px at 78% -8%, rgba(109, 74, 255, 0.07), transparent 60%),
+    radial-gradient(620px 380px at 6% 108%, rgba(8, 145, 178, 0.05), transparent 60%);
+}

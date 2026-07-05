@@ -63,6 +63,27 @@ function navFor(roles: string[]): NavItem[] {
   return nav;
 }
 
+// Theme: dark by default (Obsidian), switchable to light. The choice is persisted and
+// applied to the document root as data-theme, which flips the CSS token overrides.
+function useTheme() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      return localStorage.getItem("pansoph-theme") === "light" ? "light" : "dark";
+    } catch {
+      return "dark";
+    }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("pansoph-theme", theme);
+    } catch {
+      /* storage may be unavailable; the attribute is what actually drives the theme */
+    }
+  }, [theme]);
+  return { theme, toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")) };
+}
+
 export default function App() {
   const { user, ready } = useAuth();
 
@@ -112,12 +133,25 @@ function Login() {
 
 function Shell({ identity }: { identity: Identity }) {
   const [hp, setHp] = useState<Health | null>(null);
+  const { theme, toggle } = useTheme();
+  const navigate = useNavigate();
   useEffect(() => {
     const tick = () => health().then(setHp).catch(() => setHp(null));
     tick();
     const t = setInterval(tick, 8000);
     return () => clearInterval(t);
   }, []);
+  // Cmd/Ctrl+K jumps to Search, matching the command-bar affordance in the header.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        navigate("/search");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate]);
   const healthy = hp?.ok ?? false;
   const nav = navFor(identity.roles);
   const canManage = canManageConnectors(identity.roles);
@@ -199,8 +233,13 @@ function Shell({ identity }: { identity: Identity }) {
       {/* ---- Main column ---- */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center gap-4 border-b border-border bg-[color-mix(in_srgb,var(--ob-bg)_72%,transparent)] px-6 backdrop-blur-md">
-          {/* cmd-K hint (cheap, non-functional affordance) */}
-          <div className="flex h-[34px] min-w-[280px] items-center gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface px-3 text-[13px] text-muted">
+          {/* Command bar: jumps to Search (also bound to Cmd/Ctrl+K) */}
+          <button
+            type="button"
+            onClick={() => navigate("/search")}
+            aria-label="Go to search"
+            className="flex h-[34px] min-w-[280px] items-center gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface px-3 text-left text-[13px] text-muted transition hover:border-border-hover hover:text-text"
+          >
             <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
               <circle cx="11" cy="11" r="7" />
               <path d="m21 21-4.3-4.3" strokeLinecap="round" />
@@ -210,9 +249,15 @@ function Shell({ identity }: { identity: Identity }) {
               <Kbd>Cmd</Kbd>
               <Kbd>K</Kbd>
             </span>
-          </div>
+          </button>
 
-          <TopBarRight healthKind={healthKind} healthLabel={healthLabel} identity={identity} />
+          <TopBarRight
+            healthKind={healthKind}
+            healthLabel={healthLabel}
+            identity={identity}
+            theme={theme}
+            onToggleTheme={toggle}
+          />
         </header>
 
         <main className="min-h-0 flex-1 overflow-auto px-8 py-7">
@@ -237,10 +282,14 @@ function TopBarRight({
   healthKind,
   healthLabel,
   identity,
+  theme,
+  onToggleTheme,
 }: {
   healthKind: "ok" | "warn" | "err";
   healthLabel: string;
   identity: Identity;
+  theme: "dark" | "light";
+  onToggleTheme: () => void;
 }) {
   const navigate = useNavigate();
 
@@ -251,12 +300,28 @@ function TopBarRight({
         {healthLabel}
       </div>
 
-      <div className="flex items-center gap-1.5 text-xs text-muted" title="lens uses the Obsidian dark theme">
-        <svg viewBox="0 0 24 24" className="h-[14px] w-[14px]" fill="none" stroke="currentColor" strokeWidth="1.8">
-          <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span className="hidden sm:inline">dark</span>
-      </div>
+      <button
+        type="button"
+        onClick={onToggleTheme}
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        title={`Theme: ${theme}. Click for ${theme === "dark" ? "light" : "dark"}.`}
+        className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted transition hover:border-border-hover hover:text-text"
+      >
+        {theme === "dark" ? (
+          <svg viewBox="0 0 24 24" className="h-[14px] w-[14px]" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" className="h-[14px] w-[14px]" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <circle cx="12" cy="12" r="4.2" />
+            <path
+              d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"
+              strokeLinecap="round"
+            />
+          </svg>
+        )}
+        <span className="hidden sm:inline">{theme}</span>
+      </button>
 
       <span className="h-6 w-px bg-border" />
 
