@@ -47,7 +47,9 @@ Note: both are Google-classified "restricted" scopes, so a Google app-verificati
 Redirect URI to register (step 7): `http://localhost:8080/api/oauth/google/callback`
 (This matches the default `PANSOPH_PUBLIC_BASE_URL=http://localhost:8080`. If you changed the public base URL, use that host instead.)
 
-Into pansoph: put the Client ID in env var `PANSOPH_OAUTH_GOOGLE_CLIENT_ID` and the Client secret in `PANSOPH_OAUTH_GOOGLE_CLIENT_SECRET` (or add both to the gitignored `.env.creds`). Restart pansoph, then in the lens UI Connectors page click Connect on the `google_drive` and `gmail` connectors to run the OAuth flow. No token is pasted for this provider.
+Into pansoph: put the Client ID in env var `PANSOPH_OAUTH_GOOGLE_CLIENT_ID` and the Client secret in `PANSOPH_OAUTH_GOOGLE_CLIENT_SECRET` in the gitignored `.env.creds` file (never in this committed guide). Restart pansoph, then in the lens UI Connectors page click Connect on the `google_drive` and `gmail` connectors to run the OAuth flow. No token is pasted for this provider.
+
+Do NOT paste real client IDs or secrets into this file. It is committed. Put them only in `.env.creds`.
 
 ## Atlassian (Jira, Confluence)
 

@@ -167,7 +167,13 @@ services:
       dockerfile: deploy/Dockerfile.agora
     image: cyproto/pansoph-agora:dev
     profiles: ["core"]
-    env_file: [.env]
+    # .env holds config; .env.creds (gitignored, optional) holds OAuth client credentials
+    # and pasted keys so secrets stay out of source control and the committed docs.
+    env_file:
+      - path: .env
+        required: true
+      - path: .env.creds
+        required: false
     # Reach a host-run model server (for example Ollama at host.docker.internal:11434).
     # Docker Desktop provides this name automatically; host-gateway adds it on Linux too.
     extra_hosts:
@@ -205,7 +211,11 @@ services:
       dockerfile: deploy/Dockerfile.scribe
     image: cyproto/pansoph-scribe:dev
     profiles: ["workers"]
-    env_file: [.env]
+    env_file:
+      - path: .env
+        required: true
+      - path: .env.creds
+        required: false
     # Reach a host-run model server (for example Ollama at host.docker.internal:11434).
     extra_hosts:
       - "host.docker.internal:host-gateway"
