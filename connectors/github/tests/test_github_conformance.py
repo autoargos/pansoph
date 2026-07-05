@@ -83,3 +83,67 @@ async def test_github_permissions_private_repo(respx_mock: respx.MockRouter) -> 
         principals=_FIX / "principals.json",
         expected=_FIX / "expected.json",
     )
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_github_list_resources_orgs_then_repos(respx_mock: respx.MockRouter) -> None:
+    # Top level: the authenticated user (synthetic owner) plus the orgs the credential
+    # belongs to. Then drilling an org lists its repos, each a selectable owner/repo id.
+    respx_mock.get(path="/user").mock(return_value=httpx.Response(200, json={"login": "octocat"}))
+    respx_mock.get(path="/user/orgs").mock(
+        return_value=httpx.Response(200, json=[{"login": "acme"}, {"login": "globex"}])
+    )
+    respx_mock.get(path="/orgs/acme/repos").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"name": "widget", "full_name": "acme/widget", "private": True},
+                {"name": "public-site", "full_name": "acme/public-site", "private": False},
+            ],
+        )
+    )
+    conn = _factory()
+
+    top = await conn.list_resources()
+    # The synthetic user owner is first, then the two orgs. All are org-kind owners.
+    assert [r.id for r in top.items] == ["octocat", "acme", "globex"]
+    assert all(r.kind == "org" and r.parent_id is None for r in top.items)
+    assert top.items[0].extra == {"scope": "user"}
+    assert top.next_cursor is None
+
+    repos = await conn.list_resources(kind="repo", parent_id="acme")
+    assert [r.id for r in repos.items] == ["acme/widget", "acme/public-site"]
+    assert [r.label for r in repos.items] == ["widget", "public-site"]
+    assert all(r.kind == "repo" and r.parent_id == "acme" for r in repos.items)
+    assert repos.items[0].extra == {"private": "true"}
+    assert repos.items[1].extra == {"private": "false"}
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_github_list_resources_paginates_by_link_header(respx_mock: respx.MockRouter) -> None:
+    # The opaque cursor is GitHub's own page number, parsed out of the Link header
+    # rel="next". A first page returns that cursor; the last page returns None.
+    respx_mock.get(path="/user").mock(return_value=httpx.Response(200, json={"login": "octocat"}))
+    first = httpx.Response(
+        200,
+        json=[{"name": "r1", "full_name": "acme/r1", "private": False}],
+        headers={
+            "Link": '<https://api.github.com/orgs/acme/repos?page=2>; rel="next", '
+            '<https://api.github.com/orgs/acme/repos?page=2>; rel="last"'
+        },
+    )
+    second = httpx.Response(200, json=[{"name": "r2", "full_name": "acme/r2", "private": False}])
+    route = respx_mock.get(path="/orgs/acme/repos").mock(side_effect=[first, second])
+
+    conn = _factory()
+    page1 = await conn.list_resources(kind="repo", parent_id="acme")
+    assert [r.id for r in page1.items] == ["acme/r1"]
+    assert page1.next_cursor == "2"
+
+    page2 = await conn.list_resources(kind="repo", parent_id="acme", cursor=page1.next_cursor)
+    assert [r.id for r in page2.items] == ["acme/r2"]
+    assert page2.next_cursor is None
+    # The second call carried the cursor through as the page query param.
+    assert route.calls[1].request.url.params.get("page") == "2"

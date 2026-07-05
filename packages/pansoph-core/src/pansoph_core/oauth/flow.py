@@ -163,14 +163,24 @@ class OAuthFlow:
     async def _seal_into_instance(
         self, record: OAuthState, *, result_access: str, result_refresh: str | None
     ) -> None:
-        """Seal the minted tokens into the instance config and persist the instance.
+        """Seal the minted tokens into a DRAFT instance and persist it.
 
         The access token is sealed under the connector's OAUTH field key; the
         refresh token, when present, under `{key}__refresh_token`. Both go through
         `seal_config`, so the config column holds only handles. Any config the
         instance already had is preserved and merged, so re-connecting refreshes the
         credential without dropping other settings.
+
+        The instance is written as a `draft` (two-phase lifecycle): at callback time
+        only the credential exists, and the resources the connector requires (owner,
+        repo, space_key) have not been picked yet. Persisting a draft skips the
+        connector's resource-required validation, so the flow no longer 500s when
+        owner/repo are absent. The configure submit later promotes it to `active`. An
+        instance that is already active (a re-connect) keeps its status so a
+        credential refresh does not demote a configured instance back to draft.
         """
+        from ..connectors import STATUS_ACTIVE, STATUS_DRAFT
+
         oauth_key = self._oauth_field_key(record.connector)
         existing = await self.manager.get_instance(record.instance)
         config: dict[str, Any] = dict(existing["config"]) if existing else {}
@@ -185,6 +195,12 @@ class OAuthFlow:
             self.secret_store, record.tenant, record.instance, config, secret_keys
         )
 
+        # A brand-new connect lands as a draft; re-connecting an already-active
+        # instance preserves its active status (a credential refresh, not a reset).
+        status = existing["status"] if existing else STATUS_DRAFT
+        if status not in (STATUS_ACTIVE, STATUS_DRAFT):
+            status = STATUS_DRAFT
+
         name = existing["name"] if existing else record.instance
         await self.manager.create_instance(
             instance_id=record.instance,
@@ -196,6 +212,7 @@ class OAuthFlow:
             schedule_cron=existing.get("schedule_cron") or "" if existing else "",
             scope_type=existing["scope_type"] if existing else "org",
             scope_ref=existing.get("scope_ref") or "" if existing else "",
+            status=status,
         )
 
     def _oauth_field_key(self, connector: str) -> str:

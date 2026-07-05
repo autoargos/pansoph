@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
-from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc, ResourcePage
 from pydantic import BaseModel
 
 
@@ -89,4 +89,24 @@ class Connector(Protocol):
 
     async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
         """Optional. Normalize a source webhook into change events for freshness."""
+        ...
+
+    async def list_resources(
+        self,
+        kind: str | None = None,
+        parent_id: str | None = None,
+        cursor: str | None = None,
+    ) -> ResourcePage:
+        """Optional. Enumerate what the configured credential can reach, for a picker.
+
+        Present only when the connector declares the `resource_discovery` capability,
+        which the conformance suite pairs exactly like deletions: declaring the flag
+        requires implementing this method. It lists resources at the source's own
+        granularity, filtered to what the credential already permits (so discovery is
+        a read, never a scope escalation), hierarchical by `(kind, parent_id)` so the
+        UI drills org to repo, drive to folder, workspace to channel, and paginated by
+        the opaque `cursor` returned in the previous `ResourcePage`. A None `kind`
+        means the top level; a None `cursor` means the first page. It reuses the same
+        TokenSource as sync, so no separate credential is minted for discovery.
+        """
         ...

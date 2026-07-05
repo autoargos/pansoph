@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   type ConnectorSpec,
   connectorSpecs,
   createInstance,
+  type CredentialStatus,
   deleteInstance,
   type Instance,
+  instanceCredential,
   instanceRuns,
   listInstances,
   oauthAuthorizeUrl,
@@ -40,8 +43,10 @@ import {
   useToasts,
 } from "../ui.tsx";
 import { ConnectorLogo } from "../components/ConnectorLogo.tsx";
+import { ResourcePicker } from "../components/ResourcePicker.tsx";
 import {
   IconAlert,
+  IconCheck,
   IconClock,
   IconEdit,
   IconEye,
@@ -72,6 +77,33 @@ function oauthProviderOf(field: SpecField): string | undefined {
 
 function isBoolField(kind: SpecFieldKind): boolean {
   return kind === "bool";
+}
+
+// A field bound to a Resource picker. When the field declares a resource_kind it is filled
+// by picking discovered resources (org -> repo, drive -> folder) instead of typing. A list
+// kind means many resources may be chosen; any other kind is a single pick.
+function isResourceField(field: SpecField): boolean {
+  return !!field.resource_kind;
+}
+function isMultiResource(field: SpecField): boolean {
+  return field.kind === "list";
+}
+
+// Read the resource-field selections out of an existing config into the picker's shape
+// (field key -> selected ids). A list field stores an array; a single field stores a scalar.
+function configToResources(
+  spec: ConnectorSpec | undefined,
+  config: Record<string, unknown>,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const f of spec?.fields ?? []) {
+    if (!isResourceField(f)) continue;
+    const v = config[f.key];
+    if (Array.isArray(v)) out[f.key] = v.map(String);
+    else if (v != null && v !== "") out[f.key] = [String(v)];
+    else out[f.key] = [];
+  }
+  return out;
 }
 
 // Fields the browser masks. The backend never returns their values, so these render
@@ -156,6 +188,8 @@ function configToValues(
   const out: Record<string, string> = {};
   for (const f of spec?.fields ?? []) {
     if (isBoolField(f.kind) || isSecretField(f.kind) || f.kind === "oauth") continue;
+    // Resource-bound fields are filled by the picker, not the free-text map.
+    if (isResourceField(f)) continue;
     const v = config[f.key];
     if (Array.isArray(v)) out[f.key] = v.join("\n");
     else if (v != null) out[f.key] = String(v);
@@ -177,12 +211,17 @@ function configToChecks(
 type Filter = "all" | "healthy" | "attention";
 
 export default function Connectors({ canManage }: { canManage: boolean }) {
+  const [params, setParams] = useSearchParams();
   const [instances, setInstances] = useState<Instance[]>([]);
   const [specs, setSpecs] = useState<ConnectorSpec[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Instance | null>(null);
+  // The draft instance the OAuth callback landed on (via ?configure={id}). Its credential is
+  // already sealed; the form opens in configure mode so the user can pick resources and
+  // promote the draft to active. Null when not configuring.
+  const [configuring, setConfiguring] = useState<Instance | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunInfo[]>([]);
@@ -215,6 +254,39 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
     );
     return () => clearInterval(t);
   }, []);
+
+  // Query-param intents. ?add=1 opens a fresh Add form (used by the command palette).
+  // ?configure={id} is where the OAuth callback lands: open the matching draft instance in
+  // configure mode. We wait for the instance list to load so we can hand the form the real
+  // draft (its connector, name, and any partial config). The param is cleared once handled.
+  const addParam = params.get("add");
+  const configureParam = params.get("configure");
+  useEffect(() => {
+    if (!addParam) return;
+    setAdding(true);
+    setEditing(null);
+    setConfiguring(null);
+    const next = new URLSearchParams(params);
+    next.delete("add");
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addParam]);
+
+  useEffect(() => {
+    if (!configureParam || loading) return;
+    const draft = instances.find((i) => i.id === configureParam);
+    if (!draft) {
+      // The instance list may not carry it yet on a cold callback; a refresh will retry.
+      return;
+    }
+    setConfiguring(draft);
+    setAdding(false);
+    setEditing(null);
+    const next = new URLSearchParams(params);
+    next.delete("configure");
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configureParam, loading, instances]);
 
   const counts = useMemo(() => {
     let healthy = 0;
@@ -410,19 +482,31 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
         </div>
       )}
 
-      {(adding || editing) && (
+      {(adding || editing || configuring) && (
         <ConnectorForm
           specs={specs}
-          editing={editing}
+          editing={editing ?? configuring}
+          configuring={!!configuring}
           onClose={() => {
             setAdding(false);
             setEditing(null);
+            setConfiguring(null);
           }}
           onSaved={(name) => {
+            const wasConfigure = !!configuring;
+            const wasEdit = !!editing;
             setAdding(false);
             setEditing(null);
+            setConfiguring(null);
             refresh();
-            push(editing ? `Saved "${name}".` : `Added "${name}".`, "ok");
+            push(
+              wasConfigure
+                ? `Connected "${name}".`
+                : wasEdit
+                  ? `Saved "${name}".`
+                  : `Added "${name}".`,
+              "ok",
+            );
           }}
         />
       )}
@@ -722,11 +806,16 @@ function Stat({
 function ConnectorForm({
   specs,
   editing,
+  configuring = false,
   onClose,
   onSaved,
 }: {
   specs: ConnectorSpec[];
   editing: Instance | null;
+  // Configure mode: the (draft) instance already has a sealed credential (the OAuth callback
+  // landed here). We show the live credential status, offer resource pickers, and submit
+  // promotes the draft to active. Distinct from a plain edit of an already-active instance.
+  configuring?: boolean;
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
@@ -746,6 +835,13 @@ function ConnectorForm({
       ? configToChecks(specs.find((s) => s.name === editing.connector), editing.config)
       : {},
   );
+  // Resource-picker selections, keyed by field key. Filled from an existing config on edit /
+  // configure, then written back into the config on submit.
+  const [resources, setResources] = useState<Record<string, string[]>>(() =>
+    editing
+      ? configToResources(specs.find((s) => s.name === editing.connector), editing.config)
+      : {},
+  );
   const [schedule, setSchedule] = useState(editing?.schedule_seconds ?? 0);
   const [cronMode, setCronMode] = useState(!!editing?.schedule_cron);
   const [cron, setCron] = useState(editing?.schedule_cron ?? "");
@@ -753,6 +849,21 @@ function ConnectorForm({
   const [scopeRef, setScopeRef] = useState(editing?.scope_ref ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Live credential status for an existing instance (edit or configure). Drives whether the
+  // prominent Connect button shows (no valid credential) or a subordinate Reconnect link
+  // plus the resource pickers (already connected). Null until loaded; only fetched for a
+  // persisted instance, since a brand-new Add has no instance to query yet.
+  const [cred, setCred] = useState<CredentialStatus | null>(null);
+  const [credLoading, setCredLoading] = useState(false);
+  useEffect(() => {
+    if (!editing) return;
+    setCredLoading(true);
+    instanceCredential(editing.id)
+      .then(setCred)
+      .catch(() => setCred(null))
+      .finally(() => setCredLoading(false));
+  }, [editing]);
 
   // The oauth field (if any) drives whether we show the Connect button instead of a token
   // input. There is at most one per connector spec.
@@ -768,6 +879,7 @@ function ConnectorForm({
     setConnector(t);
     setValues({});
     setChecks({});
+    setResources({});
     setError(null);
   }
 
@@ -775,6 +887,17 @@ function ConnectorForm({
     const config: Record<string, unknown> = {};
     for (const f of def?.fields ?? []) {
       if (f.kind === "oauth") continue;
+      // A resource-bound field is filled by the picker, not the text/checkbox maps. A multi
+      // (list) field stores the array of ids; a single field stores the one id as a scalar.
+      if (isResourceField(f)) {
+        const ids = resources[f.key] ?? [];
+        if (isMultiResource(f)) {
+          if (ids.length) config[f.key] = ids;
+        } else if (ids.length) {
+          config[f.key] = ids[0];
+        }
+        continue;
+      }
       if (isBoolField(f.kind)) {
         if (checks[f.key]) config[f.key] = true;
         continue;
@@ -821,6 +944,10 @@ function ConnectorForm({
         schedule_cron: cronMode ? cron.trim() : "",
         scope_type: scopeType,
         scope_ref: scopeType === "org" ? "" : scopeRef.trim(),
+        // Configure submit promotes a draft (from the OAuth callback) to active. A plain
+        // add / edit also persists 'active'; the backend defaults to it, we send it for
+        // clarity and so a configure of a draft flips the status.
+        status: "active",
       });
       onSaved(finalName);
     } catch (e) {
@@ -832,14 +959,32 @@ function ConnectorForm({
 
   const visibleFields = (def?.fields ?? []).filter((f) => f.kind !== "oauth");
 
+  // Whether the instance already holds a usable credential. Only a persisted instance can be
+  // connected (a fresh Add has none yet). When connected we suppress the prominent Connect
+  // button and enable the resource pickers; when not, we keep offering Connect. While the
+  // credential status is still loading we hold off on the pickers to avoid a flash.
+  const connected = !!editing && !!cred?.connected;
+  const needsReauth = !!editing && (cred?.needs_reauth ?? false);
+  // Resource pickers need a live instance to query. Available in configure or edit once the
+  // credential is confirmed present.
+  const pickersReady = connected;
+
+  const modalTitle = configuring
+    ? "Finish connecting"
+    : editing
+      ? "Edit connector"
+      : "Add connector";
+
   return (
     <Modal
       open
       onClose={onClose}
-      title={editing ? "Edit connector" : "Add connector"}
+      title={modalTitle}
       subtitle={
-        def?.description ??
-        "Connect a source. Its documents inherit the source ACLs, enforced at retrieval."
+        configuring
+          ? "Your credential is connected. Choose what to sync, then finish."
+          : (def?.description ??
+            "Connect a source. Its documents inherit the source ACLs, enforced at retrieval.")
       }
       icon={
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[11px] bg-[linear-gradient(140deg,var(--ob-accent),#5b3ce0)] shadow-[0_0_0_1px_var(--ob-accent-line)]">
@@ -860,8 +1005,10 @@ function ConnectorForm({
             {busy ? (
               <>
                 <Spinner className="border-white/40 border-t-white" />
-                {editing ? "Saving" : "Adding"}
+                {configuring ? "Finishing" : editing ? "Saving" : "Adding"}
               </>
+            ) : configuring ? (
+              "Finish and activate"
             ) : editing ? (
               "Save changes"
             ) : (
@@ -902,18 +1049,34 @@ function ConnectorForm({
           />
         </Field>
 
-        {/* OAuth first: for a connector that declares an oauth field, the
-            "Connect with X" block is the primary, recommended path and sits
-            near the top, right after Type and Display name. */}
-        {oauthField && (
-          <OAuthConnect
-            provider={provider}
-            connector={connector}
-            instanceId={instanceId}
-            tenant={tenant}
-            editing={!!editing}
-          />
-        )}
+        {/* Credential state for an OAuth connector. When a credential is already sealed
+            (edit or the configure step after the callback), show a subordinate "Connected"
+            banner with a Reconnect link, not another prominent Connect prompt. Otherwise the
+            prominent "Connect with X" block is the primary, recommended path. */}
+        {oauthField &&
+          (connected ? (
+            <CredentialBanner
+              cred={cred}
+              provider={provider}
+              connector={connector}
+              instanceId={instanceId}
+              tenant={tenant}
+              needsReauth={needsReauth}
+            />
+          ) : credLoading ? (
+            <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border bg-bg px-4 py-3 text-[12px] text-muted">
+              <Spinner />
+              Checking credential
+            </div>
+          ) : (
+            <OAuthConnect
+              provider={provider}
+              connector={connector}
+              instanceId={instanceId}
+              tenant={tenant}
+              editing={!!editing}
+            />
+          ))}
 
         {/* Dynamic spec fields (never the oauth field). For a non-oauth
             connector these are the primary inputs and render inline here. For
@@ -926,15 +1089,41 @@ function ConnectorForm({
               field={f}
               values={values}
               checks={checks}
+              resources={resources}
+              instanceId={instanceId}
+              pickersReady={pickersReady}
               setValues={setValues}
               setChecks={setChecks}
+              setResources={setResources}
             />
           ))}
+
+        {/* For an OAuth connector, once connected the resource pickers are the primary
+            inputs (pick the repos / folders / drives to sync). Non-resource fields still
+            render in the manual-fallback block below. */}
+        {oauthField &&
+          connected &&
+          visibleFields
+            .filter((f) => isResourceField(f))
+            .map((f) => (
+              <SpecFieldInput
+                key={f.key}
+                field={f}
+                values={values}
+                checks={checks}
+                resources={resources}
+                instanceId={instanceId}
+                pickersReady={pickersReady}
+                setValues={setValues}
+                setChecks={setChecks}
+                setResources={setResources}
+              />
+            ))}
 
         {/* Scope */}
         <Field
           label="Scope"
-          help="Which slice this instance covers. Management metadata; the source ACL still governs who can read its documents."
+          help="Which slice this instance covers. An individual or group scope narrows the source ACL so only that user or group can retrieve these documents. Organization keeps the source ACL as is. Scope can only remove reach, never widen it."
         >
           <Select value={scopeType} onChange={(e) => setScopeType(e.target.value)}>
             <option value="org">Organization (whole source)</option>
@@ -986,28 +1175,40 @@ function ConnectorForm({
           )}
         </Field>
 
-        {/* Manual fallback: for an oauth connector the token / credential
-            fields are the secondary path, shown below a subtle divider at
-            lower visual weight. */}
-        {oauthField && visibleFields.length > 0 && (
-          <div className="space-y-4 rounded-[var(--radius-md)] border border-dashed border-border bg-bg/40 p-4">
-            <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-[0.09em] text-muted">
-              <span className="h-px flex-1 bg-border" />
-              Or connect manually with a token
-              <span className="h-px flex-1 bg-border" />
-            </div>
-            {visibleFields.map((f) => (
-              <SpecFieldInput
-                key={f.key}
-                field={f}
-                values={values}
-                checks={checks}
-                setValues={setValues}
-                setChecks={setChecks}
-              />
-            ))}
-          </div>
-        )}
+        {/* Manual fallback for an oauth connector. When already connected the resource
+            fields are pickers above, so this block holds only the remaining non-resource
+            options (relabeled as "Additional options"). When not connected it is the full
+            token / credential fallback, shown below a subtle divider at lower weight. */}
+        {oauthField &&
+          (() => {
+            const manualFields = connected
+              ? visibleFields.filter((f) => !isResourceField(f))
+              : visibleFields;
+            if (manualFields.length === 0) return null;
+            return (
+              <div className="space-y-4 rounded-[var(--radius-md)] border border-dashed border-border bg-bg/40 p-4">
+                <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-[0.09em] text-muted">
+                  <span className="h-px flex-1 bg-border" />
+                  {connected ? "Additional options" : "Or connect manually with a token"}
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+                {manualFields.map((f) => (
+                  <SpecFieldInput
+                    key={f.key}
+                    field={f}
+                    values={values}
+                    checks={checks}
+                    resources={resources}
+                    instanceId={instanceId}
+                    pickersReady={pickersReady}
+                    setValues={setValues}
+                    setChecks={setChecks}
+                    setResources={setResources}
+                  />
+                ))}
+              </div>
+            );
+          })()}
 
         {error && (
           <Alert kind="err" title="Could not save connector">
@@ -1095,23 +1296,151 @@ function OAuthConnect({
   );
 }
 
+// The connected-state banner, shown when the instance already holds a usable credential.
+// It replaces the prominent Connect prompt with a subordinate "Connected as X" line and a
+// low-weight Reconnect link. When the credential needs re-auth (expired with no refresh) it
+// switches to a warn tone and surfaces the Reconnect more prominently, but never re-shows a
+// full Connect prompt while a credential exists.
+function CredentialBanner({
+  cred,
+  provider,
+  connector,
+  instanceId,
+  tenant,
+  needsReauth,
+}: {
+  cred: CredentialStatus | null;
+  provider: ReturnType<typeof oauthProvider>;
+  connector: string;
+  instanceId: string;
+  tenant: string;
+  needsReauth: boolean;
+}) {
+  const authorizeSlug = provider?.key ?? cred?.provider ?? connector;
+  const label = provider?.label ?? cred?.provider ?? "provider";
+  const account = cred?.account_label;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function reconnect() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const url = await oauthAuthorizeUrl(authorizeSlug, connector, instanceId, tenant);
+      window.location.href = url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "could not start the reconnect flow");
+      setBusy(false);
+    }
+  }
+
+  const tone = needsReauth
+    ? "border-warn-soft bg-warn-soft"
+    : "border-[rgba(52,211,153,0.3)] bg-ok-soft";
+
+  return (
+    <div className={"rounded-[var(--radius-md)] border px-4 py-3 " + tone}>
+      <div className="flex items-center gap-2.5">
+        <span
+          className={
+            "grid h-7 w-7 shrink-0 place-items-center rounded-full " +
+            (needsReauth ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok")
+          }
+        >
+          {needsReauth ? <IconAlert width={15} height={15} /> : <IconCheck width={15} height={15} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[13px] font-semibold text-text">
+            {needsReauth ? "Reconnect needed" : "Connected"}
+            <Badge kind={needsReauth ? "warn" : "ok"} dot>
+              {label}
+            </Badge>
+          </div>
+          <div className="mt-0.5 truncate text-[11.5px] text-muted">
+            {account ? (
+              <>
+                Connected as <span className="font-medium text-text">{account}</span>
+              </>
+            ) : needsReauth ? (
+              "The credential expired. Reconnect to keep syncing."
+            ) : (
+              "Credential sealed. Pick what to sync below."
+            )}
+            {cred?.has_refresh && !needsReauth && (
+              <span className="opacity-70"> . refresh token stored</span>
+            )}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={reconnect}
+          disabled={busy}
+          className={
+            "shrink-0 rounded-[var(--radius-sm)] px-2.5 py-1 text-[11.5px] font-semibold transition disabled:opacity-60 " +
+            (needsReauth
+              ? "border border-[rgba(245,158,11,0.4)] bg-warn-soft text-warn hover:brightness-105"
+              : "text-muted hover:text-text underline underline-offset-2")
+          }
+        >
+          {busy ? "Reconnecting" : "Reconnect"}
+        </button>
+      </div>
+      {err && <p className="mt-2 text-[11.5px] text-err">{err}</p>}
+    </div>
+  );
+}
+
 // One spec-driven form control, chosen from the field's declared kind. String is text,
 // int is number, bool is a styled checkbox row, list is a newline textarea, and
-// secret / secret_file render a masked input with a reveal toggle.
+// secret / secret_file render a masked input with a reveal toggle. A field that declares a
+// resource_kind renders a ResourcePicker once the instance is connected (pickersReady),
+// otherwise it falls back to the free-text control so air-gapped / PAT users still work.
 function SpecFieldInput({
   field,
   values,
   checks,
+  resources,
+  instanceId,
+  pickersReady,
   setValues,
   setChecks,
+  setResources,
 }: {
   field: SpecField;
   values: Record<string, string>;
   checks: Record<string, boolean>;
+  resources: Record<string, string[]>;
+  instanceId: string;
+  pickersReady: boolean;
   setValues: (v: Record<string, string>) => void;
   setChecks: (v: Record<string, boolean>) => void;
+  setResources: (v: Record<string, string[]>) => void;
 }) {
   const { key, label, kind, required, help, placeholder } = field;
+
+  // Resource-bound field: pick from the discovered tree once connected. Before then (a fresh
+  // Add with no live credential) it degrades to the normal free-text control below.
+  if (isResourceField(field) && field.resource_kind && pickersReady) {
+    const multi = isMultiResource(field);
+    return (
+      <Field
+        label={label}
+        required={required}
+        help={
+          help ??
+          (multi ? "Pick one or more to sync. Drill in to narrow the scope." : "Pick one to sync.")
+        }
+      >
+        <ResourcePicker
+          instanceId={instanceId}
+          resourceKind={field.resource_kind}
+          multi={multi}
+          value={resources[key] ?? []}
+          onChange={(ids) => setResources({ ...resources, [key]: ids })}
+        />
+      </Field>
+    );
+  }
 
   if (isBoolField(kind)) {
     const on = !!checks[key];

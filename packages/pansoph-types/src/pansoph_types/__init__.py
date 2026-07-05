@@ -20,6 +20,8 @@ __all__ = [
     "DocRef",
     "RawDoc",
     "Document",
+    "Resource",
+    "ResourcePage",
 ]
 
 
@@ -37,6 +39,7 @@ class Capabilities(BaseModel):
     permission_sync: bool = False
     deletions: bool = False
     slim_listing: bool = False
+    resource_discovery: bool = False
 
 
 class AccessControl(BaseModel):
@@ -91,6 +94,44 @@ class RawDoc(BaseModel):
     source_url: str | None = None
     lang: str | None = None
     extra: dict[str, str] = Field(default_factory=dict)
+
+
+class Resource(BaseModel):
+    """One selectable thing a connected credential can reach in its source.
+
+    A resource is what a `ConfigField` bound to a picker resolves to: a github org
+    or repo, a drive or folder, a confluence space, a slack channel. `id` is the
+    opaque value the connector needs (owner/repo slug, folder id, space key), and
+    `label` is the human name the picker shows. `kind` names the level so the UI can
+    drill hierarchically (org to repo, drive to folder, workspace to channel), and
+    `parent_id` links a child to the resource above it. `selectable` is False for a
+    grouping node the user can expand but not choose (an org header, say). `extra`
+    carries source-specific hints the picker or the connector may use.
+
+    A resource is only ever what the configured credential can already reach, at the
+    source's granularity, so discovery is a read the credential permits and never a
+    scope escalation.
+    """
+
+    id: str
+    kind: str
+    label: str
+    parent_id: str | None = None
+    selectable: bool = True
+    extra: dict[str, str] = Field(default_factory=dict)
+
+
+class ResourcePage(BaseModel):
+    """One page of resources plus the cursor for the next page.
+
+    `next_cursor` is None when the listing is exhausted. The cursor is opaque to the
+    caller and passed back verbatim to `list_resources` to fetch the following page,
+    so pagination is the source's own model (a page token, a Link header offset, a
+    delta link), never reconstructed by the runtime.
+    """
+
+    items: list[Resource] = Field(default_factory=list)
+    next_cursor: str | None = None
 
 
 class Document(BaseModel):

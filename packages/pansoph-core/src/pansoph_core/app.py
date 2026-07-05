@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from . import __version__
 from .routes import router
+from .routes_resources import router as resources_router
 from .settings import Settings
 
 
@@ -67,4 +68,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Search, chat (SSE), and discovery routes. They enforce permissions through the
     # authz bulk check inside the retrieval pipeline.
     app.include_router(router)
+    # Connector resource-discovery and credential-status reads (connect-then-pick UX).
+    app.include_router(resources_router)
     return app

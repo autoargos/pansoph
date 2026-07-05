@@ -10,7 +10,7 @@ single source of truth for what "conforms" means.
 
 from __future__ import annotations
 
-from pansoph_types import AccessControl, DocRef, RawDoc
+from pansoph_types import AccessControl, DocRef, RawDoc, ResourcePage
 
 from .contract import Connector, ValidationResult
 
@@ -57,3 +57,16 @@ async def assert_conforms(connector: Connector) -> None:
             assert ref.source_doc_id not in seen, (
                 "incremental cursor leaked an already-synced document"
             )
+
+    # Resource discovery: a connector that declares the capability must implement
+    # list_resources and return a ResourcePage, exactly as a deletions-capable
+    # connector must surface a tombstone. This catches the "declares
+    # resource_discovery=True but never lists a resource" defect at the gate.
+    if meta.capabilities.resource_discovery:
+        list_resources = getattr(connector, "list_resources", None)
+        assert list_resources is not None, (
+            "connector declares resource_discovery=True but does not implement "
+            "list_resources; implement it or stop declaring the capability"
+        )
+        page = await list_resources()
+        assert isinstance(page, ResourcePage), "list_resources must return a ResourcePage"

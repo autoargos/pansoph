@@ -301,6 +301,11 @@ def _serialize_field(f: Any) -> dict[str, Any]:
         out["oauth_provider"] = f.oauth_provider
     if getattr(f, "oauth_scopes", None):
         out["oauth_scopes"] = list(f.oauth_scopes)
+    # A field bound to a resource kind renders as a live picker (drill down and select
+    # from what the credential can reach) instead of a free-text input. Only present when
+    # the connector declared the binding, so unbound fields stay free text.
+    if getattr(f, "resource_kind", None):
+        out["resource_kind"] = f.resource_kind
     return out
 
 
@@ -378,6 +383,10 @@ class InstanceCreate(BaseModel):
     # Management scope: which slice of the source this instance covers.
     scope_type: str = "org"  # org | group | individual
     scope_ref: str = ""
+    # Two-phase lifecycle status. Defaults to 'active': a normal create is a fully
+    # configured instance. The configure submit that promotes a draft passes 'active'
+    # too, so the draft (minted by the oauth callback) becomes syncable.
+    status: str = "active"  # active | draft
 
 
 @router.get("/connectors/instances")
@@ -400,6 +409,7 @@ async def create_instance(
             schedule_cron=req.schedule_cron,
             scope_type=req.scope_type,
             scope_ref=req.scope_ref,
+            status=req.status,
         )
     except ValueError as exc:
         # A bad connector name, an invalid config, or an unknown scope type is the
@@ -482,8 +492,11 @@ async def oauth_callback(
     The provider calls this endpoint (the user's browser is redirected here), so it
     cannot carry the operator's bearer token; the security check is the single-use
     `state`, not a role. A user-denied consent arrives as `error` and is redirected
-    back with the reason rather than 500ing. On success the tokens are sealed into
-    the instance and the browser is sent to /connectors?connected={instanceId}.
+    back with the reason rather than 500ing. On success the tokens are sealed into a
+    draft instance (two-phase lifecycle: credential first, resources second) and the
+    browser is sent to /connectors?configure={instanceId}, where lens opens the
+    configure step to pick resources and promote the draft to active. It no longer
+    fails when owner/repo are absent, because a draft skips resource validation.
     """
     from .oauth import (
         CodeExchangeError,
@@ -507,7 +520,7 @@ async def oauth_callback(
     except CodeExchangeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     audit("oauth_callback", actor="oauth", tenant="", provider=provider, instance=instance_id)
-    return RedirectResponse(f"/connectors?connected={instance_id}", status_code=302)
+    return RedirectResponse(f"/connectors?configure={instance_id}", status_code=302)
 
 
 @router.get("/health")

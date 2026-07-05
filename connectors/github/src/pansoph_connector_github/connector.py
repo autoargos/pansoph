@@ -7,6 +7,13 @@ Implemented against the GitHub REST API. Verified against the official docs:
                https://docs.github.com/en/rest/git/trees (recursive tree)
                https://docs.github.com/en/rest/collaborators/collaborators
                https://docs.github.com/en/rest/teams/teams
+  Discovery:   https://docs.github.com/en/rest/orgs/orgs#list-organizations-for-the-authenticated-user
+                 (GET /user/orgs; org objects carry `login`)
+               https://docs.github.com/en/rest/repos/repos#list-organization-repositories
+                 (GET /orgs/{org}/repos; repo objects carry `name`, `full_name`, `private`)
+               https://docs.github.com/en/rest/repos/repos#list-repositories-for-the-authenticated-user
+                 (GET /user/repos; the credential's own repos, listed when no org is given)
+                 Verified for discovery on: 2026-07-05.
   API version: X-GitHub-Api-Version 2026-03-10
   Auth:        bearer token. The token may be a personal access token, an org or
                GitHub App installation token, or any RBAC scoped credential. The
@@ -37,6 +44,7 @@ from __future__ import annotations
 import base64
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from pansoph_connector_sdk import (
@@ -47,7 +55,15 @@ from pansoph_connector_sdk import (
     FieldKind,
     ValidationResult,
 )
-from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+from pansoph_types import (
+    AccessControl,
+    AuthScheme,
+    Capabilities,
+    DocRef,
+    RawDoc,
+    Resource,
+    ResourcePage,
+)
 
 _API_VERSION = "2026-03-10"
 _TEXTUAL = {
@@ -106,11 +122,18 @@ class GithubConnector:
         # doubling API calls and exhausting the unauthenticated rate limit mid-sync.
         self._repo_info_cache: dict[str, Any] | None = None
         self._acl_cache: AccessControl | None = None
+        # The authenticated user's login, resolved once and reused by resource discovery
+        # to name and route the synthetic "your repositories" owner.
+        self._user_login_cache: str | None = None
         self.meta = ConnectorMeta(
             name="github",
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
+                incremental=True,
+                permission_sync=True,
+                deletions=True,
+                slim_listing=True,
+                resource_discovery=True,
             ),
         )
 
@@ -127,6 +150,9 @@ class GithubConnector:
                     kind=FieldKind.STRING,
                     placeholder="octocat",
                     help="The user or organization that owns the repository.",
+                    # Picker binds to org resources (parent none). Free-text fallback
+                    # stands for a personal owner or an air-gapped PAT user.
+                    resource_kind="org",
                 ),
                 ConfigField(
                     key="repo",
@@ -134,6 +160,10 @@ class GithubConnector:
                     kind=FieldKind.STRING,
                     placeholder="Hello-World",
                     help="The repository name, without the owner prefix.",
+                    # Picker binds to repo resources (children of the chosen org). The
+                    # repo resource id is `owner/repo`; the connector splits it back into
+                    # owner and repo, so the picked value fills both fields faithfully.
+                    resource_kind="repo",
                 ),
                 ConfigField(
                     key="token",
@@ -258,7 +288,134 @@ class GithubConnector:
                 )
         return changes
 
+    async def list_resources(
+        self,
+        kind: str | None = None,
+        parent_id: str | None = None,
+        cursor: str | None = None,
+    ) -> ResourcePage:
+        """Enumerate what the credential can reach, for the config picker.
+
+        Two levels, hierarchical by (kind, parent_id), each a valid `owner`/`repo`:
+
+        - Top level (kind None or "org", parent None): the organizations the
+          credential belongs to (GET /user/orgs), each a selectable `owner`, plus a
+          synthetic "user" org for the authenticated account itself so a personal
+          credential with no orgs can still drill into its own repos.
+        - Repos (kind "repo", parent = an org login): the repositories the credential
+          can see under that owner. GET /orgs/{org}/repos for a real org, and
+          GET /user/repos for the synthetic user node (the /orgs endpoint 404s for a
+          user login). Each repo id is `owner/repo` (its full_name), the opaque value
+          the `repo` field's picker resolves to; the connector splits it back into
+          owner and repo at sync time.
+
+        Listing is only ever what the credential already reaches, so the resource tree
+        equals the ACL reach and discovery never escalates scope. Pagination is
+        GitHub's own: the opaque cursor is the next page number carried in the Link
+        header, and next_cursor is None once the Link header has no rel="next".
+        """
+        async with self._client() as client:
+            if kind == "repo":
+                if not parent_id:
+                    return ResourcePage()
+                return await self._list_repos(client, parent_id, cursor)
+            # kind None or "org": the top level.
+            return await self._list_orgs(client, cursor)
+
     # --- helpers ---
+    async def _list_orgs(self, client: httpx.AsyncClient, cursor: str | None) -> ResourcePage:
+        # The authenticated user itself is a synthetic top-level owner so a personal
+        # credential (which may belong to no org) can still reach its own repos. It is
+        # only surfaced on the first page, so it is not duplicated across pages.
+        items: list[Resource] = []
+        if cursor is None:
+            user = await self._authenticated_user(client)
+            if user:
+                items.append(
+                    Resource(
+                        id=user,
+                        kind="org",
+                        label=f"{user} (your repositories)",
+                        extra={"scope": "user"},
+                    )
+                )
+        resp = await client.get("/user/orgs", params=self._page_params(cursor, {"per_page": 100}))
+        resp.raise_for_status()
+        for org in resp.json():
+            login = org.get("login")
+            if login:
+                items.append(Resource(id=login, kind="org", label=login))
+        return ResourcePage(items=items, next_cursor=self._next_page(resp))
+
+    async def _list_repos(
+        self, client: httpx.AsyncClient, owner: str, cursor: str | None
+    ) -> ResourcePage:
+        # A real org lists via /orgs/{org}/repos; the synthetic user owner (its login
+        # equals the authenticated user) lists via /user/repos, since /orgs/{login}
+        # 404s for a user. Fall back to /user/repos when the org endpoint 404s, so a
+        # personal owner passed straight through still resolves.
+        user = await self._authenticated_user(client)
+        if owner == user:
+            resp = await client.get(
+                "/user/repos",
+                params=self._page_params(cursor, {"affiliation": "owner", "per_page": 100}),
+            )
+        else:
+            resp = await client.get(
+                f"/orgs/{owner}/repos",
+                params=self._page_params(cursor, {"type": "all", "per_page": 100}),
+            )
+            if resp.status_code == 404:
+                resp = await client.get(
+                    "/user/repos", params=self._page_params(cursor, {"per_page": 100})
+                )
+        resp.raise_for_status()
+        items: list[Resource] = []
+        for repo in resp.json():
+            full = repo.get("full_name") or f"{owner}/{repo.get('name', '')}"
+            name = repo.get("name") or full
+            if repo.get("name") or repo.get("full_name"):
+                items.append(
+                    Resource(
+                        id=full,
+                        kind="repo",
+                        label=name,
+                        parent_id=owner,
+                        extra={"private": str(bool(repo.get("private", False))).lower()},
+                    )
+                )
+        return ResourcePage(items=items, next_cursor=self._next_page(resp))
+
+    async def _authenticated_user(self, client: httpx.AsyncClient) -> str | None:
+        # Cached for the life of the connector: the login of the token holder, used to
+        # name the synthetic user owner and to route its repo listing to /user/repos.
+        # No token means an unauthenticated credential, which reaches no user or orgs.
+        if not self._token:
+            return None
+        if self._user_login_cache is None:
+            resp = await client.get("/user")
+            resp.raise_for_status()
+            self._user_login_cache = resp.json().get("login") or ""
+        return self._user_login_cache or None
+
+    @staticmethod
+    def _page_params(cursor: str | None, base: dict[str, Any]) -> dict[str, Any]:
+        # The opaque cursor is GitHub's own page number; None is the first page.
+        params = dict(base)
+        if cursor:
+            params["page"] = cursor
+        return params
+
+    def _next_page(self, resp: httpx.Response) -> str | None:
+        # Derive the next page number from the Link header rel="next" so the cursor
+        # stays the source's own pagination model, not a runtime reconstruction.
+        next_url = self._next_link(resp)
+        if not next_url:
+            return None
+        query = urlparse(next_url).query
+        page = parse_qs(query).get("page")
+        return page[0] if page else None
+
     def _client(self) -> httpx.AsyncClient:
         headers = {
             "Accept": "application/vnd.github+json",

@@ -113,6 +113,11 @@ export interface RunInfo {
   duration_seconds: number | null;
 }
 
+// A connector instance's lifecycle state. A DRAFT has a sealed credential but has not been
+// configured yet (the OAuth callback lands here); an ACTIVE instance is fully configured and
+// syncs. Mirrors STATUS_ACTIVE / STATUS_DRAFT in pansoph_core.connectors.
+export type InstanceStatus = "active" | "draft";
+
 export interface Instance {
   id: string;
   connector: string;
@@ -127,6 +132,8 @@ export interface Instance {
   cursor: string | null;
   created_at: string | null;
   last_run: RunInfo | null;
+  // 'active' by default; 'draft' after an OAuth connect, before configure submit promotes it.
+  status?: InstanceStatus;
 }
 
 async function jget<T>(path: string): Promise<T> {
@@ -158,6 +165,10 @@ export interface SpecField {
   required: boolean;
   help?: string;
   placeholder?: string;
+  // When set, the field binds to a picker of discovered Resources of this kind (org ->
+  // repo, drive -> folder) instead of a free-text input. Absent means free text, which
+  // keeps air-gapped / PAT users working unchanged.
+  resource_kind?: string;
 }
 
 export interface ConnectorSpec {
@@ -189,6 +200,9 @@ export async function createInstance(payload: {
   schedule_cron?: string;
   scope_type?: string;
   scope_ref?: string;
+  // Lifecycle state to persist. Defaults to 'active'; the configure submit sends 'active'
+  // explicitly to promote an existing draft (from the OAuth callback) to active.
+  status?: InstanceStatus;
 }): Promise<Instance> {
   const res = await fetch("/api/connectors/instances", {
     method: "POST",
@@ -241,6 +255,69 @@ export async function oauthAuthorizeUrl(
   }
   const data = (await res.json()) as { authorize_url: string };
   return data.authorize_url;
+}
+
+// --- resource discovery + credential status ---
+
+// One node in a connector's resource tree (an org, a repo, a drive, a folder). Mirrors
+// pansoph_types.Resource. `selectable` false means the node is a drill-down container only
+// (e.g. an org you expand to reach repos), not a pickable value itself.
+export interface Resource {
+  id: string;
+  kind: string;
+  label: string;
+  parent_id: string | null;
+  selectable: boolean;
+  extra: Record<string, string>;
+}
+
+// A page of discovered resources. `next_cursor` is null when the source is exhausted.
+export interface ResourcePage {
+  items: Resource[];
+  next_cursor: string | null;
+}
+
+// List the resources an instance's sealed credential can reach, one page at a time.
+// `kind` null (undefined) means the top level; `parent` scopes to a container's children;
+// `q` filters server-side by case-insensitive label/id match; `cursor` pages forward.
+// The endpoint is admin gated (the bearer token carries identity) and audited.
+export async function listResources(
+  instanceId: string,
+  opts: { kind?: string; parent?: string; q?: string; cursor?: string } = {},
+): Promise<ResourcePage> {
+  const qs = new URLSearchParams();
+  if (opts.kind) qs.set("kind", opts.kind);
+  if (opts.parent) qs.set("parent", opts.parent);
+  if (opts.q) qs.set("q", opts.q);
+  if (opts.cursor) qs.set("cursor", opts.cursor);
+  const query = qs.toString();
+  const path =
+    `/api/connectors/instances/${encodeURIComponent(instanceId)}/resources` +
+    (query ? `?${query}` : "");
+  const res = await fetch(path, { headers: authHeader() });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(detail?.detail ?? `resources failed: ${res.status}`);
+  }
+  return (await res.json()) as ResourcePage;
+}
+
+// The credential status of an instance, computed purely from the sealed handles (no secret
+// plaintext is read). Drives the connect-then-pick UI: when connected we suppress the
+// prominent Connect button and show the resource pickers plus a subordinate Reconnect link.
+export interface CredentialStatus {
+  connected: boolean;
+  provider: string | null;
+  account_label: string | null;
+  expires_at: string | null;
+  has_refresh: boolean;
+  needs_reauth: boolean;
+}
+
+export async function instanceCredential(instanceId: string): Promise<CredentialStatus> {
+  return jget<CredentialStatus>(
+    `/api/connectors/instances/${encodeURIComponent(instanceId)}/credential`,
+  );
 }
 
 export interface Health {

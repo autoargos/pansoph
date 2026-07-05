@@ -31,8 +31,23 @@ Implemented against the Confluence Cloud REST API.
                allow_users (accountId), restricted groups become allow_groups. A page
                with no read restriction inherits space access, mapped here to a
                space-scoped group. Namespaced by the connector instance.
-  Verified:    against the documented v1 content endpoints; re-verify and provide an
-               API token to run it live.
+  Discovery:   list_resources enumerates the spaces the configured credential can
+               reach, for the space_key picker. It uses the v2 spaces endpoint
+               GET /wiki/api/v2/spaces (cursor pagination), verified 2026-07-05
+               against
+               https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/#api-spaces-get
+               and the v2 pagination model
+               https://developer.atlassian.com/cloud/confluence/rest/v2/intro/#pagination
+               The response carries results[] (each id, key, name) plus
+               _links.next, a relative URL containing the opaque cursor for the
+               next page. The listing is exhausted when _links.next is absent, so
+               next_cursor is None then. Only spaces the credential permits are
+               returned, so the picker stays faithful to what the connector can
+               actually ingest and the ACL mapping never over-reaches. Read scope:
+               read:space:confluence (covered by read:confluence-space.summary in
+               the 3LO flow).
+  Verified:    against the documented v1 content endpoints and the v2 spaces
+               endpoint; re-verify and provide an API token to run it live.
 """
 
 from __future__ import annotations
@@ -40,6 +55,7 @@ from __future__ import annotations
 import base64
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from pansoph_connector_sdk import (
@@ -50,7 +66,15 @@ from pansoph_connector_sdk import (
     FieldKind,
     ValidationResult,
 )
-from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+from pansoph_types import (
+    AccessControl,
+    AuthScheme,
+    Capabilities,
+    DocRef,
+    RawDoc,
+    Resource,
+    ResourcePage,
+)
 
 # Read-only OAuth 2.0 (3LO) scopes for the in-app Connect flow (provider
 # "atlassian"). Verified 2026-07-04 against the Confluence scope reference.
@@ -78,7 +102,11 @@ class ConfluenceConnector:
             name="confluence",
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
+                incremental=True,
+                permission_sync=True,
+                deletions=True,
+                slim_listing=True,
+                resource_discovery=True,
             ),
         )
 
@@ -133,6 +161,7 @@ class ConfluenceConnector:
                     kind=FieldKind.STRING,
                     required=False,
                     placeholder="ENG",
+                    resource_kind="space",
                     help="Limit ingestion to one space. Leave blank to list all reachable pages.",
                 ),
             ),
@@ -227,6 +256,66 @@ class ConfluenceConnector:
             space = page.get("space", {}).get("key") or self._space
             groups = [f"space:{space}"] if space else []
         return AccessControl(allow_users=users, allow_groups=groups, principal_ns=self.instance_id)
+
+    async def list_resources(
+        self,
+        kind: str | None = None,
+        parent_id: str | None = None,
+        cursor: str | None = None,
+    ) -> ResourcePage:
+        """List the Confluence spaces the configured credential can reach.
+
+        The only discoverable kind is "space" (a flat level, so parent_id is always
+        None). A None kind means the top level and lists spaces. Any other kind, or a
+        non-None parent_id, has no children in this source and returns an empty page.
+
+        Uses GET /wiki/api/v2/spaces with the source's own cursor pagination: the
+        opaque `cursor` is passed straight through as the query parameter, and the
+        next page's cursor is extracted from the relative _links.next URL the source
+        returns (None when the listing is exhausted). Each Resource's id is the space
+        key, which is exactly what the space_key config field the picker fills needs;
+        the numeric v2 space id is carried in extra for callers that want it. This
+        reuses the connector's existing auth, so discovery is a read the credential
+        already permits, never a scope escalation.
+        """
+        if (kind is not None and kind != "space") or parent_id is not None:
+            return ResourcePage(items=[], next_cursor=None)
+
+        params: dict[str, Any] = {"limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+        async with self._client() as client:
+            resp = await client.get("/wiki/api/v2/spaces", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        items = [
+            Resource(
+                id=space["key"],
+                kind="space",
+                label=space.get("name") or space["key"],
+                parent_id=None,
+                selectable=True,
+                extra={"space_id": str(space["id"])} if space.get("id") is not None else {},
+            )
+            for space in data.get("results", [])
+            if space.get("key")
+        ]
+        return ResourcePage(items=items, next_cursor=self._next_cursor(data))
+
+    @staticmethod
+    def _next_cursor(data: dict[str, Any]) -> str | None:
+        """Extract the opaque cursor from the v2 _links.next relative URL.
+
+        The v2 spaces response carries the next page under _links.next as a relative
+        URL like /wiki/api/v2/spaces?cursor=<opaque>. We return just the cursor value,
+        which the caller passes back verbatim. A missing _links.next means the listing
+        is exhausted, so we return None.
+        """
+        nxt = data.get("_links", {}).get("next")
+        if not nxt:
+            return None
+        values = parse_qs(urlparse(nxt).query).get("cursor")
+        return values[0] if values else None
 
     async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
         return []

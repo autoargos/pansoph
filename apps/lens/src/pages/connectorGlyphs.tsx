@@ -127,6 +127,39 @@ export function IconEyeOff(p: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconChevronRight(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" {...s} {...p}>
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+export function IconFolder(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" {...s} {...p}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
+export function IconSearch(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" {...s} {...p}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+export function IconCheck(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" {...s} strokeWidth={2.4} {...p}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 // --- connector brand glyphs (may use their own fills) ---
 
 const GH: Glyph = (p) => (

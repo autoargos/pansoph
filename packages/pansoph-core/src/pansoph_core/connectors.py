@@ -42,6 +42,10 @@ ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS schedule_cron text;
 -- so the admin UI can present and filter by it and role checks can key off it.
 ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS scope_type text NOT NULL DEFAULT 'org';
 ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS scope_ref text;
+-- Two-phase lifecycle. A 'draft' instance holds only a sealed credential (minted by
+-- the oauth callback) and has not had its resources picked yet, so resource-required
+-- validation is skipped for it. The configure submit promotes it to 'active'.
+ALTER TABLE connector_instances ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active';
 CREATE TABLE IF NOT EXISTS sync_runs (
     id            bigserial PRIMARY KEY,
     instance_id   text NOT NULL,
@@ -60,17 +64,35 @@ CREATE INDEX IF NOT EXISTS sync_runs_instance ON sync_runs (instance_id, started
 # Applied in ingestion via narrow(); scope can only remove reach, never add it.
 _SCOPE_TYPES = {"org", "group", "individual"}
 
+# The two-phase instance statuses. A 'draft' holds only a sealed credential and has
+# not had its resources picked, so it skips resource-required validation; 'active' is
+# a fully configured instance the scheduler will sync.
+STATUS_DRAFT = "draft"
+STATUS_ACTIVE = "active"
+_STATUSES = {STATUS_DRAFT, STATUS_ACTIVE}
 
-def validate_connector_config(connector: str, instance_id: str, config: dict[str, Any]) -> None:
+
+def validate_connector_config(
+    connector: str, instance_id: str, config: dict[str, Any], status: str = STATUS_ACTIVE
+) -> None:
     """Validate a config against the connector's own contract before persisting, so a
     misconfigured instance fails at creation rather than mid-sync. Resolves the
     connector through the registry (never importing it here), instantiates it, and
     calls its validate. Raises ValueError on an unknown connector or an invalid config.
+
+    A `draft` instance holds only a sealed credential and has not had its resources
+    picked yet, so resource-required validation is skipped for it: the connector still
+    has to load, but its validate (which enforces owner/repo, space_key, and the like)
+    is not run until the configure submit promotes the instance to `active`. This is
+    what lets the oauth callback create a draft against a token before the user has
+    chosen a repo.
     """
     try:
         probe = load_adapter("pansoph.connectors", connector)(instance_id, config)
     except Exception as exc:  # noqa: BLE001  surface a clear creation-time error
         raise ValueError(f"unknown or unloadable connector '{connector}': {exc}") from exc
+    if status == STATUS_DRAFT:
+        return
     validate = getattr(probe, "validate", None)
     if validate is None:
         return
@@ -106,10 +128,13 @@ class ConnectorManager:
         schedule_cron: str = "",
         scope_type: str = "org",
         scope_ref: str = "",
+        status: str = STATUS_ACTIVE,
     ) -> dict[str, Any]:
         from psycopg.types.json import Json
 
-        validate_connector_config(connector, instance_id, config)
+        if status not in _STATUSES:
+            raise ValueError(f"status must be one of {sorted(_STATUSES)}")
+        validate_connector_config(connector, instance_id, config, status)
         if scope_type not in _SCOPE_TYPES:
             raise ValueError(f"scope_type must be one of {sorted(_SCOPE_TYPES)}")
 
@@ -124,14 +149,15 @@ class ConnectorManager:
                 """
                 INSERT INTO connector_instances
                   (id, connector, name, tenant_id, config, schedule_seconds, schedule_cron,
-                   scope_type, scope_ref)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   scope_type, scope_ref, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                   connector = EXCLUDED.connector, name = EXCLUDED.name,
                   tenant_id = EXCLUDED.tenant_id, config = EXCLUDED.config,
                   schedule_seconds = EXCLUDED.schedule_seconds,
                   schedule_cron = EXCLUDED.schedule_cron,
-                  scope_type = EXCLUDED.scope_type, scope_ref = EXCLUDED.scope_ref
+                  scope_type = EXCLUDED.scope_type, scope_ref = EXCLUDED.scope_ref,
+                  status = EXCLUDED.status
                 """,
                 (
                     instance_id,
@@ -143,6 +169,7 @@ class ConnectorManager:
                     schedule_cron or None,
                     scope_type,
                     scope_ref or None,
+                    status,
                 ),
             )
         finally:
@@ -163,7 +190,7 @@ class ConnectorManager:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "SELECT id, connector, name, tenant_id, config, schedule_seconds, "
-                    "schedule_cron, enabled, cursor, created_at, scope_type, scope_ref "
+                    "schedule_cron, enabled, cursor, created_at, scope_type, scope_ref, status "
                     "FROM connector_instances WHERE id = %s",
                     (instance_id,),
                 )
@@ -178,7 +205,7 @@ class ConnectorManager:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "SELECT id, connector, name, tenant_id, config, schedule_seconds, "
-                    "schedule_cron, enabled, cursor, created_at, scope_type, scope_ref "
+                    "schedule_cron, enabled, cursor, created_at, scope_type, scope_ref, status "
                     "FROM connector_instances ORDER BY created_at"
                 )
                 rows = await cur.fetchall()
@@ -262,6 +289,7 @@ class ConnectorManager:
             "created_at": row[9].isoformat() if row[9] else None,
             "scope_type": row[10],
             "scope_ref": row[11],
+            "status": row[12],
         }
 
     @staticmethod

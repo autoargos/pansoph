@@ -22,9 +22,28 @@ Implemented against the Google Drive API v3.
   ACL model:   a file's permissions map to the ACL. An "anyone" permission is public;
                "user" permissions become allow_users (by emailAddress); "group" and
                "domain" become allow_groups. Namespaced by the connector instance.
+  Discovery:   list_resources powers the connect-then-pick UI. The top level (kind
+               None) lists the shared drives the credential can reach via drives.list
+               (returns Resource kind "drive", id = the drive id, which is also the id
+               of the drive's top-level folder). Drilling into a drive or folder (kind
+               "folder", parent = a drive or folder id) lists the child folders via
+               files.list with a folder mimeType query and the "<parent> in parents"
+               operator, plus supportsAllDrives / includeItemsFromAllDrives so shared
+               drives are reachable. Both are read-only reads confined to what the
+               drive.readonly token already permits, never a scope escalation. The
+               opaque cursor is the source's own pageToken, passed back verbatim.
+               Verified against these v3 endpoints on 2026-07-05:
+               https://developers.google.com/workspace/drive/api/reference/rest/v3/drives/list
+               https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list
+               https://developers.google.com/workspace/drive/api/guides/search-files
+               drives.list: params pageSize (default 10, max 100), pageToken, q;
+               response drives[] (id, name) plus nextPageToken. files.list: pageSize
+               max 100; folder query "mimeType='application/vnd.google-apps.folder'
+               and '<id>' in parents"; response files[] (id, name, mimeType) plus
+               nextPageToken.
   Verified:    against the documented v3 endpoints (files.list search syntax and
-               shared-drive parameters) on 2026-06-08; provide an OAuth token to run
-               it live.
+               shared-drive parameters) on 2026-06-08, discovery re-verified 2026-07-05;
+               provide an OAuth token to run it live.
 
 The runtime owns pagination and retries; methods describe one page or one file.
 """
@@ -43,7 +62,15 @@ from pansoph_connector_sdk import (
     FieldKind,
     ValidationResult,
 )
-from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+from pansoph_types import (
+    AccessControl,
+    AuthScheme,
+    Capabilities,
+    DocRef,
+    RawDoc,
+    Resource,
+    ResourcePage,
+)
 
 _BASE = "https://www.googleapis.com/drive/v3"
 # Google Docs native types are exported to text; binary files are downloaded as-is.
@@ -52,6 +79,7 @@ _EXPORT = {
     "application/vnd.google-apps.presentation": "text/plain",
     "application/vnd.google-apps.spreadsheet": "text/csv",
 }
+_FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
 class GoogleDriveConnector:
@@ -69,7 +97,11 @@ class GoogleDriveConnector:
             name="google_drive",
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
+                incremental=True,
+                permission_sync=True,
+                deletions=True,
+                slim_listing=True,
+                resource_discovery=True,
             ),
         )
 
@@ -101,9 +133,11 @@ class GoogleDriveConnector:
                     kind=FieldKind.STRING,
                     required=False,
                     placeholder="0ABcdEFGhijKLMnoPQR",
+                    resource_kind="folder",
                     help=(
-                        "Confine the instance to one folder. Leave blank to ingest all "
-                        "reachable files."
+                        "Confine the instance to one folder. Pick one from the folder tree "
+                        "the connected credential can reach, or leave blank to ingest all "
+                        "reachable files. Free-text folder ids still work."
                     ),
                 ),
                 ConfigField(
@@ -111,7 +145,11 @@ class GoogleDriveConnector:
                     label="Shared drive ID",
                     kind=FieldKind.STRING,
                     required=False,
-                    help="Set to narrow the search to one shared drive. Leave blank for My Drive.",
+                    resource_kind="drive",
+                    help=(
+                        "Pick a shared drive the credential can reach to narrow the search "
+                        "to it. Leave blank for My Drive. Free-text drive ids still work."
+                    ),
                 ),
                 ConfigField(
                     key="query",
@@ -232,3 +270,71 @@ class GoogleDriveConnector:
 
     async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
         return []
+
+    async def list_resources(
+        self,
+        kind: str | None = None,
+        parent_id: str | None = None,
+        cursor: str | None = None,
+    ) -> ResourcePage:
+        """Enumerate the drives and folders the drive.readonly credential can reach.
+
+        Top level (kind None): the shared drives via drives.list, returned as Resource
+        kind "drive". A drive id doubles as the id of its top-level folder, so drilling
+        into it (kind "folder", parent = the drive/folder id) lists that node's child
+        folders via files.list with a folder mimeType query and the parents operator.
+        supportsAllDrives / includeItemsFromAllDrives keep shared-drive folders visible.
+        The opaque cursor is Google's own pageToken, so pagination is the source's model
+        and next_cursor is None exactly when the source stops returning nextPageToken.
+        """
+        async with self._client() as client:
+            if kind is None or kind == "drive":
+                return await self._list_drives(client, cursor)
+            return await self._list_folders(client, parent_id, cursor)
+
+    async def _list_drives(self, client: httpx.AsyncClient, cursor: str | None) -> ResourcePage:
+        params: dict[str, str] = {
+            "pageSize": "100",
+            "fields": "nextPageToken, drives(id, name)",
+        }
+        if cursor:
+            params["pageToken"] = cursor
+        resp = await client.get("/drives", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        items = [
+            Resource(id=d["id"], kind="drive", label=d.get("name") or d["id"])
+            for d in data.get("drives", [])
+            if d.get("id")
+        ]
+        return ResourcePage(items=items, next_cursor=data.get("nextPageToken"))
+
+    async def _list_folders(
+        self, client: httpx.AsyncClient, parent_id: str | None, cursor: str | None
+    ) -> ResourcePage:
+        # Without a parent there is no folder tree to walk (the top level is drives).
+        if not parent_id:
+            return ResourcePage(items=[], next_cursor=None)
+        q = f"mimeType = '{_FOLDER_MIME}' and '{parent_id}' in parents and trashed = false"
+        params: dict[str, str] = {
+            "q": q,
+            "pageSize": "100",
+            "fields": "nextPageToken, files(id, name)",
+            **self._drive_params(),
+        }
+        if cursor:
+            params["pageToken"] = cursor
+        resp = await client.get("/files", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        items = [
+            Resource(
+                id=f["id"],
+                kind="folder",
+                label=f.get("name") or f["id"],
+                parent_id=parent_id,
+            )
+            for f in data.get("files", [])
+            if f.get("id")
+        ]
+        return ResourcePage(items=items, next_cursor=data.get("nextPageToken"))

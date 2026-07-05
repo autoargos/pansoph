@@ -12,7 +12,15 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+from pansoph_types import (
+    AccessControl,
+    AuthScheme,
+    Capabilities,
+    DocRef,
+    RawDoc,
+    Resource,
+    ResourcePage,
+)
 
 from .contract import ChangeEvent, ConnectorMeta, ValidationResult
 from .spec import ConnectorSpec
@@ -39,9 +47,23 @@ class InMemoryConnector:
             name="memory",
             auth=AuthScheme.none,
             capabilities=Capabilities(
-                incremental=True, permission_sync=True, deletions=True, slim_listing=True
+                incremental=True,
+                permission_sync=True,
+                deletions=True,
+                slim_listing=True,
+                resource_discovery=True,
             ),
         )
+        # A tiny fixed resource tree so the discovery contract has a real, hermetic
+        # implementation to verify: two top-level "folder" resources, each with one
+        # selectable "item" child. This mirrors the hierarchical (kind, parent_id)
+        # drill a real source exposes, without any network.
+        self._resources: list[Resource] = [
+            Resource(id="folder-a", kind="folder", label="Folder A"),
+            Resource(id="folder-b", kind="folder", label="Folder B"),
+            Resource(id="item-a1", kind="item", label="Item A1", parent_id="folder-a"),
+            Resource(id="item-b1", kind="item", label="Item B1", parent_id="folder-b"),
+        ]
 
     @classmethod
     def spec(cls) -> ConnectorSpec:
@@ -108,3 +130,24 @@ class InMemoryConnector:
 
     async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
         return []
+
+    async def list_resources(
+        self,
+        kind: str | None = None,
+        parent_id: str | None = None,
+        cursor: str | None = None,
+    ) -> ResourcePage:
+        """Return the fixed reference resource tree, filtered by (kind, parent_id).
+
+        A None kind returns the top level (resources with no parent). A parent_id
+        returns that node's children. This single-page implementation never sets a
+        next_cursor, which is a valid exhausted listing. It exists so the discovery
+        conformance category has a real connector to check, exactly as the deletions
+        category has the tombstone path in remove().
+        """
+        items = [
+            r
+            for r in self._resources
+            if (kind is None or r.kind == kind) and r.parent_id == parent_id
+        ]
+        return ResourcePage(items=items, next_cursor=None)

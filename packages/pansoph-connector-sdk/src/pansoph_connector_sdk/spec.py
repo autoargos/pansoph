@@ -50,6 +50,12 @@ class ConfigField:
     # For kind=OAUTH: which provider flow mints this field's value, and the scopes.
     oauth_provider: str | None = None
     oauth_scopes: tuple[str, ...] = ()
+    # When set, this field binds to a resource picker instead of free text: its value
+    # is chosen from the connector's list_resources of this kind (github owner/repo,
+    # drive folder_id/drive_id, confluence space_key, slack channel_ids). The field
+    # stays a free-text fallback when the connector declares no resource_discovery, so
+    # this is optional and back-compatible for air-gapped or PAT users.
+    resource_kind: str | None = None
 
     @property
     def is_secret(self) -> bool:

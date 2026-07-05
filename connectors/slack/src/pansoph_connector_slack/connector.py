@@ -8,6 +8,13 @@ Implemented against the Slack Web API. Verified against the official docs:
                https://docs.slack.dev/reference/methods/conversations.members
                https://docs.slack.dev/apis/web-api/pagination (cursor pagination)
                https://docs.slack.dev/authentication/tokens (token types)
+  Discovery:   conversations.list returns channels[] with id, name, is_private,
+               is_archived, and response_metadata.next_cursor. Requested types are
+               public_channel,private_channel; limit is 200 (the doc-recommended
+               page size, hard cap 1000). list_resources exposes each reachable
+               channel as a Resource of kind "channel", cursor paginated by the same
+               next_cursor. Verified against the conversations.list reference on the
+               date below.
   API version: Slack Web API (versionless, methods under https://slack.com/api/).
   Auth:        bearer token in the Authorization header. The token is a bot token
                (xoxb-) or a user token (xoxp-) supplied by the operator. The
@@ -25,7 +32,7 @@ Implemented against the Slack Web API. Verified against the official docs:
                allow_groups is always empty for this source, and Slack has no per
                channel deny concept, so deny is always empty. The ACL therefore
                reflects exactly the membership the credential can see.
-  Verified on: 2026-06-20.
+  Verified on: 2026-07-05.
 
 Credential scope note: every configured instance carries its own credential and its
 own ACL namespace (principal_ns = instance_id). One instance may be a bot token in
@@ -51,7 +58,15 @@ from pansoph_connector_sdk import (
     FieldKind,
     ValidationResult,
 )
-from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+from pansoph_types import (
+    AccessControl,
+    AuthScheme,
+    Capabilities,
+    DocRef,
+    RawDoc,
+    Resource,
+    ResourcePage,
+)
 
 
 class SlackConnector:
@@ -66,7 +81,11 @@ class SlackConnector:
             name="slack",
             auth=AuthScheme.api_token,
             capabilities=Capabilities(
-                incremental=False, permission_sync=True, deletions=False, slim_listing=True
+                incremental=False,
+                permission_sync=True,
+                deletions=False,
+                slim_listing=True,
+                resource_discovery=True,
             ),
         )
 
@@ -96,6 +115,21 @@ class SlackConnector:
                         "directly. Either way it is sealed in the secret store. Needs "
                         "channels:read, groups:read, channels:history, groups:history, "
                         "and users:read."
+                    ),
+                ),
+                ConfigField(
+                    key="channel_ids",
+                    label="Channels",
+                    kind=FieldKind.LIST,
+                    required=False,
+                    resource_kind="channel",
+                    placeholder="C0123ABCD, C0456EFGH",
+                    help=(
+                        "Optional. Restrict ingestion to specific channels chosen from "
+                        "the resource picker (which lists the channels this token can "
+                        "reach via list_resources). Leave empty to ingest every "
+                        "reachable channel. Falls back to a comma-separated list of "
+                        "channel ids when discovery is unavailable."
                     ),
                 ),
                 ConfigField(
@@ -173,7 +207,68 @@ class SlackConnector:
             return [ChangeEvent(kind="upsert", source_doc_id=channel, instance_id=self.instance_id)]
         return []
 
+    async def list_resources(
+        self,
+        kind: str | None = None,
+        parent_id: str | None = None,
+        cursor: str | None = None,
+    ) -> ResourcePage:
+        """List the channels this credential can reach, as pickable Resources.
+
+        Slack is a flat workspace of channels for discovery purposes, so there is a
+        single kind, "channel", and no parent hierarchy: every channel is top level
+        and parent_id is always None. A None kind means "the top level", which for
+        Slack is the channels themselves, so both None and "channel" list channels;
+        any other kind lists nothing. parent_id is accepted for contract symmetry and
+        must be None (there is no level below a channel to drill into).
+
+        One Slack conversations.list page maps to one ResourcePage: the passed cursor
+        is Slack's own next_cursor (None means the first page), and the returned
+        next_cursor is response_metadata.next_cursor, or None when Slack returns an
+        empty cursor (the listing is exhausted). Only channels the token can see are
+        returned, so discovery is exactly the reach the credential already grants and
+        never a scope escalation. The Resource id is the opaque channel id the
+        connector needs (it flows straight into a DocRef), and the label is the human
+        channel name, prefixed to mark private channels for the picker.
+        """
+        if kind not in (None, "channel"):
+            return ResourcePage(items=[], next_cursor=None)
+        if parent_id is not None:
+            return ResourcePage(items=[], next_cursor=None)
+
+        params: dict[str, Any] = {
+            "types": "public_channel,private_channel",
+            "limit": 200,
+            "exclude_archived": "true",
+        }
+        if cursor:
+            params["cursor"] = cursor
+        async with self._client() as client:
+            resp = await client.get("/api/conversations.list", params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+        items = [self._resource(channel) for channel in payload.get("channels", [])]
+        next_cursor = payload.get("response_metadata", {}).get("next_cursor", "") or ""
+        return ResourcePage(items=items, next_cursor=next_cursor or None)
+
     # --- helpers ---
+    def _resource(self, channel: dict[str, Any]) -> Resource:
+        channel_id = channel["id"]
+        name = channel.get("name") or channel_id
+        is_private = bool(channel.get("is_private", False))
+        # Human label mirrors Slack's own UI convention: a hash for a public channel,
+        # a lock for a private one, so the picker reads at a glance. The id stays the
+        # opaque channel id the connector actually needs.
+        label = f"\U0001f512 {name}" if is_private else f"# {name}"
+        return Resource(
+            id=channel_id,
+            kind="channel",
+            label=label,
+            parent_id=None,
+            selectable=True,
+            extra={"is_private": "true" if is_private else "false"},
+        )
+
     def _client(self) -> httpx.AsyncClient:
         headers = {"Authorization": f"Bearer {self._token}"}
         return httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=30.0)

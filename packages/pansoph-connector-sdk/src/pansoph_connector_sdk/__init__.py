@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pansoph_types import Resource, ResourcePage
+
 from .auth import CredentialProvider
 from .auth_types import (
     AccessToken,
@@ -39,6 +41,9 @@ __all__ = [
     "ConfigField",
     "FieldKind",
     "looks_like_credential",
+    # Resource discovery (connect-then-pick).
+    "Resource",
+    "ResourcePage",
     # Auth subsystem (auto-refresh credentials).
     "AccessToken",
     "AuthError",
