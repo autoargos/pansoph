@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 
+import { CommandPalette, type Command } from "./components/CommandPalette.tsx";
 import { Lockup } from "./components/Logo.tsx";
 import { health, type Health, type Identity } from "./api.ts";
 import {
+  accountUrl,
   canManageConnectors,
   groupsOf,
   isAdmin,
   login,
+  logout,
   rolesOf,
   useAuth,
   usernameOf,
@@ -133,6 +136,7 @@ function Login() {
 
 function Shell({ identity }: { identity: Identity }) {
   const [hp, setHp] = useState<Health | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
   useEffect(() => {
@@ -141,17 +145,18 @@ function Shell({ identity }: { identity: Identity }) {
     const t = setInterval(tick, 8000);
     return () => clearInterval(t);
   }, []);
-  // Cmd/Ctrl+K jumps to Search, matching the command-bar affordance in the header.
+  // Cmd/Ctrl+K toggles the command palette. The palette searches the app itself (pages
+  // and actions), not documents. Document search stays on the /search page.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        navigate("/search");
+        setPaletteOpen((o) => !o);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate]);
+  }, []);
   const healthy = hp?.ok ?? false;
   const nav = navFor(identity.roles);
   const canManage = canManageConnectors(identity.roles);
@@ -159,6 +164,54 @@ function Shell({ identity }: { identity: Identity }) {
 
   const healthLabel = hp == null ? "agora unreachable" : healthy ? "all systems healthy" : "degraded";
   const healthKind: "ok" | "warn" | "err" = hp == null ? "err" : healthy ? "ok" : "warn";
+
+  // The commands the palette can run. Navigation entries come from the same role-aware
+  // nav the sidebar renders, so a route the user cannot reach never appears here. Actions
+  // are wired to the real callbacks (theme toggle, account console, sign out, add
+  // connector). Only actions the user is permitted to take are included.
+  const commands: Command[] = [
+    ...nav.map(
+      (n): Command => ({
+        id: `nav:${n.to}`,
+        group: "Navigate",
+        label: n.label,
+        icon: <NavIcon d={n.icon} />,
+        run: () => navigate(n.to),
+      }),
+    ),
+    ...(canManage
+      ? [
+          {
+            id: "action:add-connector",
+            group: "Actions",
+            label: "Add connector",
+            icon: <NavIcon d={NAV_CONNECTORS.icon} />,
+            run: () => navigate("/connectors?add=1"),
+          } satisfies Command,
+        ]
+      : []),
+    {
+      id: "action:toggle-theme",
+      group: "Actions",
+      label: `Toggle theme (${theme === "dark" ? "to light" : "to dark"})`,
+      icon: <ActionIcon kind="theme" />,
+      run: toggle,
+    },
+    {
+      id: "action:manage-account",
+      group: "Actions",
+      label: "Manage account",
+      icon: <ActionIcon kind="account" />,
+      run: () => window.open(accountUrl(), "_blank", "noopener,noreferrer"),
+    },
+    {
+      id: "action:sign-out",
+      group: "Actions",
+      label: "Sign out",
+      icon: <ActionIcon kind="signout" />,
+      run: logout,
+    },
+  ];
 
   return (
     <div className="flex h-full">
@@ -223,6 +276,35 @@ function Shell({ identity }: { identity: Identity }) {
           </div>
         </div>
 
+        {/* Signed-in user and sign out, always visible in the chrome. Full identity,
+            roles, and groups live on the Access page (the avatar links there). */}
+        <div className="mb-3 flex items-center gap-2.5 rounded-[var(--radius-md)] border border-border bg-elevated px-2.5 py-2">
+          <button
+            type="button"
+            onClick={() => navigate("/access")}
+            title="Open Access"
+            className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          >
+            <Avatar name={identity.user} size={26} />
+            <div className="min-w-0">
+              <div className="truncate text-[12.5px] font-medium text-text">{identity.user}</div>
+              <div className="truncate text-[10.5px] text-muted">signed in</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={logout}
+            title="Sign out"
+            aria-label="Sign out"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-muted transition hover:bg-surface hover:text-err"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+
         <div className="flex items-center gap-2 border-t border-border px-2 pt-3 text-[11px] text-muted">
           <span>Apache-2.0</span>
           <span className="opacity-50">.</span>
@@ -233,18 +315,19 @@ function Shell({ identity }: { identity: Identity }) {
       {/* ---- Main column ---- */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center gap-4 border-b border-border bg-[color-mix(in_srgb,var(--ob-bg)_72%,transparent)] px-6 backdrop-blur-md">
-          {/* Command bar: jumps to Search (also bound to Cmd/Ctrl+K) */}
+          {/* Command bar: opens the command palette to search the app (also Cmd/Ctrl+K).
+              This searches pages and actions, not documents; document search is /search. */}
           <button
             type="button"
-            onClick={() => navigate("/search")}
-            aria-label="Go to search"
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Open command palette"
             className="flex h-[34px] min-w-[280px] items-center gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface px-3 text-left text-[13px] text-muted transition hover:border-border-hover hover:text-text"
           >
             <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
               <circle cx="11" cy="11" r="7" />
               <path d="m21 21-4.3-4.3" strokeLinecap="round" />
             </svg>
-            <span>Search connectors, docs, or run a command</span>
+            <span>Search actions and pages</span>
             <span className="ml-auto flex gap-1">
               <Kbd>Cmd</Kbd>
               <Kbd>K</Kbd>
@@ -270,7 +353,37 @@ function Shell({ identity }: { identity: Identity }) {
           </Routes>
         </main>
       </div>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={commands}
+      />
     </div>
+  );
+}
+
+// A stroked line icon rendered from a single SVG path, matching the sidebar nav icons.
+// Used for the palette's Navigate entries so a command reads visually like its page.
+function NavIcon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d={d} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// Icons for the palette's action commands (theme toggle, account console, sign out).
+function ActionIcon({ kind }: { kind: "theme" | "account" | "signout" }) {
+  const paths: Record<typeof kind, string> = {
+    theme: "M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z",
+    account: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+    signout: "M15 12H3m0 0 4-4m-4 4 4 4M11 4h6a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6",
+  };
+  return (
+    <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d={paths[kind]} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

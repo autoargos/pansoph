@@ -39,8 +39,8 @@ import {
   TR,
   useToasts,
 } from "../ui.tsx";
+import { ConnectorLogo } from "../components/ConnectorLogo.tsx";
 import {
-  connectorBrand,
   IconAlert,
   IconClock,
   IconEdit,
@@ -172,19 +172,6 @@ function configToChecks(
     if (isBoolField(f.kind)) out[f.key] = Boolean(config[f.key]);
   }
   return out;
-}
-
-// The tinted logo tile that identifies a connector by brand.
-function ConnectorLogo({ connector, size = 42 }: { connector: string; size?: number }) {
-  const { glyph: Glyph, tint } = connectorBrand(connector);
-  return (
-    <span
-      className="grid shrink-0 place-items-center rounded-[11px] border border-border bg-elevated"
-      style={{ width: size, height: size, color: tint }}
-    >
-      <Glyph width={size * 0.52} height={size * 0.52} />
-    </span>
-  );
 }
 
 type Filter = "all" | "healthy" | "attention";
@@ -861,15 +848,15 @@ function ConnectorForm({
       }
       footer={
         <>
-          <span className="flex items-center gap-1.5 text-[11px] text-muted">
-            <IconShield width={13} height={13} className="text-ok" />
-            Credentials encrypted at rest, never logged
+          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
+            <IconShield width={13} height={13} className="shrink-0 text-ok" />
+            <span className="truncate">Credentials encrypted at rest, never logged</span>
           </span>
           <div className="flex-1" />
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" className="shrink-0 whitespace-nowrap" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy}>
+          <Button className="shrink-0 whitespace-nowrap" onClick={submit} disabled={busy}>
             {busy ? (
               <>
                 <Spinner className="border-white/40 border-t-white" />
@@ -915,17 +902,34 @@ function ConnectorForm({
           />
         </Field>
 
-        {/* Dynamic spec fields (never the oauth field) */}
-        {visibleFields.map((f) => (
-          <SpecFieldInput
-            key={f.key}
-            field={f}
-            values={values}
-            checks={checks}
-            setValues={setValues}
-            setChecks={setChecks}
+        {/* OAuth first: for a connector that declares an oauth field, the
+            "Connect with X" block is the primary, recommended path and sits
+            near the top, right after Type and Display name. */}
+        {oauthField && (
+          <OAuthConnect
+            provider={provider}
+            connector={connector}
+            instanceId={instanceId}
+            tenant={tenant}
+            editing={!!editing}
           />
-        ))}
+        )}
+
+        {/* Dynamic spec fields (never the oauth field). For a non-oauth
+            connector these are the primary inputs and render inline here. For
+            an oauth connector they are the manual fallback and render lower,
+            under a subtle divider, so keep them out of this spot. */}
+        {!oauthField &&
+          visibleFields.map((f) => (
+            <SpecFieldInput
+              key={f.key}
+              field={f}
+              values={values}
+              checks={checks}
+              setValues={setValues}
+              setChecks={setChecks}
+            />
+          ))}
 
         {/* Scope */}
         <Field
@@ -982,15 +986,27 @@ function ConnectorForm({
           )}
         </Field>
 
-        {/* OAuth Connect (when the connector declares an oauth field) */}
-        {oauthField && (
-          <OAuthConnect
-            provider={provider}
-            connector={connector}
-            instanceId={instanceId}
-            tenant={tenant}
-            editing={!!editing}
-          />
+        {/* Manual fallback: for an oauth connector the token / credential
+            fields are the secondary path, shown below a subtle divider at
+            lower visual weight. */}
+        {oauthField && visibleFields.length > 0 && (
+          <div className="space-y-4 rounded-[var(--radius-md)] border border-dashed border-border bg-bg/40 p-4">
+            <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-[0.09em] text-muted">
+              <span className="h-px flex-1 bg-border" />
+              Or connect manually with a token
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            {visibleFields.map((f) => (
+              <SpecFieldInput
+                key={f.key}
+                field={f}
+                values={values}
+                checks={checks}
+                setValues={setValues}
+                setChecks={setChecks}
+              />
+            ))}
+          </div>
         )}
 
         {error && (
@@ -1043,11 +1059,12 @@ function OAuthConnect({
   }
 
   return (
-    <div>
-      <div className="my-1 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-        <span className="h-px flex-1 bg-border" />
-        authenticate
-        <span className="h-px flex-1 bg-border" />
+    <div className="rounded-[var(--radius-md)] border border-accent-line bg-accent-soft p-4 shadow-[0_10px_30px_-16px_rgba(124,92,255,0.7)]">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-[12.5px] font-semibold text-text">
+          Connect with {label}
+        </span>
+        <Badge kind="accent">Recommended</Badge>
       </div>
       <button
         type="button"

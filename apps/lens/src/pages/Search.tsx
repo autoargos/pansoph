@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type Identity, search, type SearchResult } from "../api.ts";
+import { ConnectorLogo } from "../components/ConnectorLogo.tsx";
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner, Tooltip } from "../ui.tsx";
 
 // ============================================================
@@ -145,61 +146,10 @@ const BAR_FILL: Record<Enriched["scoreClass"], string> = {
   low: "bg-muted",
 };
 
-// Small connector glyph. A handful of first-party sources get a mark;
-// everything else gets a neutral document tile. Kept inline so the page
-// stays self-contained.
+// Small connector mark. Renders the official brand logo when one is bundled,
+// otherwise a neutral tile, via the shared ConnectorLogo.
 function ConnectorMark({ connector }: { connector: string }) {
-  const common = "h-[15px] w-[15px]";
-  let glyph: ReactNode;
-  switch (connector) {
-    case "github":
-      glyph = (
-        <svg viewBox="0 0 24 24" className={common} fill="currentColor" aria-hidden>
-          <path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.35-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z" />
-        </svg>
-      );
-      break;
-    case "slack":
-      glyph = (
-        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-          <path d="M4 4h16v12H5.2L4 17.2z" strokeLinejoin="round" />
-        </svg>
-      );
-      break;
-    case "notion":
-    case "confluence":
-    case "drive":
-    case "gdrive":
-      glyph = (
-        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-          <rect x="4" y="3" width="16" height="18" rx="2" />
-          <path d="M8 8h8M8 12h8M8 16h5" strokeLinecap="round" />
-        </svg>
-      );
-      break;
-    case "web":
-    case "public_links":
-    case "links":
-      glyph = (
-        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-          <circle cx="12" cy="12" r="9" />
-          <path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 4 9-.1 3.3-1.5 6.4-4 9-2.5-2.6-3.9-5.7-4-9 .1-3.3 1.5-6.4 4-9Z" />
-        </svg>
-      );
-      break;
-    default:
-      glyph = (
-        <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-          <path d="M14 3v5h5" strokeLinejoin="round" />
-          <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinejoin="round" />
-        </svg>
-      );
-  }
-  return (
-    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-md)] border border-border bg-elevated text-muted">
-      {glyph}
-    </span>
-  );
+  return <ConnectorLogo connector={connector} size={32} />;
 }
 
 // A small shield-check glyph used by the access-path badge.

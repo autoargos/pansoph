@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { chat, type Identity } from "../api.ts";
+import { ConnectorLogo } from "../components/ConnectorLogo.tsx";
 import { Avatar, Badge, Button, Card, StatusDot, Tooltip } from "../ui.tsx";
 
 // ============================================================
@@ -51,89 +52,21 @@ type ConnectorKey =
 
 interface ConnectorMeta {
   label: string;
-  icon: ReactNode;
+  // The name handed to ConnectorLogo, which resolves it to a bundled brand
+  // logo when one exists, or a neutral tile otherwise.
+  logo: string;
 }
 
 const CONNECTORS: Record<ConnectorKey, ConnectorMeta> = {
-  github: {
-    label: "GitHub",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
-        <path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.35-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z" />
-      </svg>
-    ),
-  },
-  notion: {
-    label: "Notion",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-        <rect x="4" y="3" width="16" height="18" rx="2" />
-        <path d="M8 8v8M8 8l8 8M16 8v8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  confluence: {
-    label: "Confluence",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-        <rect x="4" y="3" width="16" height="18" rx="2" />
-        <path d="M8 8h8M8 12h8M8 16h5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  slack: {
-    label: "Slack",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-        <path d="M4 4h16v12H5.2L4 17.2z" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  drive: {
-    label: "Drive",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-        <path d="M8 3h8l5 9-5 9H8l-5-9z" strokeLinejoin="round" />
-        <path d="M8 3 3 12M16 3l5 9M3 12h18" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  gmail: {
-    label: "Gmail",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-        <rect x="3" y="5" width="18" height="14" rx="2" />
-        <path d="m3 7 9 6 9-6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  jira: {
-    label: "Jira",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-        <path d="M12 2 22 12 12 22 2 12z" strokeLinejoin="round" />
-        <path d="M12 8v8M8 12h8" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  web: {
-    label: "Web",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-3.5 w-3.5">
-        <circle cx="12" cy="12" r="9" />
-        <path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 4 9-.1 3.3-1.5 6.4-4 9-2.5-2.6-3.9-5.7-4-9 .1-3.3 1.5-6.4 4-9Z" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  doc: {
-    label: "Document",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-        <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" strokeLinejoin="round" />
-        <path d="M14 3v6h6M8 13h8M8 17h5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
+  github: { label: "GitHub", logo: "github" },
+  notion: { label: "Notion", logo: "notion" },
+  confluence: { label: "Confluence", logo: "confluence" },
+  slack: { label: "Slack", logo: "slack" },
+  drive: { label: "Drive", logo: "google_drive" },
+  gmail: { label: "Gmail", logo: "gmail" },
+  jira: { label: "Jira", logo: "jira" },
+  web: { label: "Web", logo: "weblink" },
+  doc: { label: "Document", logo: "document" },
 };
 
 // Read the connector cue out of a doc_id. The ingestion side stamps most
@@ -262,7 +195,7 @@ function SourceChip({
       <span className="grid h-4 min-w-[18px] place-items-center rounded-[4px] bg-accent-soft px-1 font-mono text-[10px] font-bold tabular-nums text-accent">
         {source.id}
       </span>
-      <span className="text-muted transition group-hover:text-text">{conn.icon}</span>
+      <ConnectorLogo connector={conn.logo} size={18} />
       <span className="truncate">{titleFor(source.docId)}</span>
       {restricted ? (
         <Tooltip label="Access-restricted source. You can see it; not everyone can.">
