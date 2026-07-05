@@ -47,8 +47,9 @@ async def test_ingest_writes_hits_and_tuples_with_correct_metadata() -> None:
     assert hit.chunk_id.startswith("memory:mem:doc#")
     assert hit.tenant_id == "t1"
     assert hit.allow_groups == ["g1"]
-    # The group reader tuple was written for this document.
-    assert ("group", "g1", "memory:mem:doc") in authz.tuples
+    # The group reader tuple was written for this document, tenant-namespaced (the fake
+    # renders principal ids as {ns}_{id} exactly like the real engine).
+    assert ("group", "t1_g1", "memory:mem:doc") in authz.readers
 
 
 async def test_contextualize_prepends_generated_context_to_embedding_input() -> None:

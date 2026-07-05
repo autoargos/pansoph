@@ -296,10 +296,16 @@ async def run_instance(manager: ConnectorManager, instance: dict[str, Any]) -> d
     )
     count = 0
     next_cursor = instance.get("cursor")
+    scope_type = instance.get("scope_type") or "org"
+    scope_ref = instance.get("scope_ref") or ""
     try:
         async for ref, cur in pipeline.connector.list_changes(instance.get("cursor")):
             await pipeline.ingest_one(
-                connector_name=instance["connector"], tenant_id=instance["tenant_id"], ref=ref
+                connector_name=instance["connector"],
+                tenant_id=instance["tenant_id"],
+                ref=ref,
+                scope_type=scope_type,
+                scope_ref=scope_ref,
             )
             count += 1
             next_cursor = cur

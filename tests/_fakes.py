@@ -43,22 +43,40 @@ class FakeVectorStore:
         return out[:limit]
 
 
+def _rid(principal: Principal) -> str:
+    """Render a principal id exactly like the real SpiceDB/OpenFGA adapters: namespaced
+    as `{ns}_{id}`, wildcard passthrough. So a namespace mismatch between a written tuple
+    and a query subject is caught by the fake, not silently accepted."""
+    if principal.id == "*":
+        return "*"
+    return f"{principal.ns}_{principal.id}" if principal.ns else principal.id
+
+
 class FakeAuthz(AuthzPort):
-    """Resolves reader tuples like a real engine: wildcard, direct user, or a group
-    the subject belongs to (membership supplied at construction)."""
+    """Resolves reader tuples like a real engine, honoring the principal namespace:
+    wildcard, a direct user reader, or a group the subject is a member of. Membership is
+    resolved from written member tuples (like the real engine), with an optional legacy
+    seed for tests that set it directly. Ids are namespaced exactly like the adapters."""
 
     def __init__(self, user_groups: dict[str, set[str]] | None = None) -> None:
-        self._user_groups = user_groups or {}
-        self.tuples: set[tuple[str, str, str]] = set()
+        self._seed_groups = user_groups or {}
+        self.readers: set[tuple[str, str, str]] = set()  # (subject_type, rendered_id, object_id)
+        self.members: set[tuple[str, str]] = set()  # (rendered_user_id, rendered_group_object_id)
 
     async def write_tuples(self, tuples: list[Tuple]) -> ConsistencyToken:
         for t in tuples:
-            self.tuples.add((t.subject.type, t.subject.id, t.object_id))
+            if t.relation == "member":
+                self.members.add((_rid(t.subject), t.object_id))
+            else:
+                self.readers.add((t.subject.type, _rid(t.subject), t.object_id))
         return ConsistencyToken("z")
 
     async def delete_tuples(self, tuples: list[Tuple]) -> ConsistencyToken:
         for t in tuples:
-            self.tuples.discard((t.subject.type, t.subject.id, t.object_id))
+            if t.relation == "member":
+                self.members.discard((_rid(t.subject), t.object_id))
+            else:
+                self.readers.discard((t.subject.type, _rid(t.subject), t.object_id))
         return ConsistencyToken("z")
 
     async def bulk_check(
@@ -68,14 +86,19 @@ class FakeAuthz(AuthzPort):
         object_ids: list[str],
         at_least_as_fresh: ConsistencyToken | None = None,
     ) -> set[str]:
-        # Every user is a member of its tenant everyone group, so public docs (granted
-        # to that group) resolve. The fake is tenant-blind, matching the real engine's
-        # group resolution for the suite's single-tenant scenarios.
-        groups = self._user_groups.get(subject.id, set()) | {TENANT_EVERYONE}
+        sid = _rid(subject)
+        # Groups the subject is a member of, from written member tuples plus any legacy
+        # seed membership, plus the tenant everyone group. Seed and everyone are rendered
+        # in the subject's namespace so they match the tenant-scoped group reader tuples.
+        ns = f"{subject.ns}_" if subject.ns else ""
+        member_groups = {g for (u, g) in self.members if u == sid}
+        member_groups.add(f"{ns}{TENANT_EVERYONE}")
+        for g in self._seed_groups.get(subject.id, set()):
+            member_groups.add(f"{ns}{g}")
         allowed: set[str] = set()
         for oid in object_ids:
-            if ("user", "*", oid) in self.tuples or ("user", subject.id, oid) in self.tuples:
+            if ("user", "*", oid) in self.readers or ("user", sid, oid) in self.readers:
                 allowed.add(oid)
-            elif any(("group", g, oid) in self.tuples for g in groups):
+            elif any(("group", g, oid) in self.readers for g in member_groups):
                 allowed.add(oid)
         return allowed

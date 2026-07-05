@@ -31,14 +31,15 @@ def test_explicit_principal_ns_overrides_instance() -> None:
 
 
 def test_two_level_namespace_groups_tenant_users_instance() -> None:
-    # With a tenant_id, groups (and the tenant everyone group that public maps to) are
-    # tenant-scoped, so identity groups resolve across instances and a public doc never
-    # crosses tenants, while direct users stay instance-scoped (so two instances never
-    # collide). This is the ADR isolation guarantee.
+    # With a tenant_id, groups, direct users, and the tenant everyone group that public
+    # maps to are ALL tenant-scoped, so a person is one principal per tenant and resolves
+    # against every instance's grants in that tenant, while a public doc never crosses
+    # tenants. This is what makes a direct-user grant reachable by the tenant-namespaced
+    # query subject (the load-bearing enforcement fix).
     acl = AccessControl(allow_groups=["eng"], allow_users=["alice"], public=True)
     keys = _keys(tuples_for_acl("doc1", "inst", acl, tenant_id="acme"))
     assert ("group", "eng", "acme", "doc1") in keys
-    assert ("user", "alice", "inst", "doc1") in keys
+    assert ("user", "alice", "acme", "doc1") in keys
     assert ("group", TENANT_EVERYONE, "acme", "doc1") in keys
 
 

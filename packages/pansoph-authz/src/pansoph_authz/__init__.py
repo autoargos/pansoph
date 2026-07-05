@@ -6,6 +6,7 @@ from .mappers import (
     TENANT_EVERYONE,
     diff_acls,
     membership_tuples,
+    narrow,
     tuples_for_acl,
     tuples_for_document,
 )
@@ -21,5 +22,6 @@ __all__ = [
     "tuples_for_document",
     "tuples_for_acl",
     "membership_tuples",
+    "narrow",
     "diff_acls",
 ]

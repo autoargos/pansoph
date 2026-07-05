@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 
-from pansoph_authz import AuthzPort, ConsistencyToken, tuples_for_acl
+from pansoph_authz import AuthzPort, ConsistencyToken, narrow, tuples_for_acl
 from pansoph_connector_sdk import Connector
 from pansoph_retrieval.ports import Embedder, SearchHit, VectorStore
 from pansoph_types import DocRef, Document
@@ -55,19 +55,42 @@ class IngestionPipeline:
         """The connector this pipeline syncs. Used by the durable workflow wrapper."""
         return self._connector
 
-    async def sync(self, *, connector_name: str, tenant_id: str, cursor: str | None = None) -> str:
+    async def sync(
+        self,
+        *,
+        connector_name: str,
+        tenant_id: str,
+        cursor: str | None = None,
+        scope_type: str = "org",
+        scope_ref: str = "",
+    ) -> str:
         """Sync everything changed since `cursor`. Returns the next cursor."""
         next_cursor = cursor or ""
         async for ref, cur in self._connector.list_changes(cursor):
-            await self.ingest_one(connector_name=connector_name, tenant_id=tenant_id, ref=ref)
+            await self.ingest_one(
+                connector_name=connector_name,
+                tenant_id=tenant_id,
+                ref=ref,
+                scope_type=scope_type,
+                scope_ref=scope_ref,
+            )
             next_cursor = cur
         return next_cursor
 
     async def ingest_one(
-        self, *, connector_name: str, tenant_id: str, ref: DocRef
+        self,
+        *,
+        connector_name: str,
+        tenant_id: str,
+        ref: DocRef,
+        scope_type: str = "org",
+        scope_ref: str = "",
     ) -> ConsistencyToken:
         """Ingest a single document. A separately retryable, idempotent unit."""
         raw, acl = await self._connector.fetch(ref)
+        # An instance scope narrows the source ACL (never widens it), so a scoped
+        # instance genuinely guards its documents even when the source is more open.
+        acl = narrow(acl, scope_type, scope_ref)
         parsed = await self._parser.parse(raw)
         chunks = chunk_sections(list(parsed.sections))
         if not chunks:

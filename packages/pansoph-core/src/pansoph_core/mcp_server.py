@@ -32,7 +32,7 @@ def build_mcp() -> Any:
         """Search the operator's permitted knowledge. Returns cited chunks the user may read."""
         hits = await retrieve(
             query=query,
-            subject=Principal(type="user", id=user),
+            subject=Principal(type="user", id=user, ns=tenant_id),
             tenant_id=tenant_id,
             subject_groups=groups or [],
             final_k=8,

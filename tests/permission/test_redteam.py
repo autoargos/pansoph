@@ -57,7 +57,10 @@ async def _ids(
 ) -> set[str]:
     hits = await retrieve(
         query="anything",
-        subject=Principal(type="user", id=user),
+        # A person is one principal per tenant, so the query subject is namespaced by
+        # tenant, exactly as the real retrieval routes build it and as the reader and
+        # membership tuples are written.
+        subject=Principal(type="user", id=user, ns=tenant),
         tenant_id=tenant,
         subject_groups=groups,
         final_k=10,
@@ -111,7 +114,9 @@ async def test_revocation_is_reflected() -> None:
     await authz.delete_tuples(
         [
             Tuple(
-                subject=Principal(type="group", id="g1", ns="mem"),
+                # Group reader tuples are tenant scoped, so the revocation deletes the
+                # tuple as it was actually written (ns = tenant), not an instance ns.
+                subject=Principal(type="group", id="g1", ns="t1"),
                 relation="reader",
                 object_type="document",
                 object_id="memory:mem:eng",
@@ -121,3 +126,55 @@ async def test_revocation_is_reflected() -> None:
     after = await _ids(store, authz, "alice", ["g1"], "t1")
     assert "memory:mem:eng" not in after, "revoked document must disappear from results"
     assert "memory:mem:pub" in after, "unrelated access is unaffected"
+
+
+@pytest.mark.permission
+async def test_direct_user_grant_resolves() -> None:
+    # Regression: a document shared with a specific user was silently retrievable by
+    # nobody, because the reader tuple and the query subject used different namespaces.
+    # A direct-user grant must reach its grantee and no one else.
+    store, authz = FakeVectorStore(), FakeAuthz()
+    c = InMemoryConnector(instance_id="mem")
+    c.put("shared", "for alice only", AccessControl(allow_users=["alice"]))
+    await _pipeline(c, store, authz).sync(connector_name="memory", tenant_id="t1")
+
+    alice = await _ids(store, authz, "alice", [], "t1")
+    bob = await _ids(store, authz, "bob", [], "t1")
+    assert "memory:mem:shared" in alice, "the direct-user grantee must retrieve the doc"
+    assert "memory:mem:shared" not in bob, "no one else may retrieve a direct-user doc"
+
+
+@pytest.mark.permission
+async def test_scope_narrows_public_source_to_individual() -> None:
+    # The Liber case: an instance scoped to an individual guards a public source. Only the
+    # scoped user retrieves its documents, even though the source ACL is public.
+    store, authz = FakeVectorStore(), FakeAuthz()
+    c = InMemoryConnector(instance_id="mem")
+    c.put("readme", "public in the source", AccessControl(public=True))
+    await _pipeline(c, store, authz).sync(
+        connector_name="memory", tenant_id="t1", scope_type="individual", scope_ref="alice"
+    )
+
+    alice = await _ids(store, authz, "alice", [], "t1")
+    bob = await _ids(store, authz, "bob", [], "t1")
+    assert "memory:mem:readme" in alice, "the scoped user retrieves the guarded doc"
+    assert "memory:mem:readme" not in bob, "a public source scoped to alice denies bob"
+
+
+@pytest.mark.permission
+async def test_scope_never_widens() -> None:
+    # Scope only narrows. A doc shared with alice, scoped to a group that was not in the
+    # source ACL, is reachable by no one (safe closure), never widened to that group.
+    store, authz = FakeVectorStore(), FakeAuthz()
+    c = InMemoryConnector(instance_id="mem")
+    c.put("doc", "shared with alice", AccessControl(allow_users=["alice"]))
+    await _pipeline(c, store, authz).sync(
+        connector_name="memory", tenant_id="t1", scope_type="group", scope_ref="eng"
+    )
+
+    alice = await _ids(store, authz, "alice", [], "t1")
+    eng_member = await _ids(store, authz, "carol", ["eng"], "t1")
+    assert "memory:mem:doc" not in alice, "group scope removes alice's unrelated direct grant"
+    assert "memory:mem:doc" not in eng_member, (
+        "scope never widens to a group absent from the source ACL"
+    )

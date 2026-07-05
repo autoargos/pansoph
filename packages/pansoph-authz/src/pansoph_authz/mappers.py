@@ -44,8 +44,7 @@ def tuples_for_acl(
     exclusion operators wreck bulk check latency; denies are applied as a final
     filter in the enforcement path.
     """
-    user_ns = acl.principal_ns or instance_id
-    group_ns = tenant_id if tenant_id is not None else user_ns
+    group_ns = tenant_id if tenant_id is not None else (acl.principal_ns or instance_id)
     out: list[Tuple] = []
     if acl.public:
         # Grant to the tenant's everyone group (tenant-scoped via group_ns), not a
@@ -56,8 +55,50 @@ def tuples_for_acl(
     for group in acl.allow_groups:
         out.append(_reader(Principal(type="group", id=group, ns=group_ns), object_id))
     for user in acl.allow_users:
-        out.append(_reader(Principal(type="user", id=user, ns=user_ns), object_id))
+        # Users are namespaced by tenant, exactly like groups and the query subject. A
+        # person is one principal per tenant (not per instance), so a direct-user grant
+        # resolves against the same `user:{tenant}_id` the retrieval path checks.
+        out.append(_reader(Principal(type="user", id=user, ns=group_ns), object_id))
     return out
+
+
+def narrow(acl: AccessControl, scope_type: str, scope_ref: str) -> AccessControl:
+    """Intersect a source ACL with an instance's management scope. Scope can only ever
+    NARROW the audience, never widen it, so a guarded knowledge base (ADR-0001) holds
+    even when the source is more permissive than the operator intends.
+
+    - org (or no scope_ref): the source ACL governs unchanged.
+    - individual: effective audience = source ACL intersected with {scope_ref}. The user
+      is reachable when the source doc is public or already grants them directly. Group
+      membership is not known at ingest time, so a doc shared only to a group the user
+      belongs to is treated as not reachable: the safe closure is to deny, since scope
+      may only narrow. Reachable -> readable by scope_ref alone; not reachable -> nobody.
+    - group: effective audience = source ACL intersected with the group. Reachable when
+      the source doc is public or already grants that group.
+
+    `deny` is always preserved; scope never relaxes a deny.
+    """
+    if scope_type == "org" or not scope_ref:
+        return acl
+    if scope_type == "individual":
+        reachable = acl.public or scope_ref in acl.allow_users
+        return AccessControl(
+            public=False,
+            allow_groups=[],
+            allow_users=[scope_ref] if reachable else [],
+            deny=list(acl.deny),
+            principal_ns=acl.principal_ns,
+        )
+    if scope_type == "group":
+        reachable = acl.public or scope_ref in acl.allow_groups
+        return AccessControl(
+            public=False,
+            allow_users=[],
+            allow_groups=[scope_ref] if reachable else [],
+            deny=list(acl.deny),
+            principal_ns=acl.principal_ns,
+        )
+    return acl
 
 
 def tuples_for_document(doc: Document) -> list[Tuple]:
@@ -73,7 +114,9 @@ def membership_tuples(user_id: str, groups: list[str], ns: str) -> list[Tuple]:
     """
     return [
         Tuple(
-            subject=Principal(type="user", id=user_id),
+            # The member subject is namespaced by tenant too, so it matches both the
+            # tenant-scoped user reader tuples and the query subject (all `user:{ns}_id`).
+            subject=Principal(type="user", id=user_id, ns=ns),
             relation="member",
             object_type="group",
             object_id=f"{ns}_{group}",

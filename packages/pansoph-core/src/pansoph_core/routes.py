@@ -141,7 +141,7 @@ async def _retrieve(
     await authz.write_tuples(membership_tuples(user, [TENANT_EVERYONE, *groups], tenant_id))
     return await retrieve(
         query=query,
-        subject=Principal(type="user", id=user),
+        subject=Principal(type="user", id=user, ns=tenant_id),
         tenant_id=tenant_id,
         subject_groups=groups,
         final_k=final_k,
