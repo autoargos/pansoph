@@ -493,7 +493,7 @@ export default function Chat({ identity }: { identity: Identity }) {
 
       {/* ---- Composer ---- */}
       <form onSubmit={onSubmit} className="sticky bottom-0 pt-3">
-        <div className="flex items-end gap-2.5 rounded-[12px] border border-border bg-bg p-2 pl-3.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-soft)]">
+        <div className="flex items-end gap-2.5 rounded-[12px] border border-border bg-bg p-2 pl-3.5 transition focus-within:border-accent-line">
           <textarea
             ref={composerRef}
             value={q}

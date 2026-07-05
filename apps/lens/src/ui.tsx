@@ -113,7 +113,7 @@ export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInpu
     <input
       {...props}
       className={cx(
-        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 text-sm text-text outline-none transition placeholder:text-muted focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)]",
+        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 text-sm text-text outline-none transition placeholder:text-muted focus:border-accent-line",
         className,
       )}
     />
@@ -132,7 +132,7 @@ export function Textarea({
     <textarea
       {...props}
       className={cx(
-        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 text-sm text-text outline-none transition placeholder:text-muted focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)]",
+        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 text-sm text-text outline-none transition placeholder:text-muted focus:border-accent-line",
         className,
       )}
     />
@@ -154,7 +154,7 @@ export function Select({
       <select
         {...props}
         className={cx(
-          "w-full appearance-none rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 pr-9 text-sm text-text outline-none transition focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)] disabled:opacity-60",
+          "w-full appearance-none rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 pr-9 text-sm text-text outline-none transition focus:border-accent-line disabled:opacity-60",
           className,
         )}
       >

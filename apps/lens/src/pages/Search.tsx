@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type Identity, search, type SearchResult } from "../api.ts";
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner, Tooltip } from "../ui.tsx";
@@ -25,6 +25,7 @@ interface Enriched {
   path: string; // remainder of the doc id after the connector
   snippet: ReactNode; // text with query matches wrapped in <mark>
   accessGroup: string; // which group / grant makes this visible
+  relevance: number; // 0..1, this result's score relative to the top result
   scoreClass: "high" | "mid" | "low";
 }
 
@@ -35,6 +36,16 @@ interface Enriched {
 function splitDocId(docId: string): { connector: string; path: string } {
   const id = docId.trim();
   if (!id) return { connector: "unknown", path: "" };
+  // The ingestion side stamps ids as connector:instance:source_doc_id. The source doc id
+  // may itself contain colons (a URL like https://...), so take everything after the
+  // second colon as the path and drop the noisy instance id. This yields clean titles
+  // ("Package Lock", "Wiki") instead of the whole instance-qualified id.
+  const colon = id.split(":");
+  if (colon.length >= 3) {
+    const connector = colon[0].trim().toLowerCase() || "unknown";
+    const path = colon.slice(2).join(":").trim();
+    return { connector, path: path || id };
+  }
   const sep = id.includes("::") ? "::" : id.includes(":") ? ":" : id.includes("/") ? "/" : null;
   if (!sep) return { connector: "unknown", path: id };
   const idx = id.indexOf(sep);
@@ -125,10 +136,13 @@ function scoreBucket(score: number): Enriched["scoreClass"] {
   return "low";
 }
 
-const SCORE_STYLE: Record<Enriched["scoreClass"], string> = {
-  high: "text-cyan bg-cyan-soft border-[rgba(34,211,238,0.3)]",
-  mid: "text-accent bg-accent-soft border-accent-line",
-  low: "text-muted bg-surface border-border",
+// Relevance bar fill per bucket. The raw retrieval score is not a 0..1 value and means
+// little to a person, so results show a bar relative to the top hit and keep the raw
+// number in a tooltip.
+const BAR_FILL: Record<Enriched["scoreClass"], string> = {
+  high: "bg-cyan",
+  mid: "bg-accent",
+  low: "bg-muted",
 };
 
 // Small connector glyph. A handful of first-party sources get a mark;
@@ -212,36 +226,62 @@ export default function Search({ identity }: { identity: Identity }) {
   const [groupFilter, setGroupFilter] = useState<string>(ALL);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function run(e?: FormEvent) {
+  // Live search: runs on a debounce as the query changes, and immediately on submit /
+  // Enter. A sequence guard makes sure a slow older response never overwrites a newer one.
+  const seq = useRef(0);
+  const runSearch = useCallback(
+    async (raw: string) => {
+      const query = raw.trim();
+      if (query.length < 2) {
+        setRan(false);
+        setResults([]);
+        setError(null);
+        setElapsed(null);
+        return;
+      }
+      const mine = ++seq.current;
+      setBusy(true);
+      setError(null);
+      const t0 = performance.now();
+      try {
+        const res = await search(query, identity);
+        if (mine !== seq.current) return;
+        setResults(res);
+        setRanQuery(query);
+        setRan(true);
+        setConnectorFilter(ALL);
+        setGroupFilter(ALL);
+        setElapsed(performance.now() - t0);
+      } catch (err) {
+        if (mine !== seq.current) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setResults([]);
+        setRan(true);
+        setElapsed(null);
+      } finally {
+        if (mine === seq.current) setBusy(false);
+      }
+    },
+    [identity],
+  );
+
+  useEffect(() => {
+    const t = setTimeout(() => void runSearch(q), 240);
+    return () => clearTimeout(t);
+  }, [q, runSearch]);
+
+  function run(e?: FormEvent) {
     e?.preventDefault();
-    const query = q.trim();
-    if (!query || busy) return;
-    setBusy(true);
-    setError(null);
-    const t0 = performance.now();
-    try {
-      const res = await search(query, identity);
-      setResults(res);
-      setRanQuery(query);
-      setRan(true);
-      setConnectorFilter(ALL);
-      setGroupFilter(ALL);
-      setElapsed(performance.now() - t0);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setResults([]);
-      setRan(true);
-      setElapsed(null);
-    } finally {
-      setBusy(false);
-    }
+    void runSearch(q);
   }
 
   // Enrich every result once, keyed on the query that produced them.
   const enriched = useMemo<Enriched[]>(() => {
     const terms = queryTerms(ranQuery);
+    const maxScore = results.reduce((m, r) => Math.max(m, r.score), 0) || 1;
     return results.map((raw, i) => {
       const { connector, path } = splitDocId(raw.doc_id);
+      const relevance = Math.max(0.08, Math.min(1, raw.score / maxScore));
       return {
         raw,
         rank: i + 1,
@@ -250,7 +290,8 @@ export default function Search({ identity }: { identity: Identity }) {
         path,
         snippet: makeSnippet(raw.text, terms),
         accessGroup: accessPathFor(raw.doc_id, identity),
-        scoreClass: scoreBucket(raw.score),
+        relevance,
+        scoreClass: scoreBucket(relevance),
       };
     });
   }, [results, ranQuery, identity]);
@@ -291,7 +332,7 @@ export default function Search({ identity }: { identity: Identity }) {
 
       {/* ---- Query bar (mono) ---- */}
       <form onSubmit={run} className="group/q">
-        <div className="flex items-center gap-2.5 rounded-[var(--radius-lg)] border border-border bg-bg px-3.5 py-2.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-soft)]">
+        <div className="flex items-center gap-2.5 rounded-[var(--radius-lg)] border border-border bg-bg px-3.5 py-2.5 transition focus-within:border-accent-line">
           {busy ? (
             <Spinner className="h-[18px] w-[18px]" />
           ) : (
@@ -446,7 +487,7 @@ export default function Search({ identity }: { identity: Identity }) {
           />
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted">Try</span>
-            {["vendor security review", "on-call rotation policy", "Q3 roadmap"].map((s) => (
+            {["wiki", "documentation", "readme"].map((s) => (
               <button
                 key={s}
                 type="button"
@@ -600,11 +641,14 @@ function ResultCard({ e }: { e: Enriched }) {
             <h3 className="truncate text-[14px] font-semibold leading-snug text-text transition group-hover/r:text-accent">
               {e.title}
             </h3>
-            <Tooltip label="relevance score">
-              <span
-                className={`shrink-0 rounded-[6px] border px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums ${SCORE_STYLE[e.scoreClass]}`}
-              >
-                {e.raw.score.toFixed(2)}
+            <Tooltip label={`relevance ${Math.round(e.relevance * 100)}% (raw score ${e.raw.score.toFixed(2)})`}>
+              <span className="mt-1 flex shrink-0 items-center gap-2">
+                <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border">
+                  <span
+                    className={`block h-full rounded-full ${BAR_FILL[e.scoreClass]}`}
+                    style={{ width: `${Math.round(e.relevance * 100)}%` }}
+                  />
+                </span>
               </span>
             </Tooltip>
           </div>

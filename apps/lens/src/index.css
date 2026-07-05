@@ -180,15 +180,24 @@ pre,
 /* ------------------------------------------------------------
    Focus-visible rings for keyboard users
    ------------------------------------------------------------ */
+/* Keyboard focus for actionable controls only. Inputs, textareas, and selects get a
+   clean border-color focus from their own component classes instead, so there is never a
+   hard outline or a glowing ring stacked on a text field. */
 a:focus-visible,
 button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--ob-accent);
+  outline: 2px solid var(--ob-accent-line);
   outline-offset: 2px;
   border-radius: 6px;
+}
+/* Never show the browser's default focus ring on text fields. */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible {
+  outline: none;
 }
 
 /* ------------------------------------------------------------

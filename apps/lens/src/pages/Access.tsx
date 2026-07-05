@@ -21,6 +21,7 @@ import {
   StatusDot,
   Tooltip,
 } from "../ui.tsx";
+import { accountUrl } from "../auth.ts";
 
 // ============================================================
 // Access . the profile + access page
@@ -211,6 +212,28 @@ function IdentityCard({ identity }: { identity: Identity }) {
             </Tooltip>
           </div>
         </div>
+
+        {/* Manage account: send the user to their identity provider's self-service
+            console (Keycloak account page for the demo IdP) to change profile, password,
+            or sessions. Opens in a new tab so the lens session is untouched. */}
+        <a
+          href={accountUrl()}
+          target="_blank"
+          rel="noreferrer"
+          className="relative inline-flex shrink-0 items-center gap-2 self-start rounded-[var(--radius-md)] border border-border bg-surface px-3.5 py-2 text-[13px] font-medium text-text transition hover:border-accent-line hover:text-accent"
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Manage account
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 opacity-60" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+            <path d="M7 17 17 7M8 7h9v9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
       </div>
 
       {/* identity facts strip */}

@@ -5,14 +5,23 @@ import { setAuthToken } from "./api.ts";
 
 // OIDC against the hosted Keycloak. The IdP is swappable; this only knows the issuer
 // and client id, both pointing at the demo realm.
+const OIDC_AUTHORITY = "http://localhost:8090/realms/pansoph";
+
 const manager = new UserManager({
-  authority: "http://localhost:8090/realms/pansoph",
+  authority: OIDC_AUTHORITY,
   client_id: "lens",
   redirect_uri: `${window.location.origin}/`,
   post_logout_redirect_uri: `${window.location.origin}/`,
   response_type: "code",
   scope: "openid profile email",
 });
+
+// The identity provider's self-service account console for the signed-in user (manage
+// profile, password, sessions). Keycloak serves it at {issuer}/account; swapping the IdP
+// means overriding this. This is where "Manage account" in the profile sends the user.
+export function accountUrl(): string {
+  return `${OIDC_AUTHORITY}/account`;
+}
 
 async function bootstrap(): Promise<User | null> {
   if (window.location.search.includes("code=")) {
