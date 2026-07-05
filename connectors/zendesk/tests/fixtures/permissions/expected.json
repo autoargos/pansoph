@@ -1,3 +1,5 @@
 {
-  "2": {"public": false, "allow_groups": ["staff", "group:7"], "allow_users": [], "deny": []}
+  "2": {"public": false, "allow_groups": ["group:7"], "allow_users": [], "deny": []},
+  "3": {"public": false, "allow_groups": ["tag:vip"], "allow_users": ["user:999"], "deny": []},
+  "4": {"public": false, "allow_groups": ["unsatisfiable:tags_and"], "allow_users": [], "deny": []}
 }

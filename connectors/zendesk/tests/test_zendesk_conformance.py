@@ -1,9 +1,10 @@
 """Hermetic conformance for the zendesk connector, driven by respx mocks.
 
 No live credentials: every Zendesk Help Center call the connector makes is mocked
-with a representative payload. The permission category asserts a restricted article's
-ACL maps to the user segment's reach (a staff user_type plus its group ids), with no
-deny entries, exactly as the source models it.
+with a representative payload. The suite exercises the full contract via
+`assert_conforms`, the deletions contract via reconciliation, the draft-skip policy,
+and the user-segment ACL mapping (staff, group, org, or_tags, tags conjunction fail
+closed, and added_user_ids), exactly as the source models each one.
 """
 
 from __future__ import annotations
@@ -13,8 +14,10 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
+from pansoph_connector_sdk import assert_conforms
 from pansoph_connector_sdk.verify.categories.contract import check_discovery, check_spec
 from pansoph_connector_sdk.verify.categories.permissions import check_permissions
+from pansoph_connector_sdk.verify.categories.sync import check_deletions
 from pansoph_connector_zendesk.connector import ZendeskConnector
 from pansoph_types import DocRef
 
@@ -52,10 +55,63 @@ async def test_zendesk_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
 
 @pytest.mark.conformance
 @respx.mock(assert_all_called=False)
+async def test_zendesk_list_changes_yields_non_empty_cursor(respx_mock: respx.MockRouter) -> None:
+    # The resume cursor must be non-empty so the conformance contract holds and the
+    # runtime can persist and replay it for deletion reconciliation.
+    respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "articles": [{"id": 1, "title": "A", "body": "x", "user_segment_id": None}],
+                "meta": {"has_more": False},
+                "links": {"next": None},
+            },
+        )
+    )
+    conn = _factory()
+    cursors = [cursor async for _ref, cursor in conn.list_changes(None)]
+    assert cursors and all(cursors), "every yielded cursor must be non-empty"
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_zendesk_conforms(respx_mock: respx.MockRouter) -> None:
+    # assert_conforms seeds via list_changes, then fetch and list_acls on the first
+    # ref. Article 1 is public; the listing has no drafts and closes in one page.
+    respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "articles": [{"id": 1, "title": "A", "body": "x", "user_segment_id": None}],
+                "meta": {"has_more": False},
+                "links": {"next": None},
+            },
+        )
+    )
+    respx_mock.get(path="/api/v2/help_center/articles/1.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "article": {
+                    "id": 1,
+                    "title": "A",
+                    "body": "x",
+                    "user_segment_id": None,
+                    "html_url": "h",
+                    "draft": False,
+                }
+            },
+        )
+    )
+    conn = _factory()
+    await assert_conforms(conn)
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
 async def test_zendesk_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
-    # Two pages: the first carries has_more true and a links.next on the same
-    # path, the second closes it out. side_effect serves them in order, and the
-    # path= lookup matches both calls since links.next resolves to the same path.
+    # Two pages: the first carries has_more true and a links.next on the same path,
+    # the second closes it out. side_effect serves them in order.
     respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
         side_effect=[
             httpx.Response(
@@ -84,9 +140,128 @@ async def test_zendesk_paginates_all_pages(respx_mock: respx.MockRouter) -> None
 
 
 @pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_zendesk_skips_draft_articles_in_listing(respx_mock: respx.MockRouter) -> None:
+    # A draft (unpublished) article must never be listed for indexing: with Basic auth
+    # the agent credential sees drafts, but end users must not retrieve them.
+    respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "articles": [
+                    {"id": 1, "title": "pub", "body": "x", "user_segment_id": None, "draft": False},
+                    {"id": 2, "title": "wip", "body": "y", "user_segment_id": None, "draft": True},
+                ],
+                "meta": {"has_more": False},
+                "links": {"next": None},
+            },
+        )
+    )
+    conn = _factory()
+    ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert ids == ["1"], "draft article 2 must be skipped in the listing"
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_zendesk_draft_fetch_fails_closed(respx_mock: respx.MockRouter) -> None:
+    # Defense in depth: if a draft reaches fetch (a race), it must not surface content
+    # and its ACL must be fail-closed so no end user can retrieve it.
+    respx_mock.get(path="/api/v2/help_center/articles/9.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "article": {
+                    "id": 9,
+                    "title": "wip",
+                    "body": "secret draft",
+                    "user_segment_id": None,
+                    "html_url": "h",
+                    "draft": True,
+                }
+            },
+        )
+    )
+    conn = _factory()
+    raw, acl = await conn.fetch(DocRef(source_doc_id="9", instance_id="acme"))
+    assert raw.text is None, "a draft must not surface its body"
+    assert acl.public is False
+    assert acl.allow_groups == ["unsatisfiable:tags_and"], "draft ACL must fail closed"
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_zendesk_deletions_reconcile(respx_mock: respx.MockRouter) -> None:
+    # Run one: articles 1 and 2 are published. Record the resume cursor.
+    respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "articles": [
+                    {"id": 1, "title": "A", "body": "x", "user_segment_id": None, "draft": False},
+                    {"id": 2, "title": "B", "body": "y", "user_segment_id": None, "draft": False},
+                ],
+                "meta": {"has_more": False},
+                "links": {"next": None},
+            },
+        )
+    )
+    conn = _factory()
+    first_cursor: str | None = None
+    async for _ref, cursor in conn.list_changes(None):
+        first_cursor = cursor
+    assert first_cursor
+
+    # Run two: article 2 is gone. Reconciliation must tombstone it and only it.
+    respx_mock.reset()
+    respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "articles": [
+                    {"id": 1, "title": "A", "body": "x", "user_segment_id": None, "draft": False},
+                ],
+                "meta": {"has_more": False},
+                "links": {"next": None},
+            },
+        )
+    )
+    conn2 = _factory()
+    seen: dict[str, bool] = {}
+    async for ref, _cursor in conn2.list_changes(first_cursor):
+        seen[ref.source_doc_id] = ref.deleted
+    assert seen == {"1": False, "2": True}, "article 2 must reconcile as a deletion tombstone"
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_zendesk_check_deletions_contract(respx_mock: respx.MockRouter) -> None:
+    # The shared deletions category: listing from a cursor recorded before a removal
+    # must surface at least one deleted DocRef. The deleted_state encodes ids {1, 2};
+    # the current listing has only {1}, so id 2 reconciles as a tombstone.
+    respx_mock.get(path="/api/v2/help_center/en-us/articles.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "articles": [
+                    {"id": 1, "title": "A", "body": "x", "user_segment_id": None, "draft": False},
+                ],
+                "meta": {"has_more": False},
+                "links": {"next": None},
+            },
+        )
+    )
+    conn = _factory()
+    deleted_state = ZendeskConnector._encode_cursor({"1", "2"})
+    await check_deletions(conn, deleted_state)
+
+
+@pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
 async def test_zendesk_permissions(respx_mock: respx.MockRouter) -> None:
+    # Article 2: staff user_type with a group restriction -> allow_groups
+    # ["staff"? no] the group restriction narrows it to group:7 only.
     respx_mock.get(path="/api/v2/help_center/articles/2.json").mock(
         return_value=httpx.Response(
             200,
@@ -97,6 +272,7 @@ async def test_zendesk_permissions(respx_mock: respx.MockRouter) -> None:
                     "body": "y",
                     "user_segment_id": 50,
                     "html_url": "h",
+                    "draft": False,
                 }
             },
         )
@@ -109,6 +285,66 @@ async def test_zendesk_permissions(respx_mock: respx.MockRouter) -> None:
                     "user_type": "staff",
                     "group_ids": [7],
                     "organization_ids": [],
+                }
+            },
+        )
+    )
+    # Article 3: signed_in with or_tags plus an explicitly added user.
+    respx_mock.get(path="/api/v2/help_center/articles/3.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "article": {
+                    "id": 3,
+                    "title": "C",
+                    "body": "z",
+                    "user_segment_id": 60,
+                    "html_url": "h",
+                    "draft": False,
+                }
+            },
+        )
+    )
+    respx_mock.get(path="/api/v2/help_center/user_segments/60.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "user_segment": {
+                    "user_type": "signed_in_users",
+                    "group_ids": [],
+                    "organization_ids": [],
+                    "or_tags": ["vip"],
+                    "added_user_ids": [999],
+                }
+            },
+        )
+    )
+    # Article 4: signed_in restricted by a tags conjunction -> fail closed, not
+    # widened to all signed-in users.
+    respx_mock.get(path="/api/v2/help_center/articles/4.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "article": {
+                    "id": 4,
+                    "title": "D",
+                    "body": "w",
+                    "user_segment_id": 70,
+                    "html_url": "h",
+                    "draft": False,
+                }
+            },
+        )
+    )
+    respx_mock.get(path="/api/v2/help_center/user_segments/70.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "user_segment": {
+                    "user_type": "signed_in_users",
+                    "group_ids": [],
+                    "organization_ids": [],
+                    "tags": ["confidential", "legal"],
                 }
             },
         )
@@ -126,9 +362,8 @@ async def test_zendesk_permissions(respx_mock: respx.MockRouter) -> None:
 @respx.mock(assert_all_called=False)
 async def test_zendesk_segment_fetched_once_per_segment(respx_mock: respx.MockRouter) -> None:
     # Two articles share user_segment_id 50. The segment reach is constant for the
-    # sync run, so the segment lookup must run once and be reused, not refetched
-    # per article. Each article body still fetches per document; only the shared
-    # segment call is cached.
+    # sync run, so the segment lookup must run once and be reused, not refetched per
+    # article. Each article body still fetches per document.
     article_route_3 = respx_mock.get(path="/api/v2/help_center/articles/3.json").mock(
         return_value=httpx.Response(
             200,
@@ -156,8 +391,8 @@ async def test_zendesk_segment_fetched_once_per_segment(respx_mock: respx.MockRo
     conn = _factory()
     _, acl_3 = await conn.fetch(DocRef(source_doc_id="3", instance_id="acme"))
     _, acl_4 = await conn.fetch(DocRef(source_doc_id="4", instance_id="acme"))
-    # Both articles resolve to the same reach, and the segment call ran exactly once.
-    assert acl_3.allow_groups == acl_4.allow_groups == ["staff", "group:7"]
+    # A group-restricted staff segment maps to the group ids only, not to all staff.
+    assert acl_3.allow_groups == acl_4.allow_groups == ["group:7"]
     assert segment_route.call_count == 1
     assert article_route_3.call_count == 1
     assert article_route_4.call_count == 1

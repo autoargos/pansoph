@@ -2,12 +2,20 @@
 
 Implemented against the Microsoft Graph v1.0 API. Verified against the official docs:
 
-  API docs:    https://learn.microsoft.com/graph/api/driveitem-list-children (list children)
-               https://learn.microsoft.com/graph/api/driveitem-get (get item metadata)
-               https://learn.microsoft.com/graph/api/driveitem-list-permissions (list permissions)
-               https://learn.microsoft.com/graph/api/driveitem-delta (delta, incremental)
-               https://learn.microsoft.com/graph/api/resources/permission (permission resource)
-               https://learn.microsoft.com/graph/api/resources/sharepointidentityset (identity sets)
+  API docs:    https://learn.microsoft.com/en-us/graph/api/driveitem-delta?view=graph-rest-1.0
+                 (delta: full-hierarchy enumeration, incremental cursor, deletion signal)
+               https://learn.microsoft.com/en-us/graph/api/resources/deleted?view=graph-rest-1.0
+                 (deleted facet: the tombstone marker on a delta item)
+               https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0
+                 (get item metadata)
+               https://learn.microsoft.com/en-us/graph/api/driveitem-list-permissions?view=graph-rest-1.0
+                 (list permissions)
+               https://learn.microsoft.com/en-us/graph/api/resources/permission?view=graph-rest-1.0
+                 (permission resource: grant-only, no deny facet)
+               https://learn.microsoft.com/en-us/graph/api/resources/sharinglink?view=graph-rest-1.0
+                 (sharingLink scope enum: anonymous, organization, existingAccess, users)
+               https://learn.microsoft.com/en-us/graph/api/resources/sharepointidentityset?view=graph-rest-1.0
+                 (identity sets: user, siteUser, group, siteGroup, sharePointGroup)
   API version: Graph v1.0 (base https://graph.microsoft.com/v1.0)
   Auth:        OAuth2. The connector is supplied an app-only (or delegated) access token
                via config "token"; acquiring and refreshing that token is the operator's
@@ -15,28 +23,47 @@ Implemented against the Microsoft Graph v1.0 API. Verified against the official 
                Sites.Read.All application permission). The connector sends it as
                Authorization: Bearer <token> and never sees the client secret. It maps
                whatever the credential can reach, not an assumed scope.
-  Pagination:  collections return @odata.nextLink when more pages exist. Follow it until
-               it is absent. The default children page size is 200 items.
-  Incremental: GET /drives/{drive_id}/root/delta returns pages of changed items with an
-               @odata.nextLink, then a final @odata.deltaLink to persist as the cursor for
-               the next sync. This first cut paginates root/children via @odata.nextLink;
-               the durable runtime owns the delta cursor lifecycle (see note below).
+  Pagination:  the delta collection returns @odata.nextLink while more pages of the
+               current change set remain. Follow it until it is absent, at which point
+               the final page carries @odata.deltaLink instead. The runtime persists the
+               deltaLink as the durable cursor and hands it back on the next sync.
+  Incremental: GET /drives/{drive_id}/root/delta walks the full drive hierarchy (not just
+               the root's immediate children) and is the Graph-recommended way to
+               enumerate a drive completely, since paging children can miss items when
+               writes happen mid-enumeration. On the first sync (cursor is None) delta
+               enumerates the whole drive; on later syncs the saved @odata.deltaLink
+               returns only what changed. list_changes yields the deltaLink as the cursor
+               on the terminal page, so incremental=True is honest.
+  Deletions:   a delta item that carries the "deleted" facet is a tombstone: per the
+               delta docs, "Items with this property set should be removed from your
+               local state." For each such item list_changes yields a DocRef with
+               deleted=True (source_doc_id and instance_id only, content never fetched),
+               so deletions=True is honest. A delta item may carry both a folder/file
+               facet and a deleted facet; the deleted facet wins and the item is a
+               tombstone. The same item id may appear more than once across a delta
+               feed; the runtime keys by source_doc_id and the last occurrence wins.
   ACL model:   each driveItem carries a permissions collection. A sharing link with
                scope "anonymous" is public to the world; scope "organization" is a
                tenant-wide link, which we treat as public within the instance namespace
-               (see the caveat below). Direct grants live in grantedToV2 (and the
-               grantedToIdentitiesV2 array for link permissions) as a SharePoint identity
-               set: a user, group, siteUser, siteGroup, or sharePointGroup. Users map to
-               allow_users, groups map to allow_groups. There is no native deny in the
-               Graph permission model, so deny stays empty.
-  Verified on: 2026-06-20.
+               (see the caveat below). Scopes "existingAccess" and "users" grant nothing
+               beyond the item's existing per-identity grants, so they never set public.
+               Direct grants live in grantedToV2 (and the grantedToIdentitiesV2 array for
+               link permissions) as a SharePoint identity set: a user, group, siteUser,
+               siteGroup, or sharePointGroup. Users map to allow_users, groups map to
+               allow_groups. There is no deny facet in the Graph permission model (the
+               resource is grant-only: grantedToV2, grantedToIdentitiesV2, link, roles),
+               so deny stays empty.
+  Verified on: 2026-07-05 (delta, deleted, permission, and sharingLink resources
+               re-verified against the v1.0 reference on this date; the endpoints and
+               facts are unchanged from the prior 2026-06-20 verification).
 
 ACL caveats (security-relevant, read before changing the mapping):
   1. "organization" scope links are treated as public. They are visible to every member
      of the tenant, not the whole internet, but within a single-tenant pansoph instance
      every principal in the namespace is a tenant member, so public=True is the faithful
      mapping for the principals this instance can see. If a future instance spans guests
-     or multiple tenants, revisit this.
+     or multiple tenants, revisit this so a tenant-wide link is not treated as
+     world-public across namespaces.
   2. Group expansion is deferred. A grant to a group or SharePoint group is mapped to that
      group's direct identifier in allow_groups. Resolving a group to its transitive member
      users (and nested groups) is left to a later authz-layer pass, which already owns the
@@ -82,7 +109,7 @@ class SharepointConnector:
             name="sharepoint",
             auth=AuthScheme.oauth2,
             capabilities=Capabilities(
-                incremental=False, permission_sync=True, deletions=True, slim_listing=True
+                incremental=True, permission_sync=True, deletions=True, slim_listing=True
             ),
         )
 
@@ -131,19 +158,46 @@ class SharepointConnector:
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
+        """Enumerate changes via the delta feed, yielding (DocRef, cursor) per item.
+
+        The delta endpoint walks the full drive hierarchy (not just the root's immediate
+        children), so nested folders are covered, and returns tombstones through the
+        "deleted" facet. cursor is None on the first sync (full enumeration) or the saved
+        @odata.deltaLink URL on later syncs (changes only). Every yielded item carries the
+        same cursor: the deltaLink once the terminal page is reached, else an empty string
+        for items on non-terminal pages (the runtime persists a cursor only when it is a
+        durable deltaLink). An item bearing the "deleted" facet is yielded as a tombstone
+        (DocRef with deleted=True); its content is never fetched.
+        """
         async with self._client() as client:
-            url: str | None = f"/v1.0/drives/{self._drive_id}/root/children"
+            # The initial delta URL, or the saved @odata.deltaLink from the last sync. Both
+            # @odata.nextLink and @odata.deltaLink are absolute Graph URLs, so passing them
+            # to client.get overrides base_url and preserves the opaque token verbatim.
+            url: str | None = cursor or f"/v1.0/drives/{self._drive_id}/root/delta"
             while url:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 payload = resp.json()
+                # deltaLink appears only on the terminal page; until then the cursor is
+                # empty so the runtime does not persist a mid-set page as a resume point.
+                delta_link: str = payload.get("@odata.deltaLink") or ""
+                next_link: str | None = payload.get("@odata.nextLink")
                 for item in payload.get("value", []):
                     item_id = item.get("id")
                     if not item_id:
                         continue
-                    next_cursor = item.get("lastModifiedDateTime", "") or ""
-                    yield self._ref(item_id), next_cursor
-                url = payload.get("@odata.nextLink")
+                    # The "deleted" facet marks a removed item; it wins over any file or
+                    # folder facet the same delta entry may also carry.
+                    is_deleted = "deleted" in item
+                    yield (
+                        DocRef(
+                            source_doc_id=item_id,
+                            instance_id=self.instance_id,
+                            deleted=is_deleted,
+                        ),
+                        delta_link,
+                    )
+                url = next_link
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

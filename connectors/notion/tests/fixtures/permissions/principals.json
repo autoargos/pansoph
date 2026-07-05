@@ -1,4 +1,4 @@
 [
-  {"user_id": "u1", "groups": ["everyone"]},
-  {"user_id": "u2", "groups": []}
+  {"user_id": "bot-acme", "groups": []},
+  {"user_id": "u2", "groups": ["everyone"]}
 ]

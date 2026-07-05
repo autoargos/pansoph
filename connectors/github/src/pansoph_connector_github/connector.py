@@ -3,17 +3,33 @@
 Implemented against the GitHub REST API. Verified against the official docs:
 
   API docs:    https://docs.github.com/en/rest/repos/contents (get content)
-               https://docs.github.com/en/rest/commits/commits (list commits, since)
+               https://docs.github.com/en/rest/commits/commits (list commits with
+                 `since`; a single commit's files[].status is one of added, removed,
+                 modified, renamed, copied, changed, unchanged; `since` is
+                 ISO 8601 YYYY-MM-DDTHH:MM:SSZ and filters commits after that time)
                https://docs.github.com/en/rest/git/trees (recursive tree)
                https://docs.github.com/en/rest/collaborators/collaborators
+                 (GET /repos/{owner}/{repo}/collaborators with affiliation=all returns
+                 outside collaborators, org members with direct access, org members
+                 with access via team membership, org members with default org
+                 permissions, and org owners; each item carries login and a
+                 permissions object plus role_name)
                https://docs.github.com/en/rest/teams/teams
+               https://docs.github.com/en/rest/repos/repos (repository `visibility` is
+                 one of public, private, internal; an internal repo carries
+                 private=true and visibility="internal")
+  Visibility:  https://docs.github.com/en/repositories/creating-and-managing-repositories/about-repositories
+               https://github.blog/news-insights/product-news/internal-repositories-are-now-generally-available-for-github-enterprise/
+                 (an internal repo, available on GitHub Enterprise Cloud/Server, is
+                 readable by every member of the enterprise, i.e. any member of any
+                 organization in the enterprise account; outside collaborators and
+                 non-members cannot read it)
   Discovery:   https://docs.github.com/en/rest/orgs/orgs#list-organizations-for-the-authenticated-user
                  (GET /user/orgs; org objects carry `login`)
                https://docs.github.com/en/rest/repos/repos#list-organization-repositories
                  (GET /orgs/{org}/repos; repo objects carry `name`, `full_name`, `private`)
                https://docs.github.com/en/rest/repos/repos#list-repositories-for-the-authenticated-user
                  (GET /user/repos; the credential's own repos, listed when no org is given)
-                 Verified for discovery on: 2026-07-05.
   API version: X-GitHub-Api-Version 2026-03-10
   Auth:        bearer token. The token may be a personal access token, an org or
                GitHub App installation token, or any RBAC scoped credential. The
@@ -21,13 +37,17 @@ Implemented against the GitHub REST API. Verified against the official docs:
                can reach. Needs read access to repository contents and metadata,
                and to members for ACL sync.
   Pagination:  per_page up to 100, follow the Link header rel="next".
-  Incremental: list commits with `since`, then read each commit's changed files.
+  Incremental: list commits with `since`, then read each commit's changed files. A
+               file whose status is "removed" in a commit is surfaced as a deleted
+               DocRef (a tombstone), so a poll-based sync purges removed files.
   Rate limit:  5000 requests per hour authenticated; surfaced, not hidden.
-  ACL model:   a public repo maps to public. A private repo maps to the
-               collaborators (users) and teams (groups) that the credential can
-               see, namespaced by the instance. Because access is RBAC controlled,
-               the ACL reflects the credential's actual reach, not an assumption.
-  Verified on: 2026-06-08.
+  ACL model:   a public repo maps to public. An internal repo (GitHub Enterprise)
+               maps to a synthetic enterprise-members group, because every enterprise
+               member can read it, and NOT to public. A private repo maps to the
+               collaborators (users) and teams (groups) that the credential can see,
+               namespaced by the instance. Because access is RBAC controlled, the ACL
+               reflects the credential's actual reach, not an assumption.
+  Verified on: 2026-07-05.
 
 Credential scope note: every configured instance carries its own credential and
 its own ACL namespace (principal_ns = instance_id). One instance may be a personal
@@ -231,19 +251,29 @@ class GithubConnector:
         async with self._client() as client:
             branch = self._branch or (await self._repo_info(client))["default_branch"]
             next_cursor = await self._latest_commit_date(client) or ""
-            source = (
-                self._all_paths(client, branch)
-                if cursor is None
-                else self._changed_paths(client, cursor)
-            )
             count = 0
-            async for path in source:
-                if self._path and not path.startswith(self._path):
-                    continue
-                yield self._ref(path), next_cursor
-                count += 1
-                if count >= self._max_files:
-                    break
+            if cursor is None:
+                # First full pass: the current tree. Every path is an upsert; a full
+                # crawl has no removals to report.
+                async for path in self._all_paths(client, branch):
+                    if self._path and not path.startswith(self._path):
+                        continue
+                    yield self._ref(path), next_cursor
+                    count += 1
+                    if count >= self._max_files:
+                        break
+            else:
+                # Incremental pass: each changed file carries its commit status. A
+                # "removed" file becomes a deleted DocRef (a tombstone) so the runtime
+                # purges the document and its access tuples; everything else is an
+                # upsert. Both count against max_files.
+                async for path, removed in self._changed_paths(client, cursor):
+                    if self._path and not path.startswith(self._path):
+                        continue
+                    yield self._ref(path, deleted=removed), next_cursor
+                    count += 1
+                    if count >= self._max_files:
+                        break
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:
@@ -425,8 +455,16 @@ class GithubConnector:
             headers["Authorization"] = f"Bearer {self._token}"
         return httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=30.0)
 
-    def _ref(self, path: str) -> DocRef:
-        return DocRef(source_doc_id=path, instance_id=self.instance_id)
+    def _ref(self, path: str, *, deleted: bool = False) -> DocRef:
+        return DocRef(source_doc_id=path, instance_id=self.instance_id, deleted=deleted)
+
+    def _enterprise_members_group(self) -> str:
+        # The synthetic group that stands for "every member of the enterprise", the true
+        # audience of an internal repo. It is anchored on the owning org so it does not
+        # collide with a real team slug (teams are per-org slugs, never prefixed like
+        # this), and the instance namespace (principal_ns) already isolates it from
+        # other instances. The runtime maps this group to the enterprise's membership.
+        return f"enterprise:{self._owner}:members"
 
     async def _repo_info(self, client: httpx.AsyncClient) -> dict[str, Any]:
         # Cached for the life of the connector (one sync run), so listing and every fetch
@@ -457,7 +495,19 @@ class GithubConnector:
             if item.get("type") == "blob" and _is_textual(item.get("path", "")):
                 yield item["path"]
 
-    async def _changed_paths(self, client: httpx.AsyncClient, since: str) -> AsyncIterator[str]:
+    async def _changed_paths(
+        self, client: httpx.AsyncClient, since: str
+    ) -> AsyncIterator[tuple[str, bool]]:
+        """Yield (path, removed) for each textual file changed since `since`.
+
+        `removed` is True when the file's most recent commit status in the window is
+        "removed" (https://docs.github.com/en/rest/commits/commits), which the caller
+        turns into a deleted DocRef tombstone. GitHub lists commits newest first, so
+        the first status seen for a path is its latest state, and a path re-added after
+        a deletion (or deleted after an edit) is reported by that latest state only.
+        A "removed" is emitted for the exact document id (the file path) so the runtime
+        purges precisely that document, per rule 1 (revocations must propagate).
+        """
         seen: set[str] = set()
         url: str | None = f"/repos/{self._owner}/{self._repo}/commits"
         params: dict[str, Any] | None = {"since": since, "per_page": 100}
@@ -471,9 +521,10 @@ class GithubConnector:
                 detail.raise_for_status()
                 for f in detail.json().get("files", []):
                     path = f.get("filename", "")
-                    if f.get("status") != "removed" and _is_textual(path) and path not in seen:
-                        seen.add(path)
-                        yield path
+                    if not _is_textual(path) or path in seen:
+                        continue
+                    seen.add(path)
+                    yield path, f.get("status") == "removed"
             url, params = self._next_link(resp), None
 
     @staticmethod
@@ -493,9 +544,25 @@ class GithubConnector:
             return self._acl_cache
         repo = await self._repo_info(client)
         ns = self.instance_id
-        if not repo.get("private", False) or repo.get("visibility") == "public":
+        visibility = repo.get("visibility")
+        # A public repo (visibility "public", or the legacy private=False shape) is
+        # readable by anyone.
+        if visibility == "public" or not repo.get("private", False):
             self._acl_cache = AccessControl(public=True, principal_ns=ns)
             return self._acl_cache
+        # An internal repo (GitHub Enterprise) carries private=true and
+        # visibility="internal", and is readable by every member of the enterprise,
+        # not just its collaborators and teams. Mapping it to only collaborators would
+        # over-deny entitled enterprise members. It is NOT public either, so map it to a
+        # synthetic enterprise-members group. The runtime resolves that group's members
+        # from the enterprise identity source; here the connector only names the correct
+        # audience, namespaced by the instance so scopes never collide.
+        if visibility == "internal":
+            self._acl_cache = AccessControl(
+                allow_groups=[self._enterprise_members_group()], principal_ns=ns
+            )
+            return self._acl_cache
+        # A private repo: collaborators (users) and teams (groups) the credential sees.
         users = [
             login
             async for login in self._paginate_field(

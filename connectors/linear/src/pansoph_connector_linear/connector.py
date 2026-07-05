@@ -2,7 +2,14 @@
 
 Implemented against the Linear GraphQL API. Verified against the official docs:
 
-  API docs:    https://linear.app/developers/graphql
+  API docs:      https://linear.app/developers/graphql
+  Pagination:    https://linear.app/developers/pagination
+  Filtering:     https://linear.app/developers/filtering
+  Private teams: https://linear.app/docs/private-teams
+  Webhooks:      https://linear.app/developers/webhooks
+                 https://linear.app/docs/api-and-webhooks
+  Verified on:   2026-07-05.
+
   Endpoint:    https://api.linear.app/graphql (single GraphQL endpoint). Every
                request is a POST of JSON {"query": ..., "variables": ...}.
   Auth:        API key in the Authorization header. A personal API key is sent
@@ -11,24 +18,47 @@ Implemented against the Linear GraphQL API. Verified against the official docs:
                from config "token" and sends it verbatim as {"Authorization": token},
                so a caller passes a personal key as is, or "Bearer <token>" for OAuth.
   Pagination:  GraphQL connections expose pageInfo with endCursor and hasNextPage.
-               A continuation passes the endCursor as the `after` argument. First cut
-               performs a full listing each run by paging GraphQL connections;
-               cursor-filtered incremental is a follow-up.
-  Incremental: not supported here. Linear can order by updatedAt, but this connector
-               does a full listing each run (Capabilities.incremental = False).
-  ACL model:   best effort, team scoped. Linear has no per issue viewer list, so
-               there is no fine grained per issue ACL to read. An issue's TEAM is
-               mapped to allow_groups (the team id), namespaced by the instance.
-               There are no per issue allow_users and no deny. An operator should
-               treat team membership as the access boundary, which is coarser than
-               the document, and is the most faithful mapping the source exposes.
-  Verified on: 2026-06-20.
+               A continuation passes the endCursor as the `after` argument. This
+               connector performs a full listing each run by paging GraphQL
+               connections and yields each issue's updatedAt as its per-doc cursor
+               (a durable, non-empty resume token).
+  Incremental: not supported here (Capabilities.incremental = False), and honestly
+               declared as such. Linear DOES expose the raw materials for it:
+               IssueFilter supports date comparators (updatedAt: {gt: ...}) per the
+               filtering docs, and issues can be ordered by updatedAt per the
+               pagination docs, so a future revision can turn the incoming cursor
+               into filter:{updatedAt:{gt: <cursor>}}. Until that lands the incoming
+               cursor is ignored and the connector re-lists in full.
+  Deletions:   not supported here (Capabilities.deletions = False), and honestly
+               declared as such. A full re-list cannot observe a hard delete because
+               a deleted issue simply stops appearing, so this connector never emits
+               a deleted=True DocRef. Linear's faithful deletion signal is the
+               webhook "remove" action (https://linear.app/developers/webhooks),
+               which is not retroactive; wiring on_webhook to translate remove events
+               into tombstones is the follow-up path. on_webhook is a stub today.
+  ACL model:   team membership is the real access boundary, and it splits on
+               Team.private (https://linear.app/docs/private-teams):
+                 - PRIVATE team: "Those who are not a member of the private team will
+                   not be able to see issues associated with the team." Only the
+                   team's members may see the issue, so the ACL is
+                   allow_groups=[team_id] (the private team acts as the closed group).
+                 - NON-PRIVATE (workspace) team: its issues are visible to ALL
+                   workspace members, not only the team's members. Within this
+                   instance's ACL namespace every principal is a workspace member, so
+                   the faithful mapping is public=True (workspace-visible), NOT
+                   allow_groups=[team_id], which would wrongly hide the issue from
+                   workspace members who are not on that team.
+               Linear exposes no per-issue viewer list, so there are no per-issue
+               allow_users and no deny at the issue level. The connector reads
+               Team.private to make the split; without it a public-team issue would
+               over-deny.
 
 Credential scope note: every configured instance carries its own credential and its
 own ACL namespace (principal_ns = instance_id). One instance may be a personal key
 over one user's workspace, another an OAuth token over an org. They never collide,
-and each maps ACLs at the granularity its credential grants. See pansoph CLAUDE.md
-section 6.
+and each maps ACLs at the granularity its credential grants. public=True here means
+"visible to every principal in this instance's namespace" (workspace-wide), not
+globally public. See pansoph CLAUDE.md section 6.
 
 The runtime owns retries, backoff, and resumable sync, so a method only describes
 how to talk to Linear for one page or one document.
@@ -50,11 +80,15 @@ from pansoph_connector_sdk import (
 )
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
 
+# updatedAt is selected so list_changes can yield it as a durable, non-empty
+# per-doc cursor. orderBy updatedAt keeps the walk deterministic.
 _LIST_QUERY = (
-    "query($after: String) { issues(first: 100, after: $after) "
-    "{ nodes { id title } pageInfo { hasNextPage endCursor } } }"
+    "query($after: String) { issues(first: 100, after: $after, orderBy: updatedAt) "
+    "{ nodes { id title updatedAt } pageInfo { hasNextPage endCursor } } }"
 )
-_FETCH_QUERY = "query($id:String!){ issue(id:$id){ id title description team { id key } } }"
+# team.private drives the ACL split (private team -> group scoped, public team ->
+# workspace visible), so it must be fetched, not assumed.
+_FETCH_QUERY = "query($id:String!){ issue(id:$id){ id title description team { id key private } } }"
 
 
 class LinearConnector:
@@ -110,16 +144,21 @@ class LinearConnector:
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
-        # First cut performs a full listing each run by paging GraphQL connections;
-        # cursor-filtered incremental is a follow-up. The incoming cursor is ignored,
-        # so paging starts at the head and walks pageInfo to the end every run.
+        # This connector is not incremental (Capabilities.incremental = False): the
+        # incoming cursor is ignored and paging starts at the head, walking pageInfo
+        # to the end every run. The per-doc cursor yielded here is the issue's
+        # updatedAt, a durable, non-empty resume token that also seeds the future
+        # filter:{updatedAt:{gt}} incremental path. It falls back to the issue id if
+        # updatedAt is somehow absent, so the non-empty-cursor contract always holds.
         async with self._client() as client:
             after: str | None = None
             while True:
                 data = await self._graphql(client, _LIST_QUERY, {"after": after})
                 issues = data.get("issues", {})
                 for node in issues.get("nodes", []):
-                    yield self._ref(node["id"]), ""
+                    node_id: str = node["id"]
+                    doc_cursor = node.get("updatedAt") or node_id
+                    yield self._ref(node_id), doc_cursor
                 page = issues.get("pageInfo", {})
                 if not page.get("hasNextPage"):
                     break
@@ -148,7 +187,12 @@ class LinearConnector:
             return self._acl(issue)
 
     async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
-        # Webhook ingestion is not wired up for this connector.
+        # Not wired up yet, and deletions is declared False to match. Linear's
+        # faithful deletion signal is the webhook "remove" action
+        # (https://linear.app/developers/webhooks), which is not retroactive.
+        # Translating create/update/remove events into ChangeEvents (including a
+        # deleted tombstone for "remove") is the follow-up path that would let
+        # deletions flip to True honestly.
         return []
 
     # --- helpers ---
@@ -176,7 +220,17 @@ class LinearConnector:
         return data.get("issue", {}) or {}
 
     def _acl(self, issue: dict[str, Any]) -> AccessControl:
-        team = issue.get("team") or {}
-        team_id = team.get("id")
-        groups = [team_id] if team_id else []
-        return AccessControl(allow_groups=groups, principal_ns=self.instance_id)
+        # Faithful to https://linear.app/docs/private-teams:
+        #   private team  -> only members see it -> allow_groups=[team_id]
+        #   public  team  -> all workspace members see it -> public=True
+        # Reading team.private is what prevents over-denying a public-team issue.
+        team: dict[str, Any] = issue.get("team") or {}
+        team_id: str | None = team.get("id")
+        ns = self.instance_id
+        if not team.get("private", False):
+            # Non-private team: visible to every workspace member, which in this
+            # instance's namespace is every principal, so public=True is faithful.
+            return AccessControl(public=True, principal_ns=ns)
+        # Private team: closed to non-members; the team is the allowed group.
+        groups: list[str] = [team_id] if team_id else []
+        return AccessControl(allow_groups=groups, principal_ns=ns)

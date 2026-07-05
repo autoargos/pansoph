@@ -4,50 +4,64 @@ A pansoph connector for Notion.
 
 Implemented against the latest official Notion API documentation. See the header of
 `src/pansoph_connector_notion/connector.py` for the verified endpoints, the mandatory
-`Notion-Version` header, the bearer auth, cursor pagination, and the verified date.
+`Notion-Version` header, the bearer auth, cursor pagination, the deletion signal, and
+the verified date (2026-07-05).
 
-It must pass the shared conformance suite (`assert_conforms` from
-`pansoph-connector-sdk`) before it merges.
+It passes the shared conformance suite (`assert_conforms` from
+`pansoph-connector-sdk`), wired in `tests/test_notion_conformance.py`.
 
 ## What it ingests
 
 - `list_changes` pages through `POST /v1/search` filtered to pages, yielding one
-  `DocRef` per page, with the search cursor checkpointed by the runtime.
+  `DocRef` per shared page. A page that Notion reports as `in_trash` or `is_archived`
+  is yielded as a tombstone (`deleted=True`) and never ingested as live content.
 - `fetch` reads `GET /v1/blocks/{id}/children` and joins the `plain_text` of every
   block's rich text into a plain text document.
 
-## ⚠️ CRITICAL: Notion sharing is NOT mirrored
+## Access control: the integration is the principal
 
-**Notion exposes NO API that returns who can see a page.** There is no per document
-permission endpoint, so this connector CANNOT and DOES NOT mirror real Notion
-sharing. This is a hard limitation of the Notion API, not a missing feature.
+A Notion integration behaves like a **restricted user**. `POST /v1/search` returns
+**only the pages that have been shared with the connection**, and results adhere to
+the connection's capabilities. So the integration's reachable set is a real,
+observable permission signal: what the connector can see is exactly what search
+returns.
 
-Instead, **access is whatever the operator configured for this instance**, applied
-uniformly to every page the instance ingests:
+Notion has no single "which principals can see this page" endpoint, so a full
+per-principal readout is not constructible from the API. The faithful, minimal ACL
+that never overshares is therefore: **each ingested page is readable only by this
+instance's integration principal**, namespaced by the instance. The principal id is
+the bot id read from `GET /v1/users/me` (cached), overridable via config
+`integration_principal`. This mirrors the gmail connector's owner-only model: coarse,
+but it can never grant a page to anyone the integration could not already reach.
 
-| config key     | type | default | meaning                                  |
-| -------------- | ---- | ------- | ---------------------------------------- |
-| `public`       | bool | `False` | every user in this instance can see it   |
-| `allow_groups` | list | `[]`    | these groups can see every ingested page |
-| `allow_users`  | list | `[]`    | these users can see every ingested page  |
+Because the connector maps a real (if coarse) source-scoped ACL,
+`capabilities.permission_sync` is `True` and `list_acls` returns the integration
+grant for a page.
 
-Because there is no real permission data to sync, `capabilities.permission_sync` is
-`False`. The conformance permission category still runs (it is mandatory for every
-connector) and asserts the connector reports exactly the configured ACL.
+### `public` is an explicit, audited override
+
+| config key              | type   | default | meaning                                           |
+| ----------------------- | ------ | ------- | ------------------------------------------------- |
+| `public`                | bool   | `False` | audited override: publish every page to the instance |
+| `integration_principal` | string | (auto)  | override the ACL principal; else bot id from `/v1/users/me` |
+
+`public` **never** defaults the grant wider than the integration scope. Setting
+`public: true` is a deliberate decision to publish every ingested page to every user
+in the instance, regardless of who could see it in Notion. Leave it off (the default)
+to keep access scoped to the integration principal.
 
 ### Operator responsibility
 
-If you set `public: true`, **you publish every ingested page to every user in this
-instance, regardless of who could see it in Notion.** To keep access correct:
-
 1. Scope the instance's Notion integration to only the pages you intend to expose.
-2. Set `public` / `allow_groups` / `allow_users` to match the exact audience you
-   intend for those pages.
+   The connector's ACL follows that scope automatically.
+2. Only set `public: true` when you truly intend a tenant-wide grant, and audit it.
 3. Use separate instances (each with its own integration token and ACL namespace)
    when different page sets need different audiences.
 
-Treat the configured ACL as the source of truth for access, because Notion gives us
-nothing else to go on.
+On Business/Enterprise, Notion supports page-level access rules expressed through
+`Person` / `Created-by` page properties, and user enumeration via `GET /v1/users`.
+Enriching the ACL to those real per-page principals is a documented follow-up, not a
+current feature.
 
 ## Config
 
@@ -56,7 +70,6 @@ nothing else to go on.
   "token": "<notion integration or oauth token>",
   "base_url": "https://api.notion.com",
   "public": false,
-  "allow_groups": [],
-  "allow_users": []
+  "integration_principal": ""
 }
 ```

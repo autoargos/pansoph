@@ -1,4 +1,7 @@
 [
-  {"user_id": "agent1", "groups": ["staff", "group:7"]},
+  {"user_id": "agent1", "groups": ["group:7"]},
+  {"user_id": "vip1", "groups": ["tag:vip"]},
+  {"user_id": "user:999", "groups": []},
+  {"user_id": "taguser", "groups": ["tag:confidential"]},
   {"user_id": "cust1", "groups": []}
 ]

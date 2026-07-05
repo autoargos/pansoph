@@ -2,20 +2,44 @@
 
 Implemented against the Slack Web API. Verified against the official docs:
 
-  API docs:    https://docs.slack.dev/reference/methods/conversations.list
-               https://docs.slack.dev/reference/methods/conversations.history
-               https://docs.slack.dev/reference/methods/conversations.info
-               https://docs.slack.dev/reference/methods/conversations.members
+  API docs:    https://docs.slack.dev/apis/web-api/
+               https://docs.slack.dev/apis/web-api/rate-limits/
+               https://docs.slack.dev/apis/web-api/using-the-conversations-api/
+               https://docs.slack.dev/reference/methods/conversations.list/
+               https://docs.slack.dev/reference/methods/conversations.history/
+               https://docs.slack.dev/reference/methods/conversations.info/
+               https://docs.slack.dev/reference/methods/conversations.members/
                https://docs.slack.dev/apis/web-api/pagination (cursor pagination)
                https://docs.slack.dev/authentication/tokens (token types)
+               Deletion signals (not consumed, see below):
+               https://api.slack.com/events/channel_deleted
+               https://api.slack.com/events/group_deleted
+               https://api.slack.com/events/message/message_deleted
+  API version: Slack Web API (versionless, methods under https://slack.com/api/).
+  Verified on: 2026-07-05.
+
+  Response envelope (load bearing for ACL correctness):
+    Every Slack Web API response is a JSON object with a top level boolean "ok".
+    On failure Slack returns HTTP 200 with {"ok": false, "error": "<code>"} (docs:
+    docs.slack.dev/apis/web-api/). So an HTTP status check alone (raise_for_status)
+    does NOT catch an application error: channel_not_found, missing_scope,
+    not_in_channel, invalid_auth, token_revoked all arrive as HTTP 200 with
+    ok=false. Every call therefore goes through _ok(), which raises SlackApiError on
+    ok=false. This is a security invariant: an unreadable or unresolvable channel
+    must NEVER fall through to a public or empty ACL (see _acl). Fail closed.
+
+    Rate limits arrive as HTTP 429 with a Retry-After header and body
+    {"ok": false, "error": "ratelimited"} (docs.slack.dev/apis/web-api/rate-limits/).
+    The runtime owns retries and backoff, so the connector surfaces 429 by raising
+    (raise_for_status on 429), and it exposes the Retry-After seconds on the raised
+    SlackRateLimited error so the runtime can honor it. The connector does not sleep
+    or retry itself.
+
   Discovery:   conversations.list returns channels[] with id, name, is_private,
                is_archived, and response_metadata.next_cursor. Requested types are
                public_channel,private_channel; limit is 200 (the doc-recommended
-               page size, hard cap 1000). list_resources exposes each reachable
-               channel as a Resource of kind "channel", cursor paginated by the same
-               next_cursor. Verified against the conversations.list reference on the
-               date below.
-  API version: Slack Web API (versionless, methods under https://slack.com/api/).
+               page size). list_resources exposes each reachable channel as a
+               Resource of kind "channel", cursor paginated by the same next_cursor.
   Auth:        bearer token in the Authorization header. The token is a bot token
                (xoxb-) or a user token (xoxp-) supplied by the operator. The
                connector does not assume a scope, it maps whatever the credential
@@ -24,15 +48,35 @@ Implemented against the Slack Web API. Verified against the official docs:
                ACL members lookup needs the same read scopes.
   Pagination:  cursor based. Pass limit, read response_metadata.next_cursor, and
                re pass it as cursor. Stop when next_cursor is empty.
-  Incremental: the runtime owns resumable sync. list_changes carries the channel
-               list cursor as the next_cursor so a crash resumes mid listing.
   ACL model:   a document is a channel. A public channel (is_private false) maps to
                public. A private channel, im, or mpim maps to its member user ids
                (conversations.members). Slack exposes NO per channel groups, so
                allow_groups is always empty for this source, and Slack has no per
                channel deny concept, so deny is always empty. The ACL therefore
-               reflects exactly the membership the credential can see.
-  Verified on: 2026-07-05.
+               reflects exactly the membership the credential can see. If Slack
+               reports ok=false for either the info or the members lookup (a channel
+               the credential cannot read, or a private channel the bot has not been
+               invited to, which returns not_in_channel per the conversations.members
+               reference), _acl RAISES rather than producing a public or empty grant.
+               A bot token cannot self join a private channel and must be invited
+               (using-the-conversations-api), so not_in_channel is a real, expected
+               membership boundary and must fail closed, never publish.
+
+  Capabilities (honest as declared):
+    incremental=False.  list_changes walks the full conversations.list every run.
+      Slack conversations.history does support oldest/latest windowing plus a
+      cursor, but there is no workspace level change feed that says "these channels
+      changed", so a since-token backfill is a follow up. incremental is declared
+      False to match the implementation, no false True. The cursor yielded by
+      list_changes is a page level list token (non-empty, required by the shared
+      conformance contract), not a cross-run resume high-water mark.
+    deletions=False.  Slack DOES expose real deletion signals (channel_deleted,
+      group_deleted, and the message_deleted message subtype). The connector does
+      not yet consume them: list_changes never yields a tombstone and on_webhook
+      emits only upserts. deletions is declared False to match, no false True. To
+      turn it on later, wire channel_deleted/group_deleted into on_webhook as
+      ChangeEvent(kind="delete") and flip the flag, gated by check_deletions.
+    permission_sync=True.  Backed by a real list_acls that maps source membership.
 
 Credential scope note: every configured instance carries its own credential and its
 own ACL namespace (principal_ns = instance_id). One instance may be a bot token in
@@ -67,6 +111,43 @@ from pansoph_types import (
     Resource,
     ResourcePage,
 )
+
+# Sentinel list token yielded alongside a DocRef when the connector has no Slack
+# page cursor for that ref (the first and only page, or the final page whose
+# next_cursor is empty). The shared conformance contract requires every yielded
+# cursor to be a non-empty string, and since incremental sync is off this token is
+# never used as a cross-run resume point, it only satisfies the type contract.
+_LIST_TOKEN: str = "slack:list"  # noqa: S105  not a secret, a page level list token
+
+
+class SlackApiError(RuntimeError):
+    """A Slack Web API method returned ok=false.
+
+    Slack returns HTTP 200 with {"ok": false, "error": "<code>"} for application
+    errors, so this is raised after parsing the body, not from the HTTP status. It
+    carries the machine readable Slack error code so the runtime can classify it
+    (for example channel_not_found, missing_scope, not_in_channel, invalid_auth,
+    token_revoked). Raising here is the fail-closed guarantee: an unreadable channel
+    never degrades into a public or empty ACL.
+    """
+
+    def __init__(self, method: str, code: str) -> None:
+        self.method = method
+        self.code = code
+        super().__init__(f"slack {method} returned ok=false: {code}")
+
+
+class SlackRateLimited(RuntimeError):
+    """Slack returned HTTP 429. Carries the Retry-After seconds for the runtime.
+
+    The runtime owns backoff, so the connector surfaces the header value rather than
+    sleeping. retry_after is None when Slack omitted or sent an unparseable header.
+    """
+
+    def __init__(self, method: str, retry_after: int | None) -> None:
+        self.method = method
+        self.retry_after = retry_after
+        super().__init__(f"slack {method} rate limited, retry after {retry_after}s")
 
 
 class SlackConnector:
@@ -152,12 +233,14 @@ class SlackConnector:
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
         """List every channel the credential can reach.
 
-        First cut performs a full listing each run by following Slack cursor
-        pagination; incremental message backfill is a follow-up. Incremental is off
-        (capabilities.incremental is False), so each yielded DocRef carries an empty
-        next_cursor. The cursor parameter is accepted for contract symmetry but the
-        loop always walks the full set internally so listing is complete regardless of
-        runtime re-drive behavior.
+        Performs a full listing each run by following Slack cursor pagination.
+        Incremental is off (capabilities.incremental is False), so the cursor
+        parameter is accepted for contract symmetry but the loop always walks the
+        full set internally. Each yielded DocRef carries a non-empty page level list
+        token as required by the shared conformance contract; it is the Slack cursor
+        that reached the following page, or the _LIST_TOKEN sentinel for the first
+        page and the final page (whose next_cursor is empty). Because incremental is
+        off, this token is never persisted as a cross-run resume point.
         """
         async with self._client() as client:
             params: dict[str, Any] = {
@@ -166,23 +249,22 @@ class SlackConnector:
             }
             while True:
                 resp = await client.get("/api/conversations.list", params=params)
-                resp.raise_for_status()
-                payload = resp.json()
+                payload = self._ok(resp, "conversations.list")
+                meta = payload.get("response_metadata", {}) or {}
+                next_cursor = meta.get("next_cursor", "") or ""
+                # A DocRef on this page is tagged with the token that reaches the
+                # NEXT page (or the sentinel when this is the last page), so every
+                # yielded cursor is non-empty.
+                yield_token = next_cursor or _LIST_TOKEN
                 for channel in payload.get("channels", []):
-                    yield self._ref(channel["id"]), ""
-                next_cursor = payload.get("response_metadata", {}).get("next_cursor", "") or ""
+                    yield self._ref(channel["id"]), yield_token
                 if not next_cursor:
                     break
                 params["cursor"] = next_cursor
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:
-            resp = await client.get(
-                "/api/conversations.history", params={"channel": ref.source_doc_id}
-            )
-            resp.raise_for_status()
-            messages = resp.json().get("messages", [])
-            text = "\n".join(m.get("text", "") for m in messages if m.get("text"))
+            text = await self._history_text(client, ref.source_doc_id)
             raw = RawDoc(
                 source_doc_id=ref.source_doc_id,
                 instance_id=self.instance_id,
@@ -191,6 +273,9 @@ class SlackConnector:
                 title=ref.source_doc_id,
                 source_url=None,
             )
+            # ACL and content are fetched together. If either the history call or the
+            # ACL call reports ok=false, the exception propagates and the runtime
+            # never persists a document with a leaked or empty ACL.
             return raw, await self._acl(client, ref.source_doc_id)
 
     async def list_acls(self, ref: DocRef) -> AccessControl:
@@ -200,7 +285,9 @@ class SlackConnector:
     async def on_webhook(self, event: dict[str, Any]) -> list[ChangeEvent]:
         # Slack Events API delivers message events under event.event with a channel.
         # A message upserts the channel document it belongs to. Deletions are not
-        # modeled (deletions capability is false), so only upserts are emitted.
+        # modeled (deletions capability is false), so only upserts are emitted. Slack
+        # does expose channel_deleted/group_deleted/message_deleted; consuming them
+        # is a follow up gated by check_deletions, see the module header.
         inner = event.get("event", {})
         channel = inner.get("channel")
         if inner.get("type") == "message" and channel:
@@ -245,13 +332,39 @@ class SlackConnector:
             params["cursor"] = cursor
         async with self._client() as client:
             resp = await client.get("/api/conversations.list", params=params)
-            resp.raise_for_status()
-            payload = resp.json()
+            payload = self._ok(resp, "conversations.list")
         items = [self._resource(channel) for channel in payload.get("channels", [])]
-        next_cursor = payload.get("response_metadata", {}).get("next_cursor", "") or ""
+        next_cursor = (payload.get("response_metadata", {}) or {}).get("next_cursor", "") or ""
         return ResourcePage(items=items, next_cursor=next_cursor or None)
 
     # --- helpers ---
+    def _ok(self, resp: httpx.Response, method: str) -> dict[str, Any]:
+        """Parse a Slack response body and enforce the ok envelope.
+
+        Slack returns HTTP 200 with {"ok": false, "error": "..."} for application
+        errors, and HTTP 429 with a Retry-After header when rate limited. This is the
+        single choke point every call goes through, so no code path can accidentally
+        read data off a failed response. It raises rather than returning empty data,
+        which is what makes the ACL fail closed.
+        """
+        if resp.status_code == 429:
+            raise SlackRateLimited(method, self._retry_after(resp))
+        resp.raise_for_status()
+        body: dict[str, Any] = resp.json()
+        if not body.get("ok", False):
+            raise SlackApiError(method, str(body.get("error", "unknown_error")))
+        return body
+
+    @staticmethod
+    def _retry_after(resp: httpx.Response) -> int | None:
+        raw = resp.headers.get("Retry-After")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
     def _resource(self, channel: dict[str, Any]) -> Resource:
         channel_id = channel["id"]
         name = channel.get("name") or channel_id
@@ -276,11 +389,23 @@ class SlackConnector:
     def _ref(self, channel_id: str) -> DocRef:
         return DocRef(source_doc_id=channel_id, instance_id=self.instance_id)
 
+    async def _history_text(self, client: httpx.AsyncClient, channel_id: str) -> str:
+        resp = await client.get("/api/conversations.history", params={"channel": channel_id})
+        # On ok=false (channels:history/groups:history missing, or not_in_channel)
+        # this raises instead of indexing an empty document, so a scope or membership
+        # failure surfaces to the runtime rather than silently producing empty text.
+        payload = self._ok(resp, "conversations.history")
+        messages = payload.get("messages", [])
+        return "\n".join(m.get("text", "") for m in messages if m.get("text"))
+
     async def _acl(self, client: httpx.AsyncClient, channel_id: str) -> AccessControl:
         ns = self.instance_id
-        info = await client.get("/api/conversations.info", params={"channel": channel_id})
-        info.raise_for_status()
-        channel = info.json().get("channel", {})
+        info_resp = await client.get("/api/conversations.info", params={"channel": channel_id})
+        # SECURITY: on ok=false (channel_not_found, missing_scope, not_in_channel,
+        # invalid_auth, token_revoked) _ok RAISES, so we never fall through to a
+        # public grant for a channel the credential cannot even resolve. Fail closed.
+        info = self._ok(info_resp, "conversations.info")
+        channel = info.get("channel", {})
         if not channel.get("is_private", False):
             return AccessControl(public=True, principal_ns=ns)
         members = [m async for m in self._members(client, channel_id)]
@@ -295,10 +420,15 @@ class SlackConnector:
             if cursor:
                 params["cursor"] = cursor
             resp = await client.get("/api/conversations.members", params=params)
-            resp.raise_for_status()
-            payload = resp.json()
+            # On ok=false (not_in_channel when the bot was never invited to a private
+            # channel, per the conversations.members reference) _ok RAISES. We never
+            # persist a truncated or empty member set as if the channel had no
+            # members: an empty ACL for a channel that really has members is silent
+            # under-sharing and is indistinguishable from a genuinely empty channel,
+            # so we surface the error instead of returning [].
+            payload = self._ok(resp, "conversations.members")
             for user_id in payload.get("members", []):
                 yield user_id
-            cursor = payload.get("response_metadata", {}).get("next_cursor", "") or ""
+            cursor = (payload.get("response_metadata", {}) or {}).get("next_cursor", "") or ""
             if not cursor:
                 break

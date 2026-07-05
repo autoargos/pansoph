@@ -2,26 +2,60 @@
 
 Implemented against the Google Drive API v3.
 
-  API docs:    https://developers.google.com/drive/api/reference/rest/v3/files/list
-               https://developers.google.com/drive/api/reference/rest/v3/changes/list
-               https://developers.google.com/drive/api/reference/rest/v3/permissions/list
+  API docs:    https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list
+               https://developers.google.com/workspace/drive/api/reference/rest/v3/changes/list
+               https://developers.google.com/workspace/drive/api/reference/rest/v3/changes/getStartPageToken
+               https://developers.google.com/workspace/drive/api/guides/manage-changes
+               https://developers.google.com/workspace/drive/api/reference/rest/v3/permissions
+               https://developers.google.com/workspace/drive/api/reference/rest/v3/permissions/list
+               https://developers.google.com/workspace/drive/api/reference/rest/v3/drives/list
+               https://developers.google.com/workspace/drive/api/guides/search-files
   Auth:        OAuth2 bearer access token (config: "token"). The connector declares
                an OAUTH config field (oauth_provider "google", scope drive.readonly),
                so the in-app Google OAuth flow (access_type=offline, prompt=consent)
                mints and seals the token; a token may also be pasted by hand into the
                same field. Verified against the Google Identity OAuth 2.0 web server
-               docs and the Drive scopes doc on 2026-07-04:
+               docs and the Drive scopes doc on 2026-07-05:
                https://developers.google.com/identity/protocols/oauth2/web-server
                https://developers.google.com/workspace/drive/api/guides/api-specific-auth
                A service account with domain delegation remains a valid alternative.
-  Incremental: the changes feed (changes.list with a saved startPageToken).
+  Incremental: the changes feed. A None cursor takes a fresh startPageToken from
+               changes.getStartPageToken (with driveId + supportsAllDrives for a
+               shared drive) and pages changes.list from it; that token is a durable,
+               non-expiring high-water mark, so the very first sync already yields a
+               real resume point rather than an empty string. Each page is fetched
+               with includeRemoved=true, includeItemsFromAllDrives=true, and
+               supportsAllDrives=true. Intra-listing paging threads nextPageToken;
+               the durable checkpoint surfaced to the runtime is newStartPageToken,
+               which the response carries only once the end of the current change
+               list is reached. Verified 2026-07-05 that changes.list Change fields
+               are changeType (file|drive), removed (a boolean: "Whether the file or
+               shared drive has been removed from this list of changes, for example
+               by deletion or loss of access"), fileId, driveId, time, and file (with
+               file.trashed); getStartPageToken returns a non-expiring startPageToken.
+  Deletions:  a change with removed==true (deletion or loss of access) or
+               file.trashed==true is yielded as a DocRef with deleted=True (a
+               tombstone). includeRemoved=true is required for removed changes to
+               appear. Note that the changes feed is account/drive wide and has no
+               folder filter, so folder_id narrows the initial full listing and
+               fetch/ACL reads but does not filter the incremental change stream;
+               tombstones for files outside the folder are harmless (the runtime only
+               purges documents it already indexed).
   Scope:       an instance is confined to one folder with the `folder_id` config
                (query operator "'<id>' in parents") and, for a shared drive, the
                `drive_id` config (corpora=drive, driveId, includeItemsFromAllDrives,
                supportsAllDrives). The deprecated teamDrive*/corpus params are not used.
-  ACL model:   a file's permissions map to the ACL. An "anyone" permission is public;
-               "user" permissions become allow_users (by emailAddress); "group" and
-               "domain" become allow_groups. Namespaced by the connector instance.
+  ACL model:   a file's permissions map to the ACL, read via permissions.list and
+               paginated on nextPageToken so a heavily shared file is never truncated
+               (permissions.list returns at most 100 permissions per page for
+               shared-drive files). type=anyone is public; type=user becomes
+               allow_users by emailAddress; type=group becomes allow_groups by
+               emailAddress; type=domain becomes allow_groups namespaced as
+               "domain:<domain>" so a domain-wide grant is not conflated with a group
+               of the same email. deny is always empty because Drive expresses no
+               file-level deny grants. Namespaced by the connector instance. Verified
+               2026-07-05 that Permission.type is one of user|group|domain|anyone and
+               role is one of owner|organizer|fileOrganizer|writer|commenter|reader.
   Discovery:   list_resources powers the connect-then-pick UI. The top level (kind
                None) lists the shared drives the credential can reach via drives.list
                (returns Resource kind "drive", id = the drive id, which is also the id
@@ -32,20 +66,17 @@ Implemented against the Google Drive API v3.
                drives are reachable. Both are read-only reads confined to what the
                drive.readonly token already permits, never a scope escalation. The
                opaque cursor is the source's own pageToken, passed back verbatim.
-               Verified against these v3 endpoints on 2026-07-05:
-               https://developers.google.com/workspace/drive/api/reference/rest/v3/drives/list
-               https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list
-               https://developers.google.com/workspace/drive/api/guides/search-files
                drives.list: params pageSize (default 10, max 100), pageToken, q;
                response drives[] (id, name) plus nextPageToken. files.list: pageSize
                max 100; folder query "mimeType='application/vnd.google-apps.folder'
                and '<id>' in parents"; response files[] (id, name, mimeType) plus
                nextPageToken.
-  Verified:    against the documented v3 endpoints (files.list search syntax and
-               shared-drive parameters) on 2026-06-08, discovery re-verified 2026-07-05;
-               provide an OAuth token to run it live.
+  Verified:    every endpoint and field above re-verified against the current Google
+               Drive API v3 official docs on 2026-07-05; provide an OAuth token to run
+               it live.
 
-The runtime owns pagination and retries; methods describe one page or one file.
+The runtime owns retries; methods describe one page or one file. list_changes owns
+its own change-feed pagination and surfaces the durable checkpoint per the contract.
 """
 
 from __future__ import annotations
@@ -185,27 +216,89 @@ class GoogleDriveConnector:
             params["driveId"] = self._drive_id
         return params
 
+    def _changes_params(self) -> dict[str, str]:
+        """Shared-drive support for the changes feed. driveId scopes the feed to one
+        shared drive; supportsAllDrives + includeItemsFromAllDrives keep My Drive and
+        shared-drive changes visible; includeRemoved is required so deletions and
+        loss-of-access changes appear as removed==true tombstones."""
+        params: dict[str, str] = {
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+            "includeRemoved": "true",
+        }
+        if self._drive_id:
+            params["driveId"] = self._drive_id
+        return params
+
+    async def _start_page_token(self, client: httpx.AsyncClient) -> str:
+        """Fetch a fresh, non-expiring startPageToken from changes.getStartPageToken.
+
+        Used when the runtime has no saved cursor (the initial sync), so even a first
+        pass records a durable high-water mark instead of an empty string.
+        """
+        params: dict[str, str] = {"supportsAllDrives": "true"}
+        if self._drive_id:
+            params["driveId"] = self._drive_id
+        resp = await client.get("/changes/startPageToken", params=params)
+        resp.raise_for_status()
+        token: str = resp.json().get("startPageToken", "")
+        return token
+
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
+        """Page the Drive changes feed, yielding one DocRef per change.
+
+        A None cursor takes a fresh startPageToken (the initial sync); otherwise the
+        saved cursor is the durable resume point. Within a poll, nextPageToken threads
+        intra-listing pages; the cursor yielded with every DocRef is the durable
+        checkpoint (newStartPageToken once the end of the change list is reached, else
+        the page token still being consumed) so the runtime always persists a
+        non-empty, resumable high-water mark. removed==true or file.trashed==true maps
+        to a deleted DocRef (a tombstone).
+        """
         async with self._client() as client:
-            page: str | None = None
+            page: str = cursor if cursor else await self._start_page_token(client)
+            # The durable checkpoint carried alongside each yielded ref. It advances
+            # to newStartPageToken when the source signals the change list is drained,
+            # so a crash resumes from the last persisted checkpoint, never from zero.
+            checkpoint: str = page
             while True:
                 resp = await client.get(
-                    "/files",
+                    "/changes",
                     params={
-                        "q": self._query,
-                        "fields": "nextPageToken, files(id, mimeType, modifiedTime)",
+                        "pageToken": page,
                         "pageSize": 100,
-                        **self._drive_params(),
-                        **({"pageToken": page} if page else {}),
+                        "fields": (
+                            "nextPageToken, newStartPageToken, "
+                            "changes(changeType, removed, fileId, file(trashed))"
+                        ),
+                        **self._changes_params(),
                     },
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                for f in data.get("files", []):
-                    yield DocRef(source_doc_id=f["id"], instance_id=self.instance_id), ""
-                page = data.get("nextPageToken")
-                if not page:
+                next_page = data.get("nextPageToken")
+                new_start = data.get("newStartPageToken")
+                # Advance the durable checkpoint. Prefer newStartPageToken (the true
+                # high-water mark); until it appears, the next intra-listing pageToken
+                # is still a valid, non-empty resume point for this poll.
+                checkpoint = new_start or next_page or checkpoint
+                for change in data.get("changes", []):
+                    file_id = change.get("fileId")
+                    if not file_id:
+                        continue
+                    file_obj = change.get("file") or {}
+                    deleted = bool(change.get("removed")) or bool(file_obj.get("trashed"))
+                    yield (
+                        DocRef(
+                            source_doc_id=file_id,
+                            instance_id=self.instance_id,
+                            deleted=deleted,
+                        ),
+                        checkpoint,
+                    )
+                if not next_page:
                     break
+                page = next_page
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:
@@ -242,29 +335,46 @@ class GoogleDriveConnector:
             return await self._acl(client, ref.source_doc_id)
 
     async def _acl(self, client: httpx.AsyncClient, file_id: str) -> AccessControl:
-        resp = await client.get(
-            f"/files/{file_id}/permissions",
-            params={
-                "fields": "permissions(type, role, emailAddress, domain)",
-                "supportsAllDrives": "true",
-            },
-        )
-        resp.raise_for_status()
+        """Build the ACL from the file's full permission list.
+
+        permissions.list is paginated on nextPageToken (up to 100 permissions per page
+        for shared-drive files), so every page is accumulated before the ACL is built;
+        truncating to the first page would under-share (over-deny) a heavily shared
+        file, which rule 1 forbids. type=domain is namespaced "domain:<domain>" so a
+        domain-wide grant is not conflated with a group of the same email.
+        """
         public = False
         users: list[str] = []
         groups: list[str] = []
-        for p in resp.json().get("permissions", []):
-            kind = p.get("type")
-            if kind == "anyone":
-                public = True
-            elif kind == "user" and p.get("emailAddress"):
-                users.append(p["emailAddress"])
-            elif kind in ("group", "domain"):
-                groups.append(p.get("emailAddress") or p.get("domain") or "")
+        page_token: str | None = None
+        while True:
+            params: dict[str, str] = {
+                "fields": "nextPageToken, permissions(type, role, emailAddress, domain)",
+                "pageSize": "100",
+                "supportsAllDrives": "true",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            resp = await client.get(f"/files/{file_id}/permissions", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            for p in data.get("permissions", []):
+                kind = p.get("type")
+                if kind == "anyone":
+                    public = True
+                elif kind == "user" and p.get("emailAddress"):
+                    users.append(p["emailAddress"])
+                elif kind == "group" and p.get("emailAddress"):
+                    groups.append(p["emailAddress"])
+                elif kind == "domain" and p.get("domain"):
+                    groups.append(f"domain:{p['domain']}")
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
         return AccessControl(
             public=public,
             allow_users=users,
-            allow_groups=[g for g in groups if g],
+            allow_groups=groups,
             principal_ns=self.instance_id,
         )
 

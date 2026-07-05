@@ -5,10 +5,17 @@ official docs:
 
   API docs:    https://learn.microsoft.com/graph/api/channel-list?view=graph-rest-1.0
                  (list channels)
+               https://learn.microsoft.com/graph/api/resources/channel?view=graph-rest-1.0
+                 (channel resource, the membershipType property: standard, private,
+                  shared)
                https://learn.microsoft.com/graph/api/channel-list-messages?view=graph-rest-1.0
                  (list channel messages)
                https://learn.microsoft.com/graph/api/channel-list-members?view=graph-rest-1.0
-                 (list channel members)
+                 (list channel members: DIRECT members only, for every channel type)
+               https://learn.microsoft.com/graph/api/channel-list-allmembers?view=graph-rest-1.0
+                 (list allMembers: direct AND indirect members, all channel types)
+               https://learn.microsoft.com/graph/api/team-list-members?view=graph-rest-1.0
+                 (list team members: the roster a standard channel inherits)
                https://learn.microsoft.com/graph/api/resources/conversationmember?view=graph-rest-1.0
                  (conversationMember resource, the userId property)
   API version: Graph v1.0 (paths are prefixed /v1.0/...).
@@ -16,34 +23,66 @@ official docs:
                token is sent as `Authorization: Bearer <token>`. The connector
                does not mint or refresh the token; the operator supplies an access
                token already scoped for the credential's tenant and app
-               registration (for example ChannelMember.Read.Group and the channel
-               message read permissions). Because access is RBAC controlled, the
-               ACL reflects the credential's actual reach, not an assumption.
+               registration (for example ChannelMember.Read.Group or
+               ChannelMember.Read.All for channel members, TeamMember.Read.All for
+               the team roster, and the channel message read permissions). Because
+               access is RBAC controlled, the ACL reflects the credential's actual
+               reach, not an assumption.
   Pagination:  Graph returns at most a page of items plus an `@odata.nextLink`
                absolute URL. Follow `@odata.nextLink` until it is absent.
   Incremental: not implemented in this first cut. Capabilities.incremental is
                False, so the runtime performs full listings. `next_cursor` is the
-               empty string. (Graph offers change notifications and delta queries
-               that a later revision can adopt.)
+               empty string, matching the other non-incremental connectors. (Graph
+               offers change notifications and the chatMessage delta query that a
+               later revision can adopt to set incremental=True honestly, exactly as
+               the SharePoint connector does with the driveItem delta feed.)
+  Deletions:   not implemented in this first cut. Capabilities.deletions is False.
+               list_changes never yields a tombstone (a DocRef with deleted=True),
+               so the flag is honest: the conformance suite requires a
+               deletions-capable connector to actually surface a tombstone, so the
+               flag stays False until the chatMessage delta feed (which reports a
+               removed message through the deletedDateTime property) is wired up.
   Rate limit:  Graph throttles per app and per tenant and returns 429 with a
                Retry-After header; the runtime owns retries and backoff, so a
                method only describes one page or one document.
-  ACL model:   a document is a channel. The channel ACL maps to the channel
-               members endpoint: each conversationMember exposes a `userId` (the
-               Entra object id), which becomes an allow_user. Standard channels
-               inherit team membership, so for a standard channel the members
-               endpoint may return the team roster; this first cut maps whatever
-               the members endpoint returns to allow_users. No groups and no deny
-               are emitted. See the caveat below.
-  Verified on: 2026-06-20.
+  ACL model:   a document is a channel, and the channel ACL is the set of users who
+               can actually see that channel, which depends on the channel's
+               membershipType (see the channel resource docs). Getting this wrong is
+               a security bug, not a cosmetic one, because the channel/members
+               endpoint returns only DIRECT members for every channel type:
 
-ACL caveat: this first cut maps a channel's ACL to the users returned by the
-channel members endpoint, as allow_users only. Standard channels inherit their
-membership from the parent team, and Graph surfaces that roster through the same
-members endpoint, so the result is faithful to what the credential can see at the
-member granularity. Group-based and shared-channel indirect membership, and any
-deny semantics, are out of scope for this revision; a later revision can map team
-groups to allow_groups and use the allMembers endpoint for shared channels.
+                 - standard: a standard channel is visible to the whole parent team
+                   and its membership is INHERITED from the team, not stored on the
+                   channel. The channel/members endpoint does not return the team
+                   roster for a standard channel, so mapping it would under-share
+                   (omit team members who can read the channel). The faithful source
+                   is the team members endpoint, /teams/{team}/members.
+
+                 - private and shared: access is the channel's own membership, which
+                   for a shared channel includes INDIRECT members (users who reach
+                   the channel through a team it is shared with). The allMembers
+                   endpoint returns both direct and indirect members; the plain
+                   members endpoint would omit indirect members and under-share. So
+                   these map from /teams/{team}/channels/{id}/allMembers.
+
+               Each conversationMember exposes a `userId` (the Entra object id) which
+               becomes an allow_user. Members without a userId (for example an
+               anonymous guest conversationMember) are skipped, since they carry no
+               principal to map. No allow_groups and no deny are emitted (Graph
+               surfaces channel access at the member level here). See the caveat.
+  Verified on: 2026-07-05 (channel resource, list members, list allMembers, and list
+               team members re-verified against the v1.0 reference on this date; the
+               earlier 2026-06-20 cut mapped every channel type to channel/members,
+               which under-shares standard and shared channels, and is corrected
+               here).
+
+ACL caveat (security-relevant, read before changing the mapping): membership is
+mapped to allow_users only, at the userId granularity Graph exposes. Group-backed
+access is not expanded to allow_groups in this revision; the userId lists already
+name the concrete principals, so the authz layer has the truth it needs. For a
+shared channel, allMembers may list the same user more than once (once directly and
+once per sharing team), so the userId list is deduplicated. Deny semantics do not
+exist in this Teams access model, so deny stays empty.
 
 Credential scope note: every configured instance carries its own credential and
 its own ACL namespace (principal_ns = instance_id). The members' userId values are
@@ -180,15 +219,34 @@ class TeamsConnector:
         return DocRef(source_doc_id=channel_id, instance_id=self.instance_id)
 
     async def _acl(self, client: httpx.AsyncClient, channel_id: str) -> AccessControl:
+        # The faithful ACL depends on the channel's membershipType, because the
+        # channel/members endpoint returns only DIRECT members for every type. A
+        # standard channel inherits its membership from the parent team, and a shared
+        # channel has indirect members; both are missed by channel/members. See the
+        # module ACL model note.
+        membership_type = await self._membership_type(client, channel_id)
+        if membership_type == "standard":
+            # Visible to the whole team; the roster lives on the team, not the channel.
+            path = f"/v1.0/teams/{self._team_id}/members"
+        else:
+            # private or shared (and any future type): allMembers covers direct plus
+            # indirect members, so it never under-shares relative to channel/members.
+            path = f"/v1.0/teams/{self._team_id}/channels/{channel_id}/allMembers"
+
         users: list[str] = []
-        async for member in self._paginate(
-            client,
-            f"/v1.0/teams/{self._team_id}/channels/{channel_id}/members",
-        ):
+        async for member in self._paginate(client, path):
             user_id = member.get("userId")
             if user_id:
                 users.append(user_id)
-        return AccessControl(allow_users=users, principal_ns=self.instance_id)
+        return AccessControl(allow_users=_dedupe(users), principal_ns=self.instance_id)
+
+    async def _membership_type(self, client: httpx.AsyncClient, channel_id: str) -> str:
+        # Read the channel's membershipType to choose the faithful membership source.
+        # Absent or unrecognized values fall back to the allMembers path, which is the
+        # safe superset (it never omits a member the plain members endpoint would).
+        resp = await client.get(f"/v1.0/teams/{self._team_id}/channels/{channel_id}")
+        resp.raise_for_status()
+        return resp.json().get("membershipType") or ""
 
     async def _paginate(
         self, client: httpx.AsyncClient, path: str
@@ -203,3 +261,15 @@ class TeamsConnector:
             for item in payload.get("value", []):
                 yield item
             url = payload.get("@odata.nextLink")
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    # A shared channel's allMembers can list the same userId more than once (once
+    # directly and once per sharing team). Preserve first-seen order.
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out

@@ -1,4 +1,6 @@
 [
   {"user_id": "alice@x.com", "groups": ["eng"]},
-  {"user_id": "bob@x.com", "groups": []}
+  {"user_id": "bob@x.com", "groups": []},
+  {"user_id": "mallory@x.com", "groups": []},
+  {"user_id": "pending@x.com", "groups": []}
 ]
