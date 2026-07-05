@@ -34,7 +34,15 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
-      - name: Mypy (informational until adapters land, then made blocking)
+      # The enforcement path is type checked strictly and BLOCKING: a type bug in the
+      # authz bulk check or the retrieval filter is a permission bug, so pansoph-authz and
+      # pansoph-retrieval must pass mypy --strict on every PR.
+      - name: Mypy (enforcement path, blocking)
+        run: uv run mypy packages/pansoph-authz packages/pansoph-retrieval
+
+      # The rest of the tree is type checked informationally until each package's adapters
+      # are annotated, then folded into the blocking step above.
+      - name: Mypy (rest, informational)
         run: uv run mypy packages || true
 
       - name: Pytest (unit)
@@ -72,6 +80,23 @@ jobs:
       - run: uv sync --all-packages --dev
       - name: Connector conformance (hermetic, offline)
         run: uv run pytest -m conformance -q
+
+  # The grabber guardrail. Static, hermetic checks that the scout browser extension only
+  # captures what the signed in user can see, on an explicit consent click, and never
+  # bypasses auth, captures a credential, or solves a CAPTCHA (CLAUDE.md rule 5). A green
+  # check means a regression cannot quietly turn the grabber into a scraper.
+  grabber-guardrail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.x"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --dev
+      - name: Grabber guardrail (rule 5)
+        run: uv run pytest -m guardrail -q
 
   # The live enforcement gate. Brings up a real SpiceDB and a real pgvector and runs the
   # retrieval enforcement path against them, so a schema bug, a ZedToken freshness bug, or

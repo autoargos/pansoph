@@ -83,6 +83,22 @@ python_version = "3.12"
 strict = true
 warn_unused_ignores = true
 
+# Third-party libraries that ship no type stubs. Ignoring their missing imports keeps the
+# strict gate focused on our own code (the enforcement path is the blocking target in CI)
+# rather than failing on an upstream library's lack of a py.typed marker.
+[[tool.mypy.overrides]]
+module = [
+  "authzed.*",
+  "grpc",
+  "grpc.*",
+  "grpcutil.*",
+  "psycopg",
+  "psycopg.*",
+  "qdrant_client",
+  "qdrant_client.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["packages", "connectors", "tests"]
@@ -90,4 +106,5 @@ markers = [
   "permission: document level access control red team tests that gate releases",
   "integration: tests that need live services (postgres, spicedb, ...)",
   "conformance: connector conformance suite, hermetic and offline",
+  "guardrail: static grabber safety checks (rule 5: no auth bypass, capture with consent)",
 ]

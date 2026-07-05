@@ -82,6 +82,16 @@ jobs:
           name: sbom-${{ matrix.service }}
           path: sbom-${{ matrix.service }}.cdx.json
 
+      # Supply chain scan: fail the release on a fixable Critical or High vulnerability in
+      # the built image. This is the third leg (SBOM, scan, sign) of the supply chain gate.
+      - name: Scan image for vulnerabilities (Grype)
+        uses: anchore/scan-action@v6
+        with:
+          image: ${{ env.IMAGE }}:${{ env.VERSION }}
+          severity-cutoff: high
+          only-fixed: true
+          fail-build: true
+
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 

@@ -23,7 +23,8 @@ class TEIEmbedder:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(f"{self._url}/embed", json={"inputs": texts})
             resp.raise_for_status()
-            return resp.json()
+            embeddings: list[list[float]] = resp.json()
+            return embeddings
 
 
 class OpenAICompatibleEmbedder:
