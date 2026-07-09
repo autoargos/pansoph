@@ -29,6 +29,7 @@ from sse_starlette.sse import EventSourceResponse
 from . import assembly
 from .audit import audit
 from .connectors import ConnectorManager, health, run_instance
+from .group_aliases import expand_groups
 from .registry import list_adapters, load_adapter
 
 router = APIRouter(prefix="/api")
@@ -69,10 +70,16 @@ async def _identity_from_token(authorization: str | None) -> Any:
 
 async def _effective_identity(req: Query, authorization: str | None) -> tuple[str, list[str]]:
     """Prefer the validated token identity; fall back to the request body (the demo
-    switcher) when no bearer token is present. The authz check enforces either way."""
+    switcher) when no bearer token is present. The authz check enforces either way.
+
+    The subject id is the user's EMAIL when the token carries one, because that is the
+    identifier connectors write into direct-user grants (Drive, Zendesk, Confluence, ...
+    all map a source ACL user to their email). Falling back to the opaque id keeps a
+    tokenless demo request working. Email is the canonical cross-source principal."""
     user = await _identity_from_token(authorization)
     if user is not None:
-        return user.id, list(user.group_ids)
+        subject = getattr(user, "email", None) or user.id
+        return subject, list(user.group_ids)
     return req.user, req.groups
 
 
@@ -131,19 +138,29 @@ async def _retrieve(
     user: str, groups: list[str], tenant_id: str, query: str, final_k: int
 ) -> list[Any]:
     authz = assembly.build_authz()
-    # Sync the subject's identity groups into the authz graph so the engine can
-    # resolve nested-group document access. Idempotent. In a full deployment this is
-    # done by the Identity port on login or SCIM sync; here it is per request.
-    # Every user is a member of its tenant's everyone group, so a public document
-    # (granted to that group, not a global wildcard) is readable only within its
-    # tenant. This enforces tenant isolation at the authz layer, defense in depth with
-    # the vector pre-filter. Identity groups are synced alongside it.
-    await authz.write_tuples(membership_tuples(user, [TENANT_EVERYONE, *groups], tenant_id))
+    # Expand the identity groups with any connector groups the operator aliased them to
+    # (e.g. identity group "engineering" -> "slack:member:acme"), so a document a
+    # connector granted only to its namespaced source group becomes reachable by the
+    # mapped users, and by no one else. An unmapped identity group expands to itself, so
+    # this never widens beyond the operator's declared edges.
+    aliases = await assembly.build_group_alias_store().aliases_for_tenant(tenant_id)
+    effective_groups = expand_groups(groups, aliases)
+    # Sync the subject's effective groups into the authz graph so the engine can resolve
+    # nested-group document access. Idempotent. In a full deployment this is done by the
+    # Identity port on login or SCIM sync; here it is per request. Every user is a member
+    # of its tenant's everyone group, so a public document (granted to that group, not a
+    # global wildcard) is readable only within its tenant. This enforces tenant isolation
+    # at the authz layer, defense in depth with the vector pre-filter.
+    await authz.write_tuples(
+        membership_tuples(user, [TENANT_EVERYONE, *effective_groups], tenant_id)
+    )
     return await retrieve(
         query=query,
         subject=Principal(type="user", id=user, ns=tenant_id),
         tenant_id=tenant_id,
-        subject_groups=groups,
+        # The pre-filter must see the expanded groups too, or a document granted only to a
+        # connector group would be dropped before the bulk check ever runs.
+        subject_groups=effective_groups,
         final_k=final_k,
         vector_store=assembly.build_vector_store(),
         embedder=assembly.build_embedder(),

@@ -144,6 +144,15 @@ def build_acl_log() -> Any:
     return PostgresAclLog(_postgres_dsn())
 
 
+def build_group_alias_store() -> Any:
+    """Build the identity-group alias store: the operator declared edges from an IdP
+    group to a connector source group. Read at query time to expand a subject's effective
+    groups. Postgres-backed and connector agnostic (opaque group id strings)."""
+    from .group_aliases import GroupAliasStore
+
+    return GroupAliasStore(_postgres_dsn())
+
+
 def build_llm() -> Any:
     return _build("pansoph.llms", _env("PANSOPH_LLM_ADAPTER", "openai_compatible"), _LLM_KWARGS)
 

@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from . import __version__
 from .routes import router
+from .routes_group_aliases import router as group_aliases_router
 from .routes_resources import router as resources_router
 from .settings import Settings
 
@@ -70,4 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
     # Connector resource-discovery and credential-status reads (connect-then-pick UX).
     app.include_router(resources_router)
+    # Identity-group aliases: connect an IdP group to a connector source group so its
+    # fail-closed grants become reachable by the mapped users.
+    app.include_router(group_aliases_router)
     return app

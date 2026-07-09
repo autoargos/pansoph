@@ -52,6 +52,11 @@ _SAFE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012
 def _safe_obj(object_id: str) -> str:
     """Encode a document id into a valid SpiceDB object id. Reversed via a lookup
     map on the way back, so callers keep their original ids."""
+    # The public wildcard is a legal SpiceDB object id and a sentinel, not data to
+    # encode: encoding it would turn `user:*` into `user:=2a` and break public grants.
+    # A real document id is never the bare "*", so this is unambiguous.
+    if object_id == "*":
+        return "*"
     parts: list[str] = []
     for ch in object_id:
         if ch in _SAFE_CHARS:
@@ -120,7 +125,12 @@ class SpiceDBAuthz(AuthzPort):
         resource = ObjectReference(object_type=tup.object_type, object_id=_safe_obj(tup.object_id))
         subject_type = "group" if tup.subject.type == "group" else "user"
         subject = SubjectReference(
-            object=ObjectReference(object_type=subject_type, object_id=_ns_id(tup.subject)),
+            # Subject ids go through the same encoding as resource ids: a principal id can
+            # carry SpiceDB-illegal characters (an email subject has '@' and '.'), and the
+            # write and the check must encode identically so they still match.
+            object=ObjectReference(
+                object_type=subject_type, object_id=_safe_obj(_ns_id(tup.subject))
+            ),
             # A group grants access through its members.
             optional_relation="member" if subject_type == "group" else "",
         )
@@ -177,7 +187,9 @@ class SpiceDBAuthz(AuthzPort):
             consistency = Consistency(minimize_latency=True)
 
         subj = SubjectReference(
-            object=ObjectReference(object_type="user", object_id=_ns_id(subject))
+            # Same encoding as the reader/membership writes, so an email subject (with
+            # '@' and '.') matches the tuples it was written into.
+            object=ObjectReference(object_type="user", object_id=_safe_obj(_ns_id(subject)))
         )
         # Map the SpiceDB-safe object id back to the caller's original id.
         safe_to_original = {_safe_obj(oid): oid for oid in object_ids}
