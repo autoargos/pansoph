@@ -288,6 +288,15 @@ class SlackConnector:
                 # yielded cursor is non-empty.
                 yield_token = next_cursor or _LIST_TOKEN
                 for channel in payload.get("channels", []):
+                    # Only ingest a channel the credential is actually a member of.
+                    # conversations.list returns is_member for the calling token; a bot
+                    # cannot read the history of a channel it was never invited to (fetch
+                    # would get not_in_channel and fail closed), so listing it would only
+                    # abort the sync on a channel that is correctly inaccessible. Skipping
+                    # here ingests exactly what the credential can read. A private channel
+                    # the token is in has is_member true.
+                    if not channel.get("is_member", False):
+                        continue
                     yield self._ref(channel["id"]), yield_token
                 if not next_cursor:
                     break

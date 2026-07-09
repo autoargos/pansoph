@@ -40,6 +40,22 @@ def _factory() -> GithubConnector:
     )
 
 
+def test_github_full_name_repo_splits_and_does_not_double_owner() -> None:
+    # Regression: the resource picker stores the repo as a full_name ("owner/repo"). With a
+    # separate owner also set, the connector used to build repos/owner/owner/repo (a 404).
+    # A full_name must split, its owner winning, so the request path is repos/owner/repo.
+    conn = GithubConnector(
+        instance_id="x",
+        config={"owner": "cyproto", "repo": "cyproto/abacus", "token": "x"},
+    )
+    assert conn._owner == "cyproto"
+    assert conn._repo == "abacus", "a full_name repo must be split, not passed through whole"
+
+    # A bare repo name with a separate owner is unchanged (the pre-picker/manual path).
+    bare = GithubConnector(instance_id="x", config={"owner": "octocat", "repo": "Hello-World"})
+    assert (bare._owner, bare._repo) == ("octocat", "Hello-World")
+
+
 def _mock_full_pass(respx_mock: respx.MockRouter) -> None:
     # The full pass (cursor None) reads the repo, the latest commit date (next cursor),
     # and the recursive tree, then fetches file contents on demand.

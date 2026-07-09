@@ -51,15 +51,16 @@ def _factory() -> SlackConnector:
 
 
 def _mock_list(respx_mock: respx.MockRouter) -> None:
-    """A single conversations.list page with one public and one private channel."""
+    """A single conversations.list page with one public and one private channel, both of
+    which the credential is a member of (is_member true), so both are ingested."""
     respx_mock.get(path="/api/conversations.list").mock(
         return_value=httpx.Response(
             200,
             json={
                 "ok": True,
                 "channels": [
-                    {"id": "C1", "name": "general", "is_private": False},
-                    {"id": "C2", "name": "secret-plans", "is_private": True},
+                    {"id": "C1", "name": "general", "is_private": False, "is_member": True},
+                    {"id": "C2", "name": "secret-plans", "is_private": True, "is_member": True},
                 ],
                 "response_metadata": {"next_cursor": ""},
             },
@@ -75,6 +76,34 @@ async def test_slack_discovery_and_spec(respx_mock: respx.MockRouter) -> None:
     check_spec(conn)
     refs = await check_discovery(conn)
     assert [r.source_doc_id for r in refs] == ["C1", "C2"]
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_slack_list_changes_skips_channels_the_bot_is_not_in(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # A bot can only read the history of channels it was invited to. conversations.list
+    # returns is_member for the calling token; listing a non-member channel would only make
+    # fetch hit not_in_channel and abort the whole sync on a channel that is correctly
+    # inaccessible. So list_changes ingests exactly the member channels.
+    respx_mock.get(path="/api/conversations.list").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "channels": [
+                    {"id": "C1", "name": "in", "is_private": False, "is_member": True},
+                    {"id": "C2", "name": "not-in", "is_private": False, "is_member": False},
+                    {"id": "C3", "name": "no-flag", "is_private": False},
+                ],
+                "response_metadata": {"next_cursor": ""},
+            },
+        )
+    )
+    conn = _factory()
+    ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert ids == ["C1"], "only the channel the bot is a member of is ingested"
 
 
 @pytest.mark.conformance
@@ -131,7 +160,7 @@ async def test_slack_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
                 200,
                 json={
                     "ok": True,
-                    "channels": [{"id": "C1", "is_private": False}],
+                    "channels": [{"id": "C1", "is_private": False, "is_member": True}],
                     "response_metadata": {"next_cursor": "NC"},
                 },
             ),
@@ -139,7 +168,7 @@ async def test_slack_paginates_all_pages(respx_mock: respx.MockRouter) -> None:
                 200,
                 json={
                     "ok": True,
-                    "channels": [{"id": "C2", "is_private": False}],
+                    "channels": [{"id": "C2", "is_private": False, "is_member": True}],
                     "response_metadata": {"next_cursor": ""},
                 },
             ),

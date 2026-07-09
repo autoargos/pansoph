@@ -135,8 +135,18 @@ class GithubConnector:
         self.instance_id = instance_id
         cfg = config or {}
         self._token: str = cfg.get("token", "")
-        self._owner: str = cfg.get("owner", "")
-        self._repo: str = cfg.get("repo", "")
+        # The repo may be a bare name ("abacus") with a separate owner, or a full_name
+        # ("cyproto/abacus") as the resource picker stores it. A full_name splits and its
+        # owner wins, so owner and repo can never disagree and the request path is never
+        # doubled up (repos/cyproto/cyproto/abacus).
+        repo_cfg: str = cfg.get("repo", "")
+        if "/" in repo_cfg:
+            owner_from_repo, _, repo_name = repo_cfg.partition("/")
+            self._owner = owner_from_repo
+            self._repo = repo_name
+        else:
+            self._owner = cfg.get("owner", "")
+            self._repo = repo_cfg
         self._branch: str | None = cfg.get("branch")
         self._base_url: str = cfg.get("base_url", "https://api.github.com")
         # Bound ingestion of large/popular repos: only files under `path`, capped at
