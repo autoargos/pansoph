@@ -78,6 +78,9 @@ docker compose --profile core,workers,models up
 > demo behind a much smaller footprint is on the roadmap. Until then, see `DEMO.md` for
 > the guided walkthrough.
 
+For how access is decided and what you configure (identity, group aliases, and the current
+limits), see [`docs/operating/identity-and-access.md`](docs/operating/identity-and-access.md).
+
 ## Status
 
 Pre-1.0 and under active development. This section tracks real, verified capability
@@ -85,36 +88,56 @@ honestly (see the "No fiction" rule in `CLAUDE.md`).
 
 ### What works today
 
-These work end to end against in-memory fakes, with the logic covered by the test suite
-(133 tests pass) and the permission red-team (27 tests) gating CI:
+The permission core is verified against real engines, not just fakes. CI gates every PR
+with the permission red team (61 tests), connector conformance (128 tests, all 15
+connectors), a live enforcement gate against a real SpiceDB and a real pgvector (9 tests),
+a grabber safety guardrail (3 tests), and blocking mypy on the enforcement path. The full
+hermetic suite is 342 tests.
 
-- The permission-enforcement retrieval path: embed, hybrid search with overfetch, a
-  single `authz.bulk_check` at a freshness tied to the last permission write, keep only
-  the allowed subset, apply deny as a final filter, then optionally rerank
-  (`packages/pansoph-retrieval/src/pansoph_retrieval/pipeline.py`).
-- The agora REST, SSE, and discovery surface: `/api/search`, `/api/chat` (SSE),
-  `/api/grab`, `/api/health`, and connector-instance management
-  (`packages/pansoph-core/src/pansoph_core/routes.py`).
-- Authz adapters for SpiceDB (gRPC, bulk check, consistency token), OpenFGA (batch
-  check), and a no-op adapter, behind a minimal `AuthzPort`.
-- Vector adapters for pgvector (dense plus sparse plus RRF) and Qdrant.
-- Fifteen connectors and the connector SDK contract, with a hermetic, offline
-  conformance harness.
+- **Document-level access control, enforced at retrieval, verified live.** The path is
+  embed, hybrid search with overfetch, a single `authz.bulk_check` at a freshness tied to
+  the last permission write, keep only the allowed subset, apply deny as a final filter,
+  then optionally rerank (`packages/pansoph-retrieval/src/pansoph_retrieval/pipeline.py`).
+  The live gate stands up a real SpiceDB and pgvector and asserts a user never retrieves
+  another user's restricted document, that tenants and instances are isolated, and that a
+  revocation propagates with no stale read (`tests/integration/test_enforcement_live.py`).
+- **Revocation and deletion propagate.** A re-scope or a source deletion deletes the
+  reader tuples and purges the document from the vector store, proven live.
+- **Fifteen connectors on one SDK contract**, each passing the hermetic conformance suite.
+  The thirteen with a real permission model are audited against their current official
+  docs and map source ACLs fail-closed (an unresolvable grant denies rather than leaks),
+  adversarially reviewed for over-share.
+- **Connect-then-pick onboarding.** Connect a source once (OAuth or a token), then pick
+  what to sync from its real resources (your repos, drives, channels) instead of typing
+  ids. The credential is sealed via the SecretStore, never stored in plaintext.
+- **Identity materialization.** The query subject is the user's email (the cross-source
+  principal), and an operator connects an IdP group to a connector's source group with a
+  declared alias, so a fail-closed connector grant becomes reachable by exactly the mapped
+  users. Proven live against Keycloak, Postgres, and SpiceDB.
+- **agora REST, SSE, and discovery surface**: `/api/search`, `/api/chat` (SSE),
+  `/api/grab`, `/api/health`, connector-instance management, resource discovery, and the
+  group-alias admin routes (`packages/pansoph-core/src/pansoph_core/routes.py`).
+- **Authz adapters** for SpiceDB (gRPC, bulk check, consistency token), OpenFGA (batch
+  check), and a no-op adapter, behind a minimal `AuthzPort`. Vector adapters for pgvector
+  (dense plus sparse plus RRF) and Qdrant.
+- **Release supply chain**: SBOM (Syft), image scan (Grype, fail on fixable High or
+  Critical), and keyless image signing (cosign) on release.
 
-### What is in progress (not yet verified)
+### What is in progress
 
 We say this plainly so you can trust the line above:
 
-- **Live-engine integration is unverified.** The permission suite runs on in-memory
-  fakes today. It validates the enforcement logic, not a live SpiceDB, OpenFGA, or
-  pgvector engine. Integration tests against real engines are the next priority, because
-  a schema or freshness bug could otherwise ship with green CI.
-- **Durable ingestion is a placeholder.** The ingestion worker is a stub and scheduling
-  is a best-effort in-process loop. The durable execution engine is not wired yet.
-- **Connectors are full-sync with content-fidelity caveats.** Most connectors currently
-  sync fully rather than incrementally, content extraction is demo-grade for several
-  sources, and ACL mapping fidelity varies by source. Treat the connectors as functional
-  but shallow until each one ships a conformance fixture and a verified ACL mapping.
+- **Live connector coverage is partial.** GitHub, Notion, and the public-link fetcher are
+  verified against real APIs (a real GitHub repo syncs and enforces RBAC end to end). The
+  rest pass the hermetic conformance suite but still need credentials to be verified live.
+- **Two source-API fidelity limits are documented, not fixed.** SharePoint classic Deny
+  and broken inheritance, and Salesforce restriction rules, are not exposed by those APIs,
+  so the connector cannot detect them. Both are flagged in-module and stay conservative.
+- **Identity beyond email.** Direct grants and scopes resolve by email; source principals
+  that are not emails (Slack user ids, GitHub logins, Confluence account ids) still need
+  per-source linking beyond the email and group-alias model.
+- **Durable ingestion.** A DBOS durable-execution wrapper exists as an optional dependency;
+  the default local runner is a simple in-process scheduler.
 
-The permission core is real and tested in logic. The live proof and the connector depth
-are the work in flight. Do not claim a feature works without an evidence trail.
+Do not claim a feature works without an evidence trail. Every line above points at a test,
+a run, or a file.
