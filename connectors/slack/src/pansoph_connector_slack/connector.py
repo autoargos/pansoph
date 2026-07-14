@@ -189,6 +189,12 @@ class SlackConnector:
         # Default base is the host only, so methods are called as relative
         # "/api/<method>" paths and the request path is stable for mocking.
         self._base_url: str = cfg.get("base_url", "https://slack.com")
+        # When on, the connector joins a PUBLIC channel it is not yet a member of before
+        # indexing it (Slack forbids reading a channel's history unless the token is a
+        # member, and a bot cannot be invited by itself). Needs the channels:join scope;
+        # without it the join fails and the channel is skipped, never fatal. Private
+        # channels are never self-joined (Slack does not allow it), they must be invited.
+        self._auto_join: bool = bool(cfg.get("auto_join", True))
         self.meta = ConnectorMeta(
             name="slack",
             auth=AuthScheme.api_token,
@@ -245,6 +251,18 @@ class SlackConnector:
                     ),
                 ),
                 ConfigField(
+                    key="auto_join",
+                    label="Auto-join public channels",
+                    kind=FieldKind.BOOL,
+                    required=False,
+                    help=(
+                        "On by default. Joins a public channel the bot is not yet in before "
+                        "indexing it, so a freshly installed bot works without a manual "
+                        "invite. Needs the channels:join bot scope. Private channels are "
+                        "never self-joined and must be invited to the bot."
+                    ),
+                ),
+                ConfigField(
                     key="base_url",
                     label="API base URL",
                     kind=FieldKind.STRING,
@@ -288,19 +306,38 @@ class SlackConnector:
                 # yielded cursor is non-empty.
                 yield_token = next_cursor or _LIST_TOKEN
                 for channel in payload.get("channels", []):
-                    # Only ingest a channel the credential is actually a member of.
-                    # conversations.list returns is_member for the calling token; a bot
-                    # cannot read the history of a channel it was never invited to (fetch
-                    # would get not_in_channel and fail closed), so listing it would only
-                    # abort the sync on a channel that is correctly inaccessible. Skipping
-                    # here ingests exactly what the credential can read. A private channel
-                    # the token is in has is_member true.
-                    if not channel.get("is_member", False):
+                    # Ingest a channel only once the credential is a member of it (Slack
+                    # returns not_in_channel for a non-member, which would abort the sync).
+                    # For a PUBLIC channel we are not in, best-effort self-join first so a
+                    # freshly installed bot indexes it without a manual invite; the join
+                    # needs channels:join and is skipped (not fatal) when the scope is
+                    # absent. A private channel is never self-joined and must be invited.
+                    if channel.get("is_member", False):
+                        yield self._ref(channel["id"]), yield_token
                         continue
-                    yield self._ref(channel["id"]), yield_token
+                    is_public = not channel.get("is_private", False)
+                    if (
+                        is_public
+                        and self._auto_join
+                        and await self._try_join(client, channel["id"])
+                    ):
+                        yield self._ref(channel["id"]), yield_token
                 if not next_cursor:
                     break
                 params["cursor"] = next_cursor
+
+    async def _try_join(self, client: httpx.AsyncClient, channel_id: str) -> bool:
+        """Best-effort join a public channel so its history becomes readable. Returns True
+        if the token is a member afterward. Any Slack error (missing channels:join scope,
+        an archived channel) returns False and the channel is skipped, never aborting the
+        sync. Joining a channel the token is already in is a harmless no op in Slack.
+        """
+        try:
+            resp = await client.post("/api/conversations.join", data={"channel": channel_id})
+            self._ok(resp, "conversations.join")
+            return True
+        except SlackApiError:
+            return False
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:

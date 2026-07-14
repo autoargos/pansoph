@@ -320,6 +320,24 @@ export async function instanceCredential(instanceId: string): Promise<Credential
   );
 }
 
+// One indexed document of an instance: its source id (the meaningful part of the doc id,
+// e.g. a url, file path, or page id), how many chunks it produced, and a content snippet.
+// Lets an operator see WHAT a connector ingested, not just a count.
+export interface IndexedDocument {
+  doc_id: string;
+  source_id: string;
+  chunks: number;
+  snippet: string;
+}
+
+export async function instanceDocuments(
+  instanceId: string,
+): Promise<{ documents: IndexedDocument[]; total: number }> {
+  return jget<{ documents: IndexedDocument[]; total: number }>(
+    `/api/connectors/instances/${encodeURIComponent(instanceId)}/documents`,
+  );
+}
+
 export interface Health {
   ok: boolean;
   checks: Record<string, { ok: boolean; latency_ms?: number; error?: string }>;

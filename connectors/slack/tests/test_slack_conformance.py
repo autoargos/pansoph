@@ -50,6 +50,13 @@ def _factory() -> SlackConnector:
     )
 
 
+def _factory_no_autojoin() -> SlackConnector:
+    return SlackConnector(
+        instance_id="acme",
+        config={"token": "xoxb-test", "base_url": "https://slack.com", "auto_join": False},
+    )
+
+
 def _mock_list(respx_mock: respx.MockRouter) -> None:
     """A single conversations.list page with one public and one private channel, both of
     which the credential is a member of (is_member true), so both are ingested."""
@@ -101,9 +108,52 @@ async def test_slack_list_changes_skips_channels_the_bot_is_not_in(
             },
         )
     )
-    conn = _factory()
+    # auto_join off: a non-member channel is purely skipped, no join attempted.
+    conn = _factory_no_autojoin()
     ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
     assert ids == ["C1"], "only the channel the bot is a member of is ingested"
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=False)
+async def test_slack_auto_joins_public_channels_then_ingests(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # With auto_join on (the default), a public channel the bot is not in is joined first
+    # (conversations.join), then ingested. A private non-member channel is never joined and
+    # is skipped, and a public channel whose join fails (for example missing channels:join
+    # scope) is skipped without aborting the sync.
+    respx_mock.get(path="/api/conversations.list").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "channels": [
+                    {"id": "CMEMBER", "is_private": False, "is_member": True},
+                    {"id": "CJOINABLE", "is_private": False, "is_member": False},
+                    {"id": "CPRIVATE", "is_private": True, "is_member": False},
+                    {"id": "CNOSCOPE", "is_private": False, "is_member": False},
+                ],
+                "response_metadata": {"next_cursor": ""},
+            },
+        )
+    )
+
+    def _join(request: httpx.Request) -> httpx.Response:
+        body = httpx.QueryParams(request.content.decode())
+        if body.get("channel") == "CJOINABLE":
+            return httpx.Response(200, json={"ok": True, "channel": {"id": "CJOINABLE"}})
+        # CNOSCOPE cannot be joined (simulating missing channels:join scope).
+        return httpx.Response(200, json={"ok": False, "error": "missing_scope"})
+
+    respx_mock.post(path="/api/conversations.join").mock(side_effect=_join)
+
+    conn = _factory()
+    ids = [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+    assert ids == ["CMEMBER", "CJOINABLE"], (
+        "ingest the already-member channel and the joinable public one; skip the private "
+        "and the un-joinable public channel"
+    )
 
 
 @pytest.mark.conformance

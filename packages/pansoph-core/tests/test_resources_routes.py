@@ -32,3 +32,8 @@ def test_resources_route_accepts_discovery_query_params() -> None:
         params={"kind": "repo", "parent": "org1", "q": "foo", "cursor": "c1"},
     )
     assert resp.status_code == 401
+
+
+def test_documents_route_requires_auth() -> None:
+    resp = _client().get("/api/connectors/instances/inst-1/documents")
+    assert resp.status_code == 401

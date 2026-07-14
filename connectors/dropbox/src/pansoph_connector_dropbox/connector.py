@@ -111,6 +111,21 @@ class DropboxConnector:
         self._token: str = cfg.get("token", "")
         self._path: str = cfg.get("path", "")
         self._base_url: str = cfg.get("base_url", "https://api.dropboxapi.com")
+        # Refresh-token auth (preferred). A Dropbox access token expires in about four
+        # hours; with a refresh token plus the app key and secret the connector mints a
+        # fresh access token at the start of each sync, so it never goes stale. When these
+        # are absent it falls back to the static access token above (which the operator
+        # must rotate by hand). The token endpoint is on api.dropbox.com, distinct from the
+        # api.dropboxapi.com data host.
+        self._refresh_token: str = cfg.get("refresh_token", "")
+        self._app_key: str = cfg.get("app_key", "")
+        self._app_secret: str = cfg.get("app_secret", "")
+        self._oauth_token_url: str = cfg.get(
+            "oauth_token_url", "https://api.dropbox.com/oauth2/token"
+        )
+        # Set once per instance after a successful refresh, so repeated fetch calls in one
+        # sync do not each hit the token endpoint.
+        self._refreshed: bool = False
         self.meta = ConnectorMeta(
             name="dropbox",
             auth=AuthScheme.oauth2,
@@ -130,10 +145,38 @@ class DropboxConnector:
                     key="token",
                     label="Access token",
                     kind=FieldKind.SECRET,
+                    required=False,
                     help=(
-                        "Dropbox OAuth 2 bearer token (personal, team, or RBAC scoped). "
-                        "Sealed in the secret store."
+                        "Dropbox OAuth 2 access token (personal, team, or RBAC scoped). "
+                        "Expires in about four hours. For a credential that does not go "
+                        "stale, leave this empty and set the refresh token, app key, and "
+                        "app secret below instead. Sealed in the secret store."
                     ),
+                ),
+                ConfigField(
+                    key="refresh_token",
+                    label="Refresh token",
+                    kind=FieldKind.SECRET,
+                    required=False,
+                    help=(
+                        "Dropbox OAuth 2 refresh token. With the app key and secret, the "
+                        "connector mints a fresh access token each sync so it never "
+                        "expires. Preferred over a static access token."
+                    ),
+                ),
+                ConfigField(
+                    key="app_key",
+                    label="App key",
+                    kind=FieldKind.STRING,
+                    required=False,
+                    help="Dropbox app key, used with the refresh token to mint access tokens.",
+                ),
+                ConfigField(
+                    key="app_secret",
+                    label="App secret",
+                    kind=FieldKind.SECRET,
+                    required=False,
+                    help="Dropbox app secret, sealed in the secret store.",
                 ),
                 ConfigField(
                     key="path",
@@ -156,8 +199,17 @@ class DropboxConnector:
 
     # --- contract ---
     def validate(self, config: dict[str, Any]) -> ValidationResult:
-        if not config.get("token"):
-            return ValidationResult(ok=False, error="missing config: token")
+        # Either a static access token, or the refresh trio (refresh token + app key +
+        # secret). The refresh path is preferred because a static token expires in hours.
+        has_static = bool(config.get("token"))
+        has_refresh = bool(
+            config.get("refresh_token") and config.get("app_key") and config.get("app_secret")
+        )
+        if not has_static and not has_refresh:
+            return ValidationResult(
+                ok=False,
+                error="missing config: set token, or refresh_token + app_key + app_secret",
+            )
         return ValidationResult(ok=True)
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
@@ -174,6 +226,7 @@ class DropboxConnector:
         the runtime purges it. Every yielded cursor is the latest one Dropbox returned,
         which is the durable resume point.
         """
+        await self._ensure_access_token()
         async with self._client() as client:
             if cursor is None:
                 async for item in self._initial_listing(client):
@@ -183,6 +236,7 @@ class DropboxConnector:
                     yield item
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
+        await self._ensure_access_token()
         async with self._client() as client:
             resp = await client.post(
                 "/2/files/get_metadata",
@@ -200,6 +254,7 @@ class DropboxConnector:
             return raw, await self._acl(client, ref.source_doc_id)
 
     async def list_acls(self, ref: DocRef) -> AccessControl:
+        await self._ensure_access_token()
         async with self._client() as client:
             return await self._acl(client, ref.source_doc_id)
 
@@ -209,6 +264,30 @@ class DropboxConnector:
         return []
 
     # --- helpers ---
+    async def _ensure_access_token(self) -> None:
+        """Mint a fresh access token from the refresh token if refresh auth is configured.
+
+        Runs at most once per instance (guarded by _refreshed). A no op when no refresh
+        token is set, in which case the static access token is used as is. Raised errors
+        are not swallowed, so a bad refresh credential fails the sync loudly rather than
+        silently syncing nothing.
+        """
+        if self._refreshed or not (self._refresh_token and self._app_key and self._app_secret):
+            return
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            resp = await http.post(
+                self._oauth_token_url,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self._refresh_token,
+                    "client_id": self._app_key,
+                    "client_secret": self._app_secret,
+                },
+            )
+            resp.raise_for_status()
+            self._token = resp.json()["access_token"]
+            self._refreshed = True
+
     def _client(self) -> httpx.AsyncClient:
         headers = {"Content-Type": "application/json"}
         if self._token:

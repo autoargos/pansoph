@@ -7,8 +7,10 @@ import {
   createInstance,
   type CredentialStatus,
   deleteInstance,
+  type IndexedDocument,
   type Instance,
   instanceCredential,
+  instanceDocuments,
   instanceRuns,
   listInstances,
   oauthAuthorizeUrl,
@@ -222,6 +224,8 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
   // already sealed; the form opens in configure mode so the user can pick resources and
   // promote the draft to active. Null when not configuring.
   const [configuring, setConfiguring] = useState<Instance | null>(null);
+  // The instance whose indexed documents are being browsed, or null.
+  const [viewingDocs, setViewingDocs] = useState<Instance | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunInfo[]>([]);
@@ -477,9 +481,14 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
               onToggleRuns={() => toggleRuns(inst.id)}
               onEdit={() => setEditing(inst)}
               onDelete={() => remove(inst)}
+              onViewDocs={() => setViewingDocs(inst)}
             />
           ))}
         </div>
+      )}
+
+      {viewingDocs && (
+        <DocumentsPanel inst={viewingDocs} onClose={() => setViewingDocs(null)} />
       )}
 
       {(adding || editing || configuring) && (
@@ -548,6 +557,74 @@ function ConnectorSkeletons() {
 // ConnectorCard: one source, with health, stats, an ACL note, actions, and an
 // expandable runs table. Stateless: the parent owns fetching and mutation.
 // ------------------------------------------------------------
+// DocumentsPanel: browse what an instance actually indexed. Answers the "where are these
+// documents" question by listing each source document with its id and a content snippet,
+// so an operator can confirm a connector pulled real, meaningful content.
+function DocumentsPanel({ inst, onClose }: { inst: Instance; onClose: () => void }) {
+  const [docs, setDocs] = useState<IndexedDocument[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    instanceDocuments(inst.id)
+      .then((r) => {
+        if (live) setDocs(r.documents);
+      })
+      .catch((e) => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [inst.id]);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`${inst.name}: indexed documents`}
+      subtitle="What this connector has actually pulled into the index. Retrieval still enforces each document's access control."
+    >
+      <div className="max-h-[60vh] overflow-y-auto">
+        {error ? (
+          <div className="px-2 py-8 text-center text-[13px] text-err">{error}</div>
+        ) : docs === null ? (
+          <div className="flex justify-center py-10">
+            <Spinner />
+          </div>
+        ) : docs.length === 0 ? (
+          <div className="px-2 py-10 text-center text-[13px] text-muted">
+            Nothing indexed yet. Run a sync, then check back.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {docs.map((d) => (
+              <li key={d.doc_id} className="py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-text">
+                    {d.source_id}
+                  </span>
+                  <Badge kind="neutral">{d.chunks} chunks</Badge>
+                </div>
+                {d.snippet && (
+                  <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-muted">
+                    {d.snippet}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {docs && docs.length > 0 && (
+        <p className="mt-3 text-[11.5px] text-muted">
+          {docs.length} document{docs.length === 1 ? "" : "s"} indexed.
+        </p>
+      )}
+    </Modal>
+  );
+}
+
 function ConnectorCard({
   inst,
   title,
@@ -560,6 +637,7 @@ function ConnectorCard({
   onToggleRuns,
   onEdit,
   onDelete,
+  onViewDocs,
 }: {
   inst: Instance;
   title: string;
@@ -572,6 +650,7 @@ function ConnectorCard({
   onToggleRuns: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onViewDocs: () => void;
 }) {
   const health = healthKind(inst);
   const last = inst.last_run;
@@ -617,7 +696,18 @@ function ConnectorCard({
 
       {/* stats */}
       <div className="my-5 flex gap-6 border-y border-border py-4">
-        <Stat value={fmtCount(docs)} label="documents" />
+        {docs > 0 ? (
+          <button
+            type="button"
+            onClick={onViewDocs}
+            className="text-left transition hover:opacity-70"
+            title="See the indexed documents"
+          >
+            <Stat value={fmtCount(docs)} label="documents" />
+          </button>
+        ) : (
+          <Stat value={fmtCount(docs)} label="documents" />
+        )}
         <Stat
           value={last ? relativeTime(last.started_at).replace(" ago", "") : "never"}
           label="synced ago"

@@ -244,3 +244,36 @@ async def test_dropbox_permissions(respx_mock: respx.MockRouter) -> None:
         principals=_FIX / "principals.json",
         expected=_FIX / "expected.json",
     )
+
+
+@respx.mock(assert_all_called=False)
+async def test_dropbox_mints_access_token_from_refresh_token(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # With the refresh trio (no static token), the connector mints a fresh access token
+    # from the Dropbox token endpoint before its first API call, so it never runs on a
+    # stale token. The minted token is then used for the data calls.
+    token_route = respx_mock.post("https://api.dropbox.com/oauth2/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "fresh-access-token"})
+    )
+    _mock_initial_listing(respx_mock)
+    conn = DropboxConnector(
+        instance_id="dbx",
+        config={"refresh_token": "rt", "app_key": "ak", "app_secret": "as"},
+    )
+
+    refs = [ref async for ref, _ in conn.list_changes(None)]
+    assert token_route.called, "the token endpoint must be hit to mint an access token"
+    assert conn._token == "fresh-access-token"
+    assert conn._refreshed is True
+    assert [r.source_doc_id for r in refs], "the sync runs with the minted token"
+
+
+def test_dropbox_validate_requires_a_token_or_the_refresh_trio() -> None:
+    # No credentials at all is rejected; either a static token or the full refresh trio is
+    # accepted; a partial refresh trio is not enough on its own.
+    conn = DropboxConnector(instance_id="dbx", config={})
+    assert not conn.validate({}).ok
+    assert conn.validate({"token": "x"}).ok
+    assert conn.validate({"refresh_token": "rt", "app_key": "ak", "app_secret": "as"}).ok
+    assert not conn.validate({"refresh_token": "rt"}).ok

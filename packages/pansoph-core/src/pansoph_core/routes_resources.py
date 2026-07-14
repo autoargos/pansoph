@@ -14,10 +14,78 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from . import assembly
 from .audit import audit
 from .routes import _CONNECTOR_ADMIN, _manager
 
 router = APIRouter(prefix="/api")
+
+
+async def _instance_documents(
+    connector: str, instance_id: str, tenant_id: str
+) -> list[dict[str, Any]]:
+    """The documents an instance has indexed: one row per source document with a chunk
+    count and a short snippet of its content, so an operator can see what was actually
+    ingested. Reads the pgvector chunk store directly (an ops read, not the hot path),
+    consistent with the other admin reads in this module. Returns [] on a non-pgvector
+    vector store, which does not expose this table."""
+    import psycopg
+
+    prefix = f"{connector}:{instance_id}:"
+    rows: list[Any] = []
+    try:
+        conn = await psycopg.AsyncConnection.connect(assembly._postgres_dsn(), autocommit=True)
+    except Exception:  # noqa: BLE001  no reachable pgvector store, report no documents
+        return []
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT doc_id, count(*) AS chunks, "
+                "(array_agg(body ORDER BY chunk_id))[1] AS snippet "
+                "FROM pansoph_chunks WHERE tenant_id = %s AND doc_id LIKE %s "
+                "GROUP BY doc_id ORDER BY doc_id",
+                (tenant_id, prefix + "%"),
+            )
+            rows = await cur.fetchall()
+    finally:
+        await conn.close()
+    out: list[dict[str, Any]] = []
+    for doc_id, chunks, snippet in rows:
+        # source_doc_id is everything after "{connector}:{instance}:", the human meaningful
+        # part (a url, a file path, a page id).
+        source_id = doc_id[len(prefix) :] if doc_id.startswith(prefix) else doc_id
+        text = (snippet or "").strip().replace("\n", " ")
+        out.append(
+            {
+                "doc_id": doc_id,
+                "source_id": source_id,
+                "chunks": chunks,
+                "snippet": text[:200],
+            }
+        )
+    return out
+
+
+@router.get("/connectors/instances/{instance_id}/documents")
+async def instance_documents(
+    instance_id: str, user: Any = Depends(_CONNECTOR_ADMIN)
+) -> dict[str, Any]:
+    """List what an instance has actually indexed, so an operator can see its content
+    instead of just a count. Each entry is a source document with a chunk count and a
+    content snippet. Gated to a connector admin, audited."""
+    manager = _manager()
+    instance = await manager.get_instance(instance_id)
+    if instance is None:
+        raise HTTPException(status_code=404, detail=f"instance {instance_id!r} not found")
+    docs = await _instance_documents(instance["connector"], instance_id, instance["tenant_id"])
+    audit(
+        "connector_documents",
+        actor=user.id,
+        tenant=instance["tenant_id"],
+        instance=instance_id,
+        count=len(docs),
+    )
+    return {"documents": docs, "total": len(docs)}
 
 
 @router.get("/connectors/instances/{instance_id}/resources")
