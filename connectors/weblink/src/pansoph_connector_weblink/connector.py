@@ -8,8 +8,11 @@ many sites now require (see DEFAULT_USER_AGENT).
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from pansoph_connector_sdk import (
@@ -21,6 +24,47 @@ from pansoph_connector_sdk import (
     ValidationResult,
 )
 from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDoc
+
+# Cap redirect hops so a redirect loop cannot hang the fetch; each hop is SSRF-checked.
+_MAX_REDIRECTS = 5
+
+
+class BlockedUrlError(ValueError):
+    """The URL is not a fetchable public http(s) resource (SSRF guard). Raised for a
+    non-http scheme or a host that resolves to a private, loopback, link-local, or
+    otherwise non-public address."""
+
+
+async def _assert_public_url(url: str) -> None:
+    """SSRF defense: allow only http(s) URLs whose host resolves entirely to public
+    addresses. Blocks loopback, RFC1918/ULA private ranges, link-local (which includes the
+    169.254.169.254 cloud-metadata IP), reserved, multicast, and unspecified addresses, so
+    a configured or redirected URL cannot make the worker read internal services or cloud
+    metadata. Runs on the INITIAL url and on every redirect hop. A determined DNS-rebinding
+    attacker is a residual; pinning the resolved IP is the stronger follow-up."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise BlockedUrlError(f"only http(s) URLs are fetchable, got scheme {parts.scheme!r}")
+    host = parts.hostname
+    if not host:
+        raise BlockedUrlError(f"URL has no host: {url!r}")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, port, proto=6)
+    except OSError as exc:
+        raise BlockedUrlError(f"cannot resolve host {host!r}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise BlockedUrlError(f"blocked non-public address {ip} for host {host!r}")
+
 
 # A polite, honest User-Agent. Wikimedia and a growing number of sites enforce a
 # User-Agent policy and return 403 for generic or unidentified bot agents (and for
@@ -106,10 +150,23 @@ class WeblinkConnector:
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         headers = {"user-agent": self._user_agent, "accept": _ACCEPT}
+        # Redirects are followed manually so every hop is SSRF-checked before the request:
+        # a public URL that 302s to http://169.254.169.254 or an internal host must not be
+        # followed. httpx's own follow_redirects would skip that per-hop check.
+        url = ref.source_doc_id
         async with httpx.AsyncClient(
-            timeout=30.0, follow_redirects=True, headers=headers
+            timeout=30.0, follow_redirects=False, headers=headers
         ) as client:
-            resp = await client.get(ref.source_doc_id)
+            resp: httpx.Response | None = None
+            for _ in range(_MAX_REDIRECTS):
+                await _assert_public_url(url)
+                resp = await client.get(url)
+                if resp.is_redirect and resp.headers.get("location"):
+                    url = str(resp.url.join(resp.headers["location"]))
+                    continue
+                break
+            else:
+                raise BlockedUrlError(f"too many redirects fetching {ref.source_doc_id!r}")
             resp.raise_for_status()
             mime = resp.headers.get("content-type", "text/plain").split(";")[0]
             raw = RawDoc(
