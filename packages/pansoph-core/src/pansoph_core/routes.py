@@ -68,19 +68,26 @@ async def _identity_from_token(authorization: str | None) -> Any:
         return None
 
 
-async def _effective_identity(req: Query, authorization: str | None) -> tuple[str, list[str]]:
+async def _effective_identity(req: Query, authorization: str | None) -> tuple[str, list[str], str]:
     """Prefer the validated token identity; fall back to the request body (the demo
-    switcher) when no bearer token is present. The authz check enforces either way.
+    switcher) when no bearer token is present. Returns (subject, groups, tenant_id).
 
     The subject id is the user's EMAIL when the token carries one, because that is the
     identifier connectors write into direct-user grants (Drive, Zendesk, Confluence, ...
     all map a source ACL user to their email). Falling back to the opaque id keeps a
-    tokenless demo request working. Email is the canonical cross-source principal."""
+    tokenless demo request working. Email is the canonical cross-source principal.
+
+    SECURITY: the tenant is bound to the AUTHENTICATED token (its User.tenant_id), never
+    the request body, so an authenticated user cannot read or write another tenant's data
+    by passing a different tenant_id. The body tenant_id is honored only on the tokenless
+    demo path, where there is no token to trust. A token with no tenant claim maps to the
+    default tenant."""
     user = await _identity_from_token(authorization)
     if user is not None:
         subject = getattr(user, "email", None) or user.id
-        return subject, list(user.group_ids)
-    return req.user, req.groups
+        tenant = getattr(user, "tenant_id", "") or "default"
+        return subject, list(user.group_ids), tenant
+    return req.user, req.groups, req.tenant_id
 
 
 async def _require_identity(authorization: str | None = Header(None)) -> Any:
@@ -171,9 +178,9 @@ async def _retrieve(
 
 @router.post("/search")
 async def search(req: Query, authorization: str | None = Header(None)) -> dict[str, Any]:
-    user, groups = await _effective_identity(req, authorization)
-    hits = await _retrieve(user, groups, req.tenant_id, req.query, req.final_k)
-    audit("search", actor=user, tenant=req.tenant_id, results=len(hits))
+    user, groups, tenant_id = await _effective_identity(req, authorization)
+    hits = await _retrieve(user, groups, tenant_id, req.query, req.final_k)
+    audit("search", actor=user, tenant=tenant_id, results=len(hits))
     return {
         "results": [
             {"doc_id": h.doc_id, "chunk_id": h.chunk_id, "score": h.score, "text": h.text}
@@ -184,9 +191,9 @@ async def search(req: Query, authorization: str | None = Header(None)) -> dict[s
 
 @router.post("/chat")
 async def chat(req: Query, authorization: str | None = Header(None)) -> EventSourceResponse:
-    user, groups = await _effective_identity(req, authorization)
-    hits = await _retrieve(user, groups, req.tenant_id, req.query, req.final_k)
-    audit("chat", actor=user, tenant=req.tenant_id, sources=len(hits))
+    user, groups, tenant_id = await _effective_identity(req, authorization)
+    hits = await _retrieve(user, groups, tenant_id, req.query, req.final_k)
+    audit("chat", actor=user, tenant=tenant_id, sources=len(hits))
     llm = assembly.build_llm()
 
     if hits:

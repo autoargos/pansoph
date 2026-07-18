@@ -28,12 +28,17 @@ class OIDCIdentity:
         groups_claim: str = "groups",
         jwks_url: str = "",
         roles_claim: str = "roles",
+        tenant_claim: str = "tenant",
     ) -> None:
         self._issuer_url = issuer_url.rstrip("/")
         self._client_id = client_id
         self._groups_claim = groups_claim
         self._jwks_url = jwks_url
         self._roles_claim = roles_claim
+        # The token claim that carries the user's tenant. The retrieval path binds the
+        # tenant to this (never the request body), so a multi-tenant IdP must emit it. A
+        # token with no such claim maps to the single "default" tenant.
+        self._tenant_claim = tenant_claim
         self._jwks_client: Any = None
         self._cache: dict[str, User] = {}
 
@@ -73,6 +78,7 @@ class OIDCIdentity:
             id=claims.get("preferred_username") or claims["sub"],
             email=claims.get("email"),
             display_name=claims.get("name") or claims.get("preferred_username"),
+            tenant_id=str(claims.get(self._tenant_claim) or "") or "default",
             group_ids=list(claims.get(self._groups_claim, [])),
             roles=list(claims.get(self._roles_claim, [])),
         )

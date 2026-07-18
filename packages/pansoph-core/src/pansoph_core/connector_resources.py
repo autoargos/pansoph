@@ -203,8 +203,15 @@ def instance_credential_status(instance: dict[str, Any]) -> CredentialStatus:
     oauth_key = field.key if field is not None else "oauth_token"
     provider = getattr(field, "oauth_provider", None) if field is not None else None
 
-    connected = _is_sealed(config.get(oauth_key))
-    has_refresh = _is_sealed(config.get(f"{oauth_key}__refresh_token"))
+    # A refresh token counts as connected on its own: a Dropbox instance set up the durable
+    # way (refresh_token + app key/secret, no static access token) has an empty primary
+    # token field but is fully connected. So connected is true when the primary credential
+    # OR a refresh token (either the oauth-paired handle or a standalone refresh_token
+    # field) is sealed.
+    has_refresh = _is_sealed(config.get(f"{oauth_key}__refresh_token")) or _is_sealed(
+        config.get("refresh_token")
+    )
+    connected = _is_sealed(config.get(oauth_key)) or has_refresh
 
     # The flow does not record expiry yet, so expires_at stays None (no known expiry).
     # A recorded ISO string in config is honored if a later change writes one.
