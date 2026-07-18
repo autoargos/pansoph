@@ -132,6 +132,10 @@ export interface Instance {
   cursor: string | null;
   created_at: string | null;
   last_run: RunInfo | null;
+  // Total documents and chunks currently in the index for this instance (not just the
+  // last run's delta), so the card shows the real content counts.
+  indexed_documents?: number;
+  indexed_chunks?: number;
   // 'active' by default; 'draft' after an OAuth connect, before configure submit promotes it.
   status?: InstanceStatus;
 }

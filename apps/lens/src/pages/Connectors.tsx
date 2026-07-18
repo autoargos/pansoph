@@ -655,7 +655,10 @@ function ConnectorCard({
   const health = healthKind(inst);
   const last = inst.last_run;
   const errored = health === "err";
-  const docs = last?.docs_indexed ?? 0;
+  // Show the total documents in the index, not the last run's delta (an incremental sync
+  // with no changes indexes 0, which made a populated connector look empty). Fall back to
+  // the last run count for a store that does not report totals.
+  const docs = inst.indexed_documents ?? last?.docs_indexed ?? 0;
 
   const scopeText =
     inst.scope_type === "org"
@@ -713,7 +716,7 @@ function ConnectorCard({
           label="synced ago"
           tone="cyan"
         />
-        <Stat value={fmtCount(chunkEstimate(inst))} label="chunks" mono />
+        <Stat value={fmtCount(inst.indexed_chunks ?? chunkEstimate(inst))} label="chunks" mono />
         <div className="ml-auto text-right">
           <div className="flex items-center justify-end gap-1.5 font-mono text-[13px] text-muted">
             <IconClock width={13} height={13} />

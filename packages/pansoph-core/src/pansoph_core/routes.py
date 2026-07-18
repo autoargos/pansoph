@@ -406,9 +406,45 @@ class InstanceCreate(BaseModel):
     status: str = "active"  # active | draft
 
 
+async def _indexed_counts() -> dict[tuple[str, str], tuple[int, int]]:
+    """Total distinct documents and total chunks each instance has in the index, keyed by
+    (connector, instance_id). One grouped read of the pgvector chunk store, so the
+    instances list can show what is actually indexed rather than only the last sync's
+    delta (an incremental sync with no changes indexes 0, which made a populated
+    connector read as empty). Returns {} when the chunk store is not reachable."""
+    import psycopg
+
+    try:
+        conn = await psycopg.AsyncConnection.connect(assembly._postgres_dsn(), autocommit=True)
+    except Exception:  # noqa: BLE001  no pgvector store, report no counts
+        return {}
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT split_part(doc_id, ':', 1) AS connector, "
+                "split_part(doc_id, ':', 2) AS instance_id, "
+                "count(DISTINCT doc_id) AS docs, count(*) AS chunks "
+                "FROM pansoph_chunks GROUP BY 1, 2"
+            )
+            rows = await cur.fetchall()
+    finally:
+        await conn.close()
+    return {
+        (connector, instance_id): (docs, chunks) for connector, instance_id, docs, chunks in rows
+    }
+
+
 @router.get("/connectors/instances")
 async def list_instances() -> dict[str, Any]:
-    return {"instances": await _manager().list_instances()}
+    instances = await _manager().list_instances()
+    counts = await _indexed_counts()
+    for inst in instances:
+        # Total documents and chunks currently in the index for this instance, so the UI
+        # shows the real content, not just the last run's delta or a config estimate.
+        docs, chunks = counts.get((inst.get("connector", ""), inst.get("id", "")), (0, 0))
+        inst["indexed_documents"] = docs
+        inst["indexed_chunks"] = chunks
+    return {"instances": instances}
 
 
 @router.post("/connectors/instances")
