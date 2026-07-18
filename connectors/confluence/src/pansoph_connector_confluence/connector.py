@@ -33,9 +33,11 @@ Auth
   Two paths, both supported.
   (1) OAuth 2.0 (3LO): the in-app Connect flow (provider "atlassian") mints a Bearer
       access token sealed into config key "oauth_token". When present, the connector
-      sends "Authorization: Bearer <token>". Read scopes: read:confluence-content.all,
-      read:confluence-space.summary, read:content.restriction:confluence,
-      read:space:confluence (space permissions), plus offline_access for refresh.
+      sends "Authorization: Bearer <token>". Read scopes: search:confluence (CQL change
+      feed), read:confluence-content.all (page bodies), read:confluence-space.summary,
+      read:content.restriction:confluence (page restrictions), read:space:confluence
+      (space discovery), read:space.permission:confluence (space-wide View audience),
+      plus offline_access for refresh. See _OAUTH_SCOPES for the endpoint mapping.
   (2) HTTP Basic (manual paste): base64("{email}:{api_token}") sent as
       "Authorization: Basic <b64>". The API token is minted at id.atlassian.com.
   A configured instance carries its own credential and its own ACL namespace
@@ -169,17 +171,29 @@ from pansoph_types import (
 )
 
 # Read-only OAuth 2.0 (3LO) scopes for the in-app Connect flow (provider
-# "atlassian"). Verified 2026-07-05 against the Confluence scope reference.
-# read:confluence-content.all covers page bodies and search,
-# read:confluence-space.summary covers space info,
-# read:content.restriction:confluence covers page read restrictions,
-# read:space:confluence covers the space permissions the space-wide audience reads,
-# and offline_access yields a rotating refresh token.
+# "atlassian"). Verified 2026-07-19 against the Confluence scope reference
+# (https://developer.atlassian.com/cloud/confluence/scopes-for-oauth-2-3LO-and-forge-apps/).
+# Each scope is pinned to the exact endpoint the connector calls:
+#   search:confluence                     -> GET /wiki/rest/api/content/search (CQL, the
+#                                            incremental change feed). This is a distinct
+#                                            scope from read:confluence-content.all; the
+#                                            search endpoint 401s without it.
+#   read:confluence-content.all           -> GET /wiki/rest/api/content/{id} page body
+#                                            (body.storage) and the trashed-content sweep.
+#   read:confluence-space.summary         -> space info.
+#   read:content.restriction:confluence   -> a page's read restrictions (the ACL).
+#   read:space:confluence                 -> GET /wiki/api/v2/spaces (space discovery).
+#   read:space.permission:confluence      -> GET /wiki/api/v2/spaces/{id}/permissions,
+#                                            the space-wide View audience the ACL intersects
+#                                            with. read:space:confluence does NOT cover it.
+#   offline_access                        -> a rotating refresh token.
 _OAUTH_SCOPES: tuple[str, ...] = (
+    "search:confluence",
     "read:confluence-content.all",
     "read:confluence-space.summary",
     "read:content.restriction:confluence",
     "read:space:confluence",
+    "read:space.permission:confluence",
     "offline_access",
 )
 

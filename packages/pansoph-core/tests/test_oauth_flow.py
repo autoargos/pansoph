@@ -166,6 +166,12 @@ async def test_authorize_requests_only_the_connectors_scopes_not_the_provider_un
     scope_param = parse_qs(urlparse(url).query).get("scope", [""])[0]
     scopes = set(scope_param.split())
     assert "read:confluence-content.all" in scopes, "confluence scopes must be requested"
+    # The CQL change-feed endpoint (GET /wiki/rest/api/content/search) needs the distinct
+    # search:confluence scope; without it the sync 401s even though content reads are
+    # granted. read:space.permission:confluence backs the space-wide View audience the ACL
+    # intersects. Both must be requested or Confluence connects but cannot sync.
+    assert "search:confluence" in scopes, "the CQL search scope must be requested"
+    assert "read:space.permission:confluence" in scopes, "the space-permission scope is required"
     assert "read:project-role:jira" not in scopes, (
         "a Jira scope must NOT leak into a Confluence connect"
     )

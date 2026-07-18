@@ -37,10 +37,13 @@ Verified facts from those docs:
 
 Read-only scopes (see DEFAULT_SCOPES): classic read:jira-work / read:jira-user cover
 issue search and reads; granular read:project-role:jira covers the project-role
-actors call the Jira ACL mapping makes. read:confluence-content.all covers page
-bodies, read:confluence-space.summary covers space info, and
-read:content.restriction:confluence covers the content read-restrictions the
-Confluence ACL mapping expands. offline_access yields the refresh token.
+actors call the Jira ACL mapping makes. For Confluence: search:confluence covers the
+CQL change feed (a distinct scope from content reads), read:confluence-content.all
+covers page bodies, read:confluence-space.summary covers space info,
+read:content.restriction:confluence covers content read-restrictions,
+read:space:confluence covers space discovery, and read:space.permission:confluence
+covers the space-wide View audience the ACL intersects. offline_access yields the
+refresh token. Each connector narrows this to its own set via oauth_scopes.
 
 Client credentials come from PANSOPH_OAUTH_ATLASSIAN_CLIENT_ID / _SECRET.
 
@@ -64,10 +67,14 @@ DEFAULT_SCOPES: tuple[str, ...] = (
     "read:jira-work",
     "read:jira-user",
     "read:project-role:jira",
-    # Confluence: page bodies, space summaries, and content read restrictions.
+    # Confluence: CQL search feed, page bodies, space summaries, content restrictions,
+    # space discovery, and the space-wide View audience the ACL intersects with.
+    "search:confluence",
     "read:confluence-content.all",
     "read:confluence-space.summary",
     "read:content.restriction:confluence",
+    "read:space:confluence",
+    "read:space.permission:confluence",
     # Refresh: Atlassian issues a (rotating) refresh token only with this scope.
     "offline_access",
 )
