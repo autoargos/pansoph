@@ -150,6 +150,28 @@ async def test_authorize_builds_consent_url_with_state_and_pkce(monkeypatch: Any
     assert qs["access_type"] == ["offline"]
 
 
+async def test_authorize_requests_only_the_connectors_scopes_not_the_provider_union(
+    monkeypatch: Any,
+) -> None:
+    # Atlassian serves both Confluence and Jira, whose scope sets differ. Connecting the
+    # Confluence connector must request only Confluence scopes, never the provider's
+    # Jira+Confluence union, or Atlassian rejects the consent for a Jira scope the app may
+    # not have (read:project-role:jira).
+    monkeypatch.setenv("PANSOPH_OAUTH_ATLASSIAN_CLIENT_ID", "aid")
+    async with httpx.AsyncClient() as http:
+        flow = _flow(_FakeSecretStore(), http)
+        url = await flow.authorize(
+            provider="atlassian", connector="confluence", instance="c1", tenant="t1"
+        )
+    scope_param = parse_qs(urlparse(url).query).get("scope", [""])[0]
+    scopes = set(scope_param.split())
+    assert "read:confluence-content.all" in scopes, "confluence scopes must be requested"
+    assert "read:project-role:jira" not in scopes, (
+        "a Jira scope must NOT leak into a Confluence connect"
+    )
+    assert "read:jira-work" not in scopes
+
+
 async def test_authorize_unconfigured_provider_raises(monkeypatch: Any) -> None:
     monkeypatch.delenv("PANSOPH_OAUTH_SLACK_CLIENT_ID", raising=False)
     async with httpx.AsyncClient() as http:

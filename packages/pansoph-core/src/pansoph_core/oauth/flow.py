@@ -87,6 +87,19 @@ class OAuthFlow:
         client_id = await prov.client_id(self.secret_store)
         redirect_uri = self._redirect_uri(provider)
 
+        # Request ONLY the scopes this connector declares, not the provider's default union.
+        # A provider like Atlassian serves several connectors (Confluence, Jira) whose scope
+        # sets differ; the union would make a Confluence connect ask for Jira scopes the
+        # operator's app may not have, and Atlassian then rejects the whole consent. Falling
+        # back to the provider default only when the connector declares none.
+        if scopes is None:
+            from ..connector_resources import _oauth_field
+
+            field = _oauth_field(connector)
+            declared = getattr(field, "oauth_scopes", None) if field is not None else None
+            if declared:
+                scopes = tuple(declared)
+
         code_verifier: str | None = None
         code_challenge: str | None = None
         if prov.uses_pkce:
