@@ -134,27 +134,27 @@ class ConnectorManager:
 
         if status not in _STATUSES:
             raise ValueError(f"status must be one of {sorted(_STATUSES)}")
-        validate_connector_config(connector, instance_id, config, status)
-        if scope_type not in _SCOPE_TYPES:
-            raise ValueError(f"scope_type must be one of {sorted(_SCOPE_TYPES)}")
 
-        # Seal the connector's declared secret fields into the secret store, replacing them
-        # in the persisted config with handles. The config column never holds a plaintext
-        # credential. Connectors that declare no secret fields are untouched.
-        config = await _seal_instance_secrets(connector, instance_id, tenant_id, config)
-
-        # Preserve sealed credentials the submission did not resend. The upsert below
-        # replaces the whole config, so without this, promoting a draft to active (the
-        # configure step submits the picked resources but not the oauth token) or editing a
-        # connector (the form does not resend a sealed secret) would WIPE the sealed
-        # credential the oauth callback stored, leaving a freshly connected source unable to
-        # sync. Any sealed handle in the existing config that the new config does not set is
-        # carried forward.
+        # Preserve sealed credentials the submission did not resend, BEFORE validating. The
+        # edit form and the configure step never resend a sealed secret (the plaintext is
+        # not in the browser), so without this an edit would fail validation with "missing
+        # config: token" and the upsert would wipe the credential the oauth callback stored.
+        # Any sealed handle in the existing config that the new config omits is carried
+        # forward, so validation sees the credential and the persisted config keeps it.
         existing = await self.get_instance(instance_id)
         if existing is not None:
             for key, val in (existing.get("config") or {}).items():
                 if key not in config and secret_handle(val) is not None:
                     config[key] = val
+
+        validate_connector_config(connector, instance_id, config, status)
+        if scope_type not in _SCOPE_TYPES:
+            raise ValueError(f"scope_type must be one of {sorted(_SCOPE_TYPES)}")
+
+        # Seal the connector's declared secret fields into the secret store, replacing them
+        # in the persisted config with handles. Idempotent: an already-sealed handle carried
+        # forward above is left as is. The config column never holds a plaintext credential.
+        config = await _seal_instance_secrets(connector, instance_id, tenant_id, config)
 
         conn = await self._conn()
         try:
