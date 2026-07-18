@@ -69,7 +69,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 
 # bring up the full local demo (Postgres, Valkey, Garage, SpiceDB, Ollama, TEI, API, workers, web)
-docker compose --profile core,workers,models up
+docker compose --profile core --profile workers --profile models up
 ```
 
 > Heads up: this profile brings up roughly a dozen services (Postgres, Valkey, an object
@@ -111,9 +111,10 @@ hermetic suite is 342 tests.
   what to sync from its real resources (your repos, drives, channels) instead of typing
   ids. The credential is sealed via the SecretStore, never stored in plaintext.
 - **Identity materialization.** The query subject is the user's email (the cross-source
-  principal), and an operator connects an IdP group to a connector's source group with a
-  declared alias, so a fail-closed connector grant becomes reachable by exactly the mapped
-  users. Proven live against Keycloak, Postgres, and SpiceDB.
+  principal) bound to the authenticated token, and an operator connects an IdP group to a
+  connector's source group with a declared alias, so a fail-closed connector grant becomes
+  reachable by exactly the mapped users. Covered by the permission red team (in-memory
+  fakes) and the live SpiceDB plus pgvector enforcement gate.
 - **agora REST, SSE, and discovery surface**: `/api/search`, `/api/chat` (SSE),
   `/api/grab`, `/api/health`, connector-instance management, resource discovery, and the
   group-alias admin routes (`packages/pansoph-core/src/pansoph_core/routes.py`).

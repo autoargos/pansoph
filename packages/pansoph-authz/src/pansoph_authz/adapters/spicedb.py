@@ -37,16 +37,30 @@ definition document {
 """
 
 
-def _ns_id(principal: Principal) -> str:
-    if principal.id == "*":
-        return "*"
-    return f"{principal.ns}_{principal.id}" if principal.ns else principal.id
-
-
 # SpiceDB object ids only allow [a-zA-Z0-9/_|=+-]. Document ids carry ':' and '.'
 # (e.g. "github:inst:README.md"), so encode any disallowed character as "=XX" hex,
 # which is injective (no two distinct ids collide) and uses only legal characters.
 _SAFE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_|-+")
+
+# The alphabet for a single principal COMPONENT (a namespace or an id). Underscore is the
+# separator between the two components, so it must be escaped INSIDE a component, or the
+# join is ambiguous: ns="acme_corp" id="bob" would collide with ns="acme" id="corp_bob".
+# Underscores are legal in emails and tenant ids, so the collision is real. Dropping "_"
+# from the component alphabet escapes it as =5f inside a component while the join stays a
+# literal underscore, making (ns, id) injective.
+_SAFE_COMPONENT_CHARS = _SAFE_CHARS - {"_"}
+
+
+def _encode(text: str, alphabet: frozenset[str]) -> str:
+    """Encode text to a valid SpiceDB object id using the given legal alphabet, hex
+    escaping any other character as =XX. Injective for a fixed alphabet."""
+    parts: list[str] = []
+    for ch in text:
+        if ch in alphabet:
+            parts.append(ch)
+        else:
+            parts.append("".join(f"={byte:02x}" for byte in ch.encode("utf-8")))
+    return "".join(parts)
 
 
 def _safe_obj(object_id: str) -> str:
@@ -57,13 +71,21 @@ def _safe_obj(object_id: str) -> str:
     # A real document id is never the bare "*", so this is unambiguous.
     if object_id == "*":
         return "*"
-    parts: list[str] = []
-    for ch in object_id:
-        if ch in _SAFE_CHARS:
-            parts.append(ch)
-        else:
-            parts.append("".join(f"={byte:02x}" for byte in ch.encode("utf-8")))
-    return "".join(parts)
+    return _encode(object_id, _SAFE_CHARS)
+
+
+def _safe_ns_id(principal: Principal) -> str:
+    """Encode a principal into a valid, unambiguous SpiceDB subject object id. The
+    namespace and id are each encoded (with the separator underscore escaped inside them)
+    and joined with a literal underscore, so two principals with an underscore at a
+    different boundary can never collide across tenants."""
+    if principal.id == "*":
+        return "*"
+    if principal.ns:
+        ns = _encode(principal.ns, _SAFE_COMPONENT_CHARS)
+        pid = _encode(principal.id, _SAFE_COMPONENT_CHARS)
+        return f"{ns}_{pid}"
+    return _encode(principal.id, _SAFE_COMPONENT_CHARS)
 
 
 class SpiceDBAuthz(AuthzPort):
@@ -128,9 +150,7 @@ class SpiceDBAuthz(AuthzPort):
             # Subject ids go through the same encoding as resource ids: a principal id can
             # carry SpiceDB-illegal characters (an email subject has '@' and '.'), and the
             # write and the check must encode identically so they still match.
-            object=ObjectReference(
-                object_type=subject_type, object_id=_safe_obj(_ns_id(tup.subject))
-            ),
+            object=ObjectReference(object_type=subject_type, object_id=_safe_ns_id(tup.subject)),
             # A group grants access through its members.
             optional_relation="member" if subject_type == "group" else "",
         )
@@ -189,7 +209,7 @@ class SpiceDBAuthz(AuthzPort):
         subj = SubjectReference(
             # Same encoding as the reader/membership writes, so an email subject (with
             # '@' and '.') matches the tuples it was written into.
-            object=ObjectReference(object_type="user", object_id=_safe_obj(_ns_id(subject)))
+            object=ObjectReference(object_type="user", object_id=_safe_ns_id(subject))
         )
         # Map the SpiceDB-safe object id back to the caller's original id.
         safe_to_original = {_safe_obj(oid): oid for oid in object_ids}

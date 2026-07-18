@@ -2,8 +2,8 @@
 
 This is the working map. The authoritative decisions live in the ADRs:
 
-- [ADR-0001](../../architecture-decision-records/adr-0001-modular-knowledge-platform/) the product vision.
-- [ADR-0002](../../architecture-decision-records/adr-0002-finalized-tech-stack/) the finalized tech stack and the ports.
+- [ADR-0001](adr/0001-modular-knowledge-platform/README.md) the product vision.
+- [ADR-0002](adr/0002-finalized-tech-stack/README.md) the finalized tech stack and the ports.
 
 ## The one principle: everything is replaceable
 

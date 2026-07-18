@@ -16,19 +16,26 @@ permitted view, enforced by the engine, not by hiding a button.
 From the repo root (`pansoph/`):
 
 ```bash
-# 1. Bring up the stack (first run pulls images; allow a few minutes).
-#    This demo uses a cloud model (Gemini) configured in .env, so the local model
-#    servers are not needed. For a fully-local, no-cloud run, add the `models`
-#    profile (TEI + Ollama) and point the model env at them instead.
-docker compose --profile core,workers up -d
+# 1. Provide an EMBEDDER. Ingestion embeds every chunk, so a reachable embedding model
+#    is required or nothing indexes (you would see "All connection attempts failed" on
+#    every sync). The default .env points the embedder at a local Ollama with bge-m3:
+ollama serve &            # if not already running (the Ollama app also does this)
+ollama pull bge-m3        # one-time, ~1.2 GB
+#    Alternatively, bring the model servers up in-compose with the `models` profile and
+#    repoint PANSOPH_EMBEDDER_URL at the in-cluster TEI/Ollama.
 
-# 2. Wait for green, then confirm agora is healthy.
+# 2. Bring up the stack (first run pulls images; allow a few minutes).
+#    The chat LLM defaults to cloud Gemini (in .env) for answer quality; the embedder is
+#    the local Ollama above. Both are swappable, pansoph is model-agnostic.
+docker compose --profile core --profile workers up -d
+
+# 3. Wait for green, then confirm agora is healthy.
 curl -s localhost:8080/api/health | python3 -m json.tool   # expect "ok": true
 ```
 
-> The model is cloud Gemini here purely for demo answer quality; pansoph is
-> model-agnostic and one env var flips it to a fully-local Ollama/TEI. A banner in
-> the System screen shows when a cloud model is active.
+> The chat model is cloud Gemini here purely for demo answer quality; the embedder is a
+> local Ollama (bge-m3). pansoph is model-agnostic and one env var flips either to a
+> different provider. A banner in the System screen shows when a cloud model is active.
 
 Seed the demo corpus if this is a fresh stack (idempotent; skips if already present):
 

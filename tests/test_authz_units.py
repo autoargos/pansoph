@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pansoph_authz.adapters.noop import NoOpAuthz
 from pansoph_authz.adapters.openfga import _fga_user
-from pansoph_authz.adapters.spicedb import _ns_id, _safe_obj
+from pansoph_authz.adapters.spicedb import _safe_ns_id, _safe_obj
 from pansoph_authz.port import Principal
 
 
@@ -18,9 +18,11 @@ def test_spicedb_safe_obj_encodes_disallowed_chars() -> None:
 
 
 def test_spicedb_ns_id_namespacing() -> None:
-    assert _ns_id(Principal(type="user", id="alice", ns="inst")) == "inst_alice"
-    assert _ns_id(Principal(type="user", id="alice")) == "alice"
-    assert _ns_id(Principal(type="user", id="*", ns="inst")) == "*"  # wildcard not namespaced
+    # A plain namespaced principal keeps the readable ns_id shape; the wildcard is not
+    # namespaced. Underscores inside a component are escaped so the join stays unambiguous.
+    assert _safe_ns_id(Principal(type="user", id="alice", ns="inst")) == "inst_alice"
+    assert _safe_ns_id(Principal(type="user", id="alice")) == "alice"
+    assert _safe_ns_id(Principal(type="user", id="*", ns="inst")) == "*"  # wildcard not namespaced
 
 
 def test_openfga_user_encoding() -> None:

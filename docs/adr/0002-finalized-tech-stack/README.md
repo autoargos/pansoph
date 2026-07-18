@@ -111,7 +111,7 @@ Retrieval and answering: embed the query, run hybrid dense plus sparse search wi
 
 ## Local full Phase 1 demo
 
-One command brings up the full vertical on one machine: `docker compose --profile core,workers,models up`. Services: Postgres 17 with pgvectorscale and pgmq, Valkey, Garage, SpiceDB, Ollama plus TEI, the FastAPI API, the DBOS workers, the React reference web app, and optionally Zitadel.
+One command brings up the full vertical on one machine: `docker compose --profile core --profile workers --profile models up`. Services: Postgres 17 with pgvectorscale and pgmq, Valkey, Garage, SpiceDB, Ollama plus TEI, the FastAPI API, the DBOS workers, the React reference web app, and optionally Zitadel.
 
 The demo exercises all of Phase 1 in breadth: connectors across all three tiers (GitHub, Google Drive, and Confluence as native, public link fetcher and an MCP server through the bridge as reach anything, and the browser extension as grabber), each multi instance, ingestion with source ACL import, ACL aware hybrid chat and search with inline citations, and the headline red team test live, where a second user provably cannot retrieve the first user's restricted document and a revocation is reflected after re sync. A single environment variable flips the LLM and embeddings to a cloud provider to prove BYOM.
 
