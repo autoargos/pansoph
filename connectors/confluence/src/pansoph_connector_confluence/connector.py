@@ -43,11 +43,13 @@ Auth
   not assume a scope; it maps whatever the credential can actually reach.
 
 OAuth base
-  A 3LO token is NOT scoped to a site origin. After consent the caller resolves the
-  cloudid via https://api.atlassian.com/oauth/token/accessible-resources and
-  addresses the API at https://api.atlassian.com/ex/confluence/{cloudid}. When an
-  oauth_token is configured, set base_url to that ex/confluence/{cloudid} origin.
-  This connector reads base_url as-is.
+  A 3LO token is NOT scoped to a site origin. After consent the connector resolves
+  the cloud id itself from the token (GET
+  https://api.atlassian.com/oauth/token/accessible-resources) and addresses the API
+  at https://api.atlassian.com/ex/confluence/{cloud_id}, so an OAuth instance needs
+  no base_url (see _ensure_base). A multi-site grant is disambiguated by the optional
+  cloud_id or site_url config fields, else the first accessible site is used. A
+  manual Server/DC or basic-auth Cloud instance still sets base_url directly.
 
 Incremental (list_changes, upsert phase)
   A real high-water-mark cursor over the CQL lastmodified field. The connector calls
@@ -256,6 +258,16 @@ class ConfluenceConnector:
         self._token = cfg.get("token", "")
         self._oauth_token = cfg.get("oauth_token", "")
         self._space = cfg.get("space_key", "")
+        # Atlassian Cloud (OAuth) addresses the API through a gateway keyed by a cloud
+        # id, not the site host. When only an OAuth token is sealed (no base_url), the
+        # base is resolved from the token at run time (see _ensure_base). These two
+        # optional fields disambiguate which site to use when the grant reaches several.
+        self._cloud_id = str(cfg.get("cloud_id", "")).strip()
+        self._site_url = str(cfg.get("site_url", "")).strip()
+        # The site's human-openable web URL, filled once the cloud id is resolved, so a
+        # document's source_url points at the site the user can actually open rather
+        # than the api.atlassian.com gateway (which a browser cannot follow).
+        self._site_web_url = ""
         # The space-wide view audience is constant per space within one sync run (the
         # runtime builds a fresh instance per sync), so it is safe to cache per key.
         self._space_acl_cache: dict[str, tuple[list[str], list[str]]] = {}
@@ -329,8 +341,6 @@ class ConfluenceConnector:
         )
 
     def validate(self, config: dict[str, Any]) -> ValidationResult:
-        if not config.get("base_url"):
-            return ValidationResult(ok=False, error="missing: base_url")
         # Auth is satisfied either by an OAuth token or by an email plus API token.
         has_oauth = bool(config.get("oauth_token"))
         has_basic = bool(config.get("email")) and bool(config.get("token"))
@@ -339,7 +349,61 @@ class ConfluenceConnector:
                 ok=False,
                 error="missing auth: connect with Atlassian, or set email and token",
             )
+        # A manual instance (Server/DC, or Cloud basic auth) must give its base_url; an
+        # OAuth (Atlassian Cloud) instance resolves its API base from the token at run
+        # time (_ensure_base), so requiring base_url up front would wrongly reject a
+        # freshly connected Cloud instance that never pastes a URL.
+        if not has_oauth and not config.get("base_url"):
+            return ValidationResult(ok=False, error="missing: base_url")
         return ValidationResult(ok=True)
+
+    async def _ensure_base(self) -> None:
+        """Resolve the Atlassian Cloud API base for an OAuth credential, once.
+
+        A manually configured instance sets base_url directly, so this is a no op. An
+        OAuth (Atlassian Cloud) connect seals only a token: the API base
+        (https://api.atlassian.com/ex/confluence/{cloud_id}) must be discovered from
+        the token itself. GET /oauth/token/accessible-resources lists the sites the
+        grant can reach, each with a cloud id and a site URL. We pick the configured
+        site (by cloud_id, else by a site_url substring) or the first, address the
+        Confluence API through the gateway, and remember the site's web URL for
+        building human-openable document links. Resolved once, then cached on _base.
+        """
+        if self._base or not self._oauth_token:
+            return
+        headers = {
+            "Authorization": f"Bearer {self._oauth_token}",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+            resp = await client.get("https://api.atlassian.com/oauth/token/accessible-resources")
+            resp.raise_for_status()
+            sites = resp.json()
+        if not sites:
+            raise RuntimeError(
+                "the Atlassian grant can reach no sites; re-connect and grant a site"
+            )
+        chosen = self._pick_site(sites)
+        self._base = f"https://api.atlassian.com/ex/confluence/{chosen['id']}"
+        self._site_web_url = str(chosen.get("url", "")).rstrip("/")
+
+    def _pick_site(self, sites: list[dict[str, Any]]) -> dict[str, Any]:
+        """Choose which accessible Atlassian site to use.
+
+        Prefers an exact cloud_id match, then a case-insensitive site_url substring
+        match, then falls back to the first site the grant returned. Keeping the choice
+        explicit means a multi-site grant is deterministic rather than order-dependent.
+        """
+        if self._cloud_id:
+            for site in sites:
+                if str(site.get("id")) == self._cloud_id:
+                    return site
+        if self._site_url:
+            want = self._site_url.lower()
+            for site in sites:
+                if want in str(site.get("url", "")).lower():
+                    return site
+        return sites[0]
 
     def _client(self) -> httpx.AsyncClient:
         # Prefer the OAuth Bearer token when the Connect flow sealed one; otherwise
@@ -367,6 +431,7 @@ class ConfluenceConnector:
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
         since = _parse_when(cursor) if cursor else None
         checkpoint = cursor or _EPOCH_CURSOR
+        await self._ensure_base()
         async with self._client() as client:
             # Phase 1: incremental upserts by CQL lastmodified. The coarse minute
             # floor over-fetches; the precise version.when filter below drops any
@@ -447,6 +512,7 @@ class ConfluenceConnector:
 
     # --- documents + ACL ---
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
+        await self._ensure_base()
         async with self._client() as client:
             resp = await client.get(
                 f"/wiki/rest/api/content/{ref.source_doc_id}",
@@ -467,11 +533,15 @@ class ConfluenceConnector:
                 mime="text/html",
                 text=body,
                 title=page.get("title"),
-                source_url=f"{self._base}/wiki/pages/viewpage.action?pageId={ref.source_doc_id}",
+                source_url=(
+                    f"{self._site_web_url or self._base}"
+                    f"/wiki/pages/viewpage.action?pageId={ref.source_doc_id}"
+                ),
             )
             return raw, await self._acl_from_page(client, page)
 
     async def list_acls(self, ref: DocRef) -> AccessControl:
+        await self._ensure_base()
         async with self._client() as client:
             resp = await client.get(
                 f"/wiki/rest/api/content/{ref.source_doc_id}",
@@ -657,6 +727,7 @@ class ConfluenceConnector:
         params: dict[str, Any] = {"limit": 100}
         if cursor:
             params["cursor"] = cursor
+        await self._ensure_base()
         async with self._client() as client:
             resp = await client.get("/wiki/api/v2/spaces", params=params)
             resp.raise_for_status()

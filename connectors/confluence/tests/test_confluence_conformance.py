@@ -434,3 +434,69 @@ async def test_confluence_permissions(respx_mock: respx.MockRouter) -> None:
         principals=_FIX / "principals.json",
         expected=_FIX / "expected.json",
     )
+
+
+@respx.mock(assert_all_called=False)
+async def test_oauth_resolves_cloud_id_and_addresses_the_gateway(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # An OAuth instance seals only a token and no base_url. Before its first API call the
+    # connector resolves the cloud id from the token (accessible-resources) and addresses
+    # the Confluence API through the api.atlassian.com gateway, so discovery no longer
+    # fails with a "missing protocol" relative URL.
+    resources = respx_mock.get("https://api.atlassian.com/oauth/token/accessible-resources").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"id": "cid-123", "url": "https://acme.atlassian.net", "name": "acme"}],
+        )
+    )
+    spaces = respx_mock.get(
+        "https://api.atlassian.com/ex/confluence/cid-123/wiki/api/v2/spaces"
+    ).mock(
+        return_value=httpx.Response(
+            200, json={"results": [{"id": "10", "key": "ENG", "name": "Engineering"}]}
+        )
+    )
+    conn = ConfluenceConnector(instance_id="conf", config={"oauth_token": "at-xyz"})
+    page = await conn.list_resources()
+    assert resources.called, "the token's accessible sites must be resolved"
+    assert spaces.called, "the API must be addressed through the cloud-id gateway"
+    assert [r.id for r in page.items] == ["ENG"]
+    assert conn._base == "https://api.atlassian.com/ex/confluence/cid-123"
+    # The human-openable link points at the site the user can actually open.
+    assert conn._site_web_url == "https://acme.atlassian.net"
+
+
+@respx.mock(assert_all_called=False)
+async def test_oauth_picks_the_configured_site_from_a_multi_site_grant(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # A grant that reaches several sites is disambiguated by the cloud_id config field,
+    # so the choice is deterministic rather than dependent on the response order.
+    respx_mock.get("https://api.atlassian.com/oauth/token/accessible-resources").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "cid-a", "url": "https://a.atlassian.net"},
+                {"id": "cid-b", "url": "https://b.atlassian.net"},
+            ],
+        )
+    )
+    respx_mock.get("https://api.atlassian.com/ex/confluence/cid-b/wiki/api/v2/spaces").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    conn = ConfluenceConnector(
+        instance_id="conf", config={"oauth_token": "at", "cloud_id": "cid-b"}
+    )
+    await conn.list_resources()
+    assert conn._base == "https://api.atlassian.com/ex/confluence/cid-b"
+
+
+def test_validate_accepts_oauth_without_base_url() -> None:
+    # An OAuth Cloud instance resolves its base at run time, so validate must not demand a
+    # base_url for it; a basic-auth instance still must supply one.
+    conn = ConfluenceConnector(instance_id="conf", config={})
+    assert conn.validate({"oauth_token": "at"}).ok
+    assert not conn.validate({}).ok
+    assert not conn.validate({"email": "e@x.com", "token": "x"}).ok
+    assert conn.validate({"base_url": "https://x", "email": "e@x.com", "token": "x"}).ok

@@ -13,6 +13,7 @@ step. Retrieval still enforces permissions through the authz bulk check regardle
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -33,6 +34,17 @@ from .group_aliases import expand_groups
 from .registry import list_adapters, load_adapter
 
 router = APIRouter(prefix="/api")
+
+
+def _app_base_url() -> str:
+    """The public origin the lens web app is served from, for redirecting a browser back
+    after an OAuth callback. Defaults to the local lens port; in a real deploy behind one
+    domain it is that domain. Falls back to the API public base if only that is set."""
+    url = os.environ.get("PANSOPH_PUBLIC_APP_URL") or os.environ.get(
+        "PANSOPH_PUBLIC_BASE_URL", "http://localhost:3000"
+    )
+    return url.rstrip("/")
+
 
 _PORT_GROUPS = [
     "pansoph.connectors",
@@ -565,8 +577,14 @@ async def oauth_callback(
         UnknownProviderError,
     )
 
+    # Redirect back to the lens WEB app, not this API host. The provider redirected the
+    # browser to agora's callback (the registered redirect_uri), so a relative /connectors
+    # redirect would resolve against the API origin (e.g. :8080) and 404. The app URL is the
+    # public origin lens is served from (default the local :3000, one env var in a real
+    # deploy behind a single domain).
+    app = _app_base_url()
     if error:
-        return RedirectResponse(f"/connectors?oauth_error={error}", status_code=302)
+        return RedirectResponse(f"{app}/connectors?oauth_error={error}", status_code=302)
     if not code or not state:
         raise HTTPException(status_code=400, detail="callback requires code and state")
 
@@ -580,7 +598,7 @@ async def oauth_callback(
     except CodeExchangeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     audit("oauth_callback", actor="oauth", tenant="", provider=provider, instance=instance_id)
-    return RedirectResponse(f"/connectors?configure={instance_id}", status_code=302)
+    return RedirectResponse(f"{app}/connectors?configure={instance_id}", status_code=302)
 
 
 @router.get("/health")
