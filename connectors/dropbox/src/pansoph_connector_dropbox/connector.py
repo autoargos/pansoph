@@ -84,6 +84,8 @@ fetch here returns metadata so ingestion can stage and the ACL is bound at fetch
 
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -102,6 +104,58 @@ from pansoph_types import AccessControl, AuthScheme, Capabilities, DocRef, RawDo
 # owner, editor, viewer, and viewer_no_comment can all read the file. traverse and
 # no_access can navigate to the item but cannot read it, so they are not a grant.
 _READ_ACCESS_TYPES: frozenset[str] = frozenset({"owner", "editor", "viewer", "viewer_no_comment"})
+
+# File extensions worth indexing. Text ones are decoded and used directly; document ones
+# are handed to the parser (Docling), which extracts their text. Anything else (images,
+# audio, video, archives, binaries) is listed for its ACL but not downloaded, so a sync
+# does not pull gigabytes of media that cannot be searched anyway.
+_TEXT_EXTS: frozenset[str] = frozenset(
+    {
+        ".txt",
+        ".md",
+        ".markdown",
+        ".rst",
+        ".csv",
+        ".tsv",
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".url",
+        ".log",
+        ".html",
+        ".htm",
+        ".css",
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".java",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".go",
+        ".rs",
+        ".rb",
+        ".php",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".kt",
+        ".scala",
+    }
+)
+_DOC_EXTS: frozenset[str] = frozenset(
+    {".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".epub"}
+)
+# Skip a file larger than this so a single huge document cannot stall a sync or blow up
+# memory. The metadata carries the size, so oversize files are never downloaded.
+_MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024
 
 
 class DropboxConnector:
@@ -238,20 +292,53 @@ class DropboxConnector:
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         await self._ensure_access_token()
         async with self._client() as client:
-            resp = await client.post(
-                "/2/files/get_metadata",
-                json={"path": ref.source_doc_id},
-            )
+            resp = await client.post("/2/files/get_metadata", json={"path": ref.source_doc_id})
             resp.raise_for_status()
             payload = resp.json()
+            name = payload.get("name") or ref.source_doc_id.rsplit("/", 1)[-1]
+            size = payload.get("size", 0)
+            ext = os.path.splitext(name)[1].lower()
+
+            # Download and index the content of a searchable file. A too-large file or a
+            # non-document type (image, audio, video, archive) is listed for its ACL but its
+            # bytes are not pulled, so the sync stays lean. A text file is decoded and used
+            # directly; a document type is handed to the parser, which extracts its text.
+            text: str | None = None
+            content: bytes | None = None
+            mime = "application/octet-stream"
+            indexable = ext in _TEXT_EXTS or ext in _DOC_EXTS
+            if indexable and 0 < size <= _MAX_DOWNLOAD_BYTES:
+                data = await self._download(ref.source_doc_id)
+                if ext in _TEXT_EXTS:
+                    text = data.decode("utf-8", "replace")
+                    mime = "text/plain"
+                else:
+                    content = data
             raw = RawDoc(
                 source_doc_id=ref.source_doc_id,
                 instance_id=self.instance_id,
-                mime="application/octet-stream",
-                text=None,
-                title=payload.get("name"),
+                mime=mime,
+                text=text,
+                content=content,
+                title=name,
             )
             return raw, await self._acl(client, ref.source_doc_id)
+
+    async def _download(self, path: str) -> bytes:
+        """Download a file's bytes from the Dropbox content host. The path is passed in the
+        Dropbox-API-Arg header (not the body), which is how the content endpoint takes its
+        argument; the response body is the raw file. A short-lived access token from a
+        refresh is used when configured."""
+        import httpx
+
+        content_base = self._base_url.replace("api.dropboxapi.com", "content.dropboxapi.com")
+        headers = {"Dropbox-API-Arg": json.dumps({"path": path})}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        async with httpx.AsyncClient(base_url=content_base, headers=headers, timeout=60.0) as c:
+            resp = await c.post("/2/files/download")
+            resp.raise_for_status()
+            return resp.content
 
     async def list_acls(self, ref: DocRef) -> AccessControl:
         await self._ensure_access_token()

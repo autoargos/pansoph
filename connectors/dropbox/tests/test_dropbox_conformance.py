@@ -23,6 +23,7 @@ from pansoph_connector_sdk.conformance import assert_conforms
 from pansoph_connector_sdk.verify.categories.contract import check_discovery, check_spec
 from pansoph_connector_sdk.verify.categories.permissions import check_permissions
 from pansoph_connector_sdk.verify.categories.sync import check_deletions, check_incremental
+from pansoph_types import DocRef
 
 _FIX = Path(__file__).parent / "fixtures" / "permissions"
 
@@ -277,3 +278,41 @@ def test_dropbox_validate_requires_a_token_or_the_refresh_trio() -> None:
     assert conn.validate({"token": "x"}).ok
     assert conn.validate({"refresh_token": "rt", "app_key": "ak", "app_secret": "as"}).ok
     assert not conn.validate({"refresh_token": "rt"}).ok
+
+
+@respx.mock(assert_all_called=False)
+async def test_dropbox_downloads_and_indexes_text_content(respx_mock: respx.MockRouter) -> None:
+    # A text file's bytes are downloaded from the content host and returned as text, so the
+    # document actually has content to chunk and index (not just metadata).
+    respx_mock.post(path="/2/files/get_metadata").mock(
+        return_value=httpx.Response(
+            200, json={"name": "notes.md", "path_lower": "/notes.md", "size": 20}
+        )
+    )
+    dl = respx_mock.post("https://content.dropboxapi.com/2/files/download").mock(
+        return_value=httpx.Response(200, content=b"# Notes\nhello world")
+    )
+    _mock_members(respx_mock)
+    conn = _factory()
+    raw, _acl = await conn.fetch(DocRef(source_doc_id="/notes.md", instance_id="dbx"))
+    assert dl.called, "the content endpoint must be hit to download the file"
+    assert raw.text == "# Notes\nhello world"
+    assert raw.title == "notes.md"
+
+
+@respx.mock(assert_all_called=False)
+async def test_dropbox_skips_content_for_non_indexable_type(respx_mock: respx.MockRouter) -> None:
+    # An image is listed for its ACL but its bytes are never downloaded (nothing to index).
+    respx_mock.post(path="/2/files/get_metadata").mock(
+        return_value=httpx.Response(
+            200, json={"name": "photo.jpg", "path_lower": "/photo.jpg", "size": 500000}
+        )
+    )
+    dl = respx_mock.post("https://content.dropboxapi.com/2/files/download").mock(
+        return_value=httpx.Response(200, content=b"binary")
+    )
+    _mock_members(respx_mock)
+    conn = _factory()
+    raw, _acl = await conn.fetch(DocRef(source_doc_id="/photo.jpg", instance_id="dbx"))
+    assert not dl.called, "a non-indexable type must not be downloaded"
+    assert raw.text is None and raw.content is None

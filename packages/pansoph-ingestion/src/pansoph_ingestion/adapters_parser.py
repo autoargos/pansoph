@@ -33,9 +33,16 @@ class DoclingParser:
         if raw.content is None:
             return ParsedDoc(title=raw.title, lang=raw.lang, sections=[])
 
-        # Binary path: parse with Docling and export to markdown, then section it.
-        from docling.datamodel.base_models import DocumentStream
-        from docling.document_converter import DocumentConverter
+        # Binary path: parse with Docling and export to markdown, then section it. Docling
+        # is a heavy optional dependency (install pansoph-ingestion[docling]); when it is not
+        # present, skip the binary document gracefully (an empty parse, no sections) rather
+        # than aborting the whole sync, so a single PDF does not stop a Dropbox or SharePoint
+        # run from indexing every text file around it.
+        try:
+            from docling.datamodel.base_models import DocumentStream
+            from docling.document_converter import DocumentConverter
+        except ImportError:
+            return ParsedDoc(title=raw.title, lang=raw.lang, sections=[])
 
         stream = DocumentStream(name=raw.source_doc_id, stream=io.BytesIO(raw.content))
         result = DocumentConverter().convert(stream)
