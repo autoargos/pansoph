@@ -1,7 +1,7 @@
 import { type User, UserManager } from "oidc-client-ts";
 import { useEffect, useState } from "react";
 
-import { setAuthToken } from "./api.ts";
+import { setAuthToken, setUnauthorizedHandler } from "./api.ts";
 
 // OIDC against the hosted Keycloak. The IdP is swappable; this only knows the issuer
 // and client id, both pointing at the demo realm.
@@ -14,6 +14,31 @@ const manager = new UserManager({
   post_logout_redirect_uri: `${window.location.origin}/`,
   response_type: "code",
   scope: "openid profile email",
+  // Keycloak access tokens are short lived (minutes). Renew them silently via the refresh
+  // token before they expire, so an open session does not start 401ing on every action
+  // (which made sync silently do nothing and connectors show "Connect" when already
+  // connected). oidc-client-ts renews ~1 minute before expiry using the stored refresh
+  // token, no hidden iframe needed.
+  automaticSilentRenew: true,
+});
+
+// Keep the bearer token the API layer sends in sync with the session as it is renewed,
+// loaded, or cleared. Without this, a renewed token would sit in the UserManager while the
+// API kept sending the stale one. Registered once at module load.
+manager.events.addUserLoaded((user) => setAuthToken(user.access_token));
+manager.events.addUserUnloaded(() => setAuthToken(null));
+// If the token still expires (renewal disabled or failed), try one silent renew; on
+// failure the next API call surfaces the 401 and the user can re-login.
+manager.events.addAccessTokenExpired(() => {
+  void manager.signinSilent().catch(() => setAuthToken(null));
+});
+// When any API call sees a 401, silently renew (a fresh access token is usually one
+// refresh away) so the action can be retried instead of failing.
+setUnauthorizedHandler(() => {
+  void manager
+    .signinSilent()
+    .then((u) => u && setAuthToken(u.access_token))
+    .catch(() => setAuthToken(null));
 });
 
 // The identity provider's self-service account console for the signed-in user (manage

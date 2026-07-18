@@ -82,6 +82,23 @@ def _oauth_field(connector: str) -> Any | None:
     return None
 
 
+def _credential_field(connector: str) -> Any | None:
+    """The connector's primary credential field: its OAUTH field if it has one, else the
+    first SECRET field (e.g. a "token" a token-based connector like Notion or Dropbox
+    seals). This is the field whose sealed handle means the instance is connected, so a
+    token-based connector reports connected too, not only OAuth ones."""
+    field = _oauth_field(connector)
+    if field is not None:
+        return field
+    spec = _connector_spec(connector)
+    if spec is None:
+        return None
+    for f in spec.fields:
+        if getattr(f.kind, "value", f.kind) == "secret":
+            return f
+    return None
+
+
 def _is_sealed(value: Any) -> bool:
     """True when a config value is a sealed secret handle (a real credential), not an
     empty placeholder."""
@@ -180,7 +197,9 @@ def instance_credential_status(instance: dict[str, Any]) -> CredentialStatus:
     handles, so a credential's plaintext never enters this computation.
     """
     config = instance.get("config") or {}
-    field = _oauth_field(instance["connector"])
+    # The primary credential is the oauth field if present, else a sealed token field, so a
+    # token-based connector (Notion, Dropbox) reports connected too, not only oauth ones.
+    field = _credential_field(instance["connector"])
     oauth_key = field.key if field is not None else "oauth_token"
     provider = getattr(field, "oauth_provider", None) if field is not None else None
 

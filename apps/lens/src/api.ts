@@ -10,6 +10,25 @@ function authHeader(): Record<string, string> {
   return _authToken ? { authorization: `Bearer ${_authToken}` } : {};
 }
 
+// Called when the API sees a 401, so the auth layer can silently renew the token (the
+// session may have a fresh refresh token even though the access token just expired).
+let _onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: () => void): void {
+  _onUnauthorized = fn;
+}
+// Throw a clear error on a non-ok response, and trigger a token renew on a 401 so the
+// session self-heals instead of an action silently doing nothing. Callers that swallow
+// the response shape (e.g. sync) then surface an honest failure, not a false "started".
+async function ensureOk(res: Response, what: string): Promise<Response> {
+  if (res.ok) return res;
+  if (res.status === 401) {
+    _onUnauthorized?.();
+    throw new Error(`${what}: your session expired, retrying sign-in`);
+  }
+  const detail = (await res.json().catch(() => null)) as { detail?: string } | null;
+  throw new Error(detail?.detail ?? `${what} failed: ${res.status}`);
+}
+
 export interface Identity {
   user: string;
   groups: string[];
@@ -142,7 +161,7 @@ export interface Instance {
 
 async function jget<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: authHeader() });
-  if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
+  await ensureOk(res, path);
   return (await res.json()) as T;
 }
 
@@ -233,6 +252,7 @@ export async function syncInstance(id: string): Promise<{ status: string; docs_i
     method: "POST",
     headers: authHeader(),
   });
+  await ensureOk(res, "Sync");
   return (await res.json()) as { status: string; docs_indexed: number; error?: string };
 }
 
