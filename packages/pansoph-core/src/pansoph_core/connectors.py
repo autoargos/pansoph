@@ -143,6 +143,19 @@ class ConnectorManager:
         # credential. Connectors that declare no secret fields are untouched.
         config = await _seal_instance_secrets(connector, instance_id, tenant_id, config)
 
+        # Preserve sealed credentials the submission did not resend. The upsert below
+        # replaces the whole config, so without this, promoting a draft to active (the
+        # configure step submits the picked resources but not the oauth token) or editing a
+        # connector (the form does not resend a sealed secret) would WIPE the sealed
+        # credential the oauth callback stored, leaving a freshly connected source unable to
+        # sync. Any sealed handle in the existing config that the new config does not set is
+        # carried forward.
+        existing = await self.get_instance(instance_id)
+        if existing is not None:
+            for key, val in (existing.get("config") or {}).items():
+                if key not in config and secret_handle(val) is not None:
+                    config[key] = val
+
         conn = await self._conn()
         try:
             await conn.execute(

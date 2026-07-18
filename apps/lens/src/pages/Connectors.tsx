@@ -142,6 +142,19 @@ function runKind(status?: string): StatusKind {
   return "err";
 }
 
+// Human copy for the OAuth error codes a provider redirects back with, so a denied or
+// failed consent is explained instead of silently dropping the user on a blank page.
+function oauthErrorMessage(code: string): string {
+  const known: Record<string, string> = {
+    access_denied: "You declined access, so the connector was not connected.",
+    invalid_scope: "The app requested a scope the provider rejected. Check the app config.",
+    server_error: "The provider had an error during sign-in. Try connecting again.",
+    temporarily_unavailable: "The provider is temporarily unavailable. Try again shortly.",
+    state_mismatch: "The sign-in could not be verified (state mismatch). Try connecting again.",
+  };
+  return known[code] ?? `Connecting the source failed: ${code.replace(/_/g, " ")}.`;
+}
+
 // A connector's overall health: green when the last run succeeded, cyan while running,
 // rose on error, amber when it has never run.
 function healthKind(inst: Instance): StatusKind {
@@ -291,6 +304,18 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configureParam, loading, instances]);
+
+  // ?oauth_error={code} is where a denied or failed OAuth consent lands. Surface it, or the
+  // user returns to a blank page and assumes the Connect button is broken.
+  const oauthError = params.get("oauth_error");
+  useEffect(() => {
+    if (!oauthError) return;
+    push(oauthErrorMessage(oauthError), "err");
+    const next = new URLSearchParams(params);
+    next.delete("oauth_error");
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oauthError]);
 
   const counts = useMemo(() => {
     let healthy = 0;
