@@ -16,7 +16,6 @@ from pansoph_types import RawDoc, Section
 
 from .ports import ParsedDoc
 
-
 # C0 control characters, except tab/newline/carriage-return, are stripped from all parsed
 # text. NUL (0x00) in particular is never meaningful document content (it shows up when a
 # binary or mis-decoded file is read as text), and a Postgres text column rejects it

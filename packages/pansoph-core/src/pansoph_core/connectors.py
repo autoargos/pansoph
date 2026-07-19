@@ -544,9 +544,7 @@ async def _resolved_config(instance: dict[str, Any]) -> dict[str, Any]:
     return await resolve_config(assembly.build_secret_store(), instance["tenant_id"], config)
 
 
-async def _refresh_oauth_token(
-    instance: dict[str, Any], config: dict[str, Any]
-) -> dict[str, Any]:
+async def _refresh_oauth_token(instance: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     """Return config with a freshly minted OAuth access token, if one can be refreshed.
 
     An OAuth access token expires (Google and Atlassian issue ~1h tokens), so reusing the
