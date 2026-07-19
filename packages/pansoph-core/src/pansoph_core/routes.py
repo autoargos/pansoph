@@ -29,7 +29,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import assembly
 from .audit import audit
-from .connectors import ConnectorManager, health, run_instance
+from .connectors import ConnectorManager, health, start_sync, stop_sync
 from .group_aliases import expand_groups
 from .registry import list_adapters, load_adapter
 
@@ -503,8 +503,22 @@ async def sync_instance(instance_id: str, user: Any = Depends(_CONNECTOR_ADMIN))
     instance = await manager.get_instance(instance_id)
     if instance is None:
         return {"error": "instance not found"}
-    result = await run_instance(manager, instance)
-    audit("connector_sync", actor="system", tenant=instance["tenant_id"], instance=instance_id)
+    # Run the sync in the background so a large source does not block the request (and so
+    # it stays cancellable via the stop endpoint). The card polls the run history for
+    # progress. Refuses a second concurrent run of the same instance.
+    result = await start_sync(manager, instance)
+    audit("connector_sync", actor=user.id, tenant=instance["tenant_id"], instance=instance_id)
+    return result
+
+
+@router.post("/connectors/instances/{instance_id}/sync/stop")
+async def stop_sync_instance(
+    instance_id: str, user: Any = Depends(_CONNECTOR_ADMIN)
+) -> dict[str, Any]:
+    """Cancel an in-flight sync, or close out a run orphaned by a restart."""
+    manager = _manager()
+    result = await stop_sync(manager, instance_id)
+    audit("connector_sync_stop", actor=user.id, tenant="", instance=instance_id)
     return result
 
 

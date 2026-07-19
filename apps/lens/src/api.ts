@@ -25,7 +25,9 @@ async function ensureOk(res: Response, what: string): Promise<Response> {
     _onUnauthorized?.();
     throw new Error(`${what}: your session expired, retrying sign-in`);
   }
-  const detail = (await res.json().catch(() => null)) as { detail?: string } | null;
+  const detail = (await res.json().catch(() => null)) as {
+    detail?: string;
+  } | null;
   throw new Error(detail?.detail ?? `${what} failed: ${res.status}`);
 }
 
@@ -60,7 +62,10 @@ function body(query: string, id: Identity): string {
   });
 }
 
-export async function search(query: string, id: Identity): Promise<SearchResult[]> {
+export async function search(
+  query: string,
+  id: Identity,
+): Promise<SearchResult[]> {
   const res = await fetch("/api/search", {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeader() },
@@ -71,7 +76,10 @@ export async function search(query: string, id: Identity): Promise<SearchResult[
   return data.results;
 }
 
-export async function* chat(query: string, id: Identity): AsyncGenerator<ChatEvent> {
+export async function* chat(
+  query: string,
+  id: Identity,
+): AsyncGenerator<ChatEvent> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeader() },
@@ -173,13 +181,7 @@ export async function connectorTypes(): Promise<string[]> {
 // rendered from the source of truth instead of a hardcoded map. See the ConnectorSpec /
 // FieldKind dataclasses in pansoph-connector-sdk.
 export type SpecFieldKind =
-  | "string"
-  | "int"
-  | "bool"
-  | "list"
-  | "secret"
-  | "secret_file"
-  | "oauth";
+  "string" | "int" | "bool" | "list" | "secret" | "secret_file" | "oauth";
 
 export interface SpecField {
   key: string;
@@ -202,15 +204,19 @@ export interface ConnectorSpec {
 }
 
 export async function connectorSpecs(): Promise<ConnectorSpec[]> {
-  return (await jget<{ connectors: ConnectorSpec[] }>("/api/connectors/specs")).connectors;
+  return (await jget<{ connectors: ConnectorSpec[] }>("/api/connectors/specs"))
+    .connectors;
 }
 
 export async function listInstances(): Promise<Instance[]> {
-  return (await jget<{ instances: Instance[] }>("/api/connectors/instances")).instances;
+  return (await jget<{ instances: Instance[] }>("/api/connectors/instances"))
+    .instances;
 }
 
 export async function instanceRuns(id: string): Promise<RunInfo[]> {
-  return (await jget<{ runs: RunInfo[] }>(`/api/connectors/instances/${id}/runs`)).runs;
+  return (
+    await jget<{ runs: RunInfo[] }>(`/api/connectors/instances/${id}/runs`)
+  ).runs;
 }
 
 export async function createInstance(payload: {
@@ -247,13 +253,31 @@ export async function deleteInstance(id: string): Promise<void> {
   if (!res.ok) throw new Error(`delete failed: ${res.status}`);
 }
 
-export async function syncInstance(id: string): Promise<{ status: string; docs_indexed: number; error?: string }> {
+export async function syncInstance(
+  id: string,
+): Promise<{ status: string; docs_indexed?: number; error?: string }> {
   const res = await fetch(`/api/connectors/instances/${id}/sync`, {
     method: "POST",
     headers: authHeader(),
   });
   await ensureOk(res, "Sync");
-  return (await res.json()) as { status: string; docs_indexed: number; error?: string };
+  return (await res.json()) as {
+    status: string;
+    docs_indexed?: number;
+    error?: string;
+  };
+}
+
+// Stop an in-flight sync (or clear a run orphaned by a restart). The sync runs in the
+// background on the server, so this cancels that task; the card then reflects the run
+// closing out as stopped.
+export async function stopInstance(id: string): Promise<{ status: string }> {
+  const res = await fetch(`/api/connectors/instances/${id}/sync/stop`, {
+    method: "POST",
+    headers: authHeader(),
+  });
+  await ensureOk(res, "Stop");
+  return (await res.json()) as { status: string };
 }
 
 // Start an OAuth connect flow. The authorize endpoint is bearer gated (connecting a
@@ -270,9 +294,12 @@ export async function oauthAuthorizeUrl(
     `?connector=${encodeURIComponent(connector)}` +
     `&instance=${encodeURIComponent(instance)}` +
     `&tenant=${encodeURIComponent(tenant)}`;
-  const res = await fetch(`/api/oauth/${encodeURIComponent(provider)}/authorize${query}`, {
-    headers: authHeader(),
-  });
+  const res = await fetch(
+    `/api/oauth/${encodeURIComponent(provider)}/authorize${query}`,
+    {
+      headers: authHeader(),
+    },
+  );
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { detail?: string };
     throw new Error(body.detail ?? `could not start connect (${res.status})`);
@@ -320,7 +347,9 @@ export async function listResources(
     (query ? `?${query}` : "");
   const res = await fetch(path, { headers: authHeader() });
   if (!res.ok) {
-    const detail = (await res.json().catch(() => null)) as { detail?: string } | null;
+    const detail = (await res.json().catch(() => null)) as {
+      detail?: string;
+    } | null;
     throw new Error(detail?.detail ?? `resources failed: ${res.status}`);
   }
   return (await res.json()) as ResourcePage;
@@ -338,7 +367,9 @@ export interface CredentialStatus {
   needs_reauth: boolean;
 }
 
-export async function instanceCredential(instanceId: string): Promise<CredentialStatus> {
+export async function instanceCredential(
+  instanceId: string,
+): Promise<CredentialStatus> {
   return jget<CredentialStatus>(
     `/api/connectors/instances/${encodeURIComponent(instanceId)}/credential`,
   );

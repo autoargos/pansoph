@@ -26,12 +26,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     started (for example Postgres is not up yet), agora still serves; the scheduler
     retries each tick. Production runs syncs on the durable engine instead."""
     from .assembly import _postgres_dsn
-    from .connectors import ConnectorManager
+    from .connectors import ConnectorManager, cleanup_orphan_runs
     from .scheduler import scheduler_loop
 
     task: asyncio.Task[None] | None = None
     with contextlib.suppress(Exception):
-        task = asyncio.create_task(scheduler_loop(ConnectorManager(_postgres_dsn())))
+        manager = ConnectorManager(_postgres_dsn())
+        # A sync runs in this process, so any run still 'running' after a restart is a
+        # crash artifact. Close them out on boot so a card never stays stuck 'syncing'.
+        await cleanup_orphan_runs(manager)
+        task = asyncio.create_task(scheduler_loop(manager))
     try:
         yield
     finally:

@@ -15,6 +15,8 @@ demo carries no secret. This is a documented follow-up, not a silent gap.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
 from typing import Any
 
@@ -256,7 +258,8 @@ class ConnectorManager:
                     "VALUES (%s, 'running') RETURNING id",
                     (instance_id,),
                 )
-                return (await cur.fetchone())[0]  # type: ignore[index]
+                row = await cur.fetchone()
+                return int(row[0]) if row else 0
         finally:
             await conn.close()
 
@@ -270,6 +273,39 @@ class ConnectorManager:
                 "error = %s WHERE id = %s",
                 (status, docs, error, run_id),
             )
+        finally:
+            await conn.close()
+
+    async def mark_running_stopped(self, instance_id: str) -> int:
+        """Mark any lingering 'running' run of an instance as stopped, returning the count.
+
+        Used when a Stop request finds no live task in this process (for example the sync
+        was orphaned by a restart): the row is a crash artifact, so it is closed out rather
+        than left forever showing 'running'."""
+        conn = await self._conn()
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE sync_runs SET status = 'stopped', finished_at = now(), "
+                    "error = 'stopped by operator' WHERE instance_id = %s AND status = 'running'",
+                    (instance_id,),
+                )
+                return int(cur.rowcount)
+        finally:
+            await conn.close()
+
+    async def mark_all_running_interrupted(self) -> int:
+        """Close out every 'running' run at startup. An in-process sync cannot survive a
+        restart, so any row still 'running' when agora boots is a crash artifact, not a
+        live sync; leaving it would strand the card in a permanent 'syncing' state."""
+        conn = await self._conn()
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE sync_runs SET status = 'interrupted', finished_at = now(), "
+                    "error = 'interrupted by a restart' WHERE status = 'running'",
+                )
+                return int(cur.rowcount)
         finally:
             await conn.close()
 
@@ -361,9 +397,68 @@ async def run_instance(manager: ConnectorManager, instance: dict[str, Any]) -> d
         await manager.record_run_finish(run_id, "success", count, None)
         await manager.set_cursor(instance["id"], next_cursor)
         return {"status": "success", "docs_indexed": count}
+    except asyncio.CancelledError:
+        # A Stop request cancelled the sync. Record the partial run as stopped and persist
+        # the cursor reached so far (list_changes yields a durable cursor per doc, so the
+        # next sync resumes rather than restarts), then re-raise so the task truly ends.
+        with contextlib.suppress(Exception):
+            await manager.record_run_finish(run_id, "stopped", count, "stopped by operator")
+            await manager.set_cursor(instance["id"], next_cursor)
+        raise
     except Exception as exc:  # noqa: BLE001  record the failure, surface it to the caller
         await manager.record_run_finish(run_id, "error", count, str(exc))
         return {"status": "error", "docs_indexed": count, "error": str(exc)}
+
+
+# In-flight sync tasks, keyed by instance id. A manual or scheduled sync registers its
+# task here so a Stop request can cancel it and a second sync of the same instance is
+# refused rather than run concurrently. In-process only: a restart clears it, and
+# cleanup_orphan_runs then closes out any run row the restart orphaned.
+_running: dict[str, asyncio.Task[Any]] = {}
+
+
+def is_running(instance_id: str) -> bool:
+    task = _running.get(instance_id)
+    return task is not None and not task.done()
+
+
+async def start_sync(manager: ConnectorManager, instance: dict[str, Any]) -> dict[str, Any]:
+    """Start a sync as a background task and return immediately.
+
+    Returns {"status": "started"} once the task is spawned, or {"status":
+    "already_running"} if this instance is mid-sync, so a double click cannot run two
+    concurrent syncs of the same instance. The card polls the run history for progress."""
+    instance_id = instance["id"]
+    if is_running(instance_id):
+        return {"status": "already_running"}
+
+    async def _run_and_deregister() -> None:
+        try:
+            await run_instance(manager, instance)
+        finally:
+            _running.pop(instance_id, None)
+
+    _running[instance_id] = asyncio.create_task(_run_and_deregister())
+    return {"status": "started"}
+
+
+async def stop_sync(manager: ConnectorManager, instance_id: str) -> dict[str, Any]:
+    """Cancel an in-flight sync, or close out a run orphaned by a restart.
+
+    A live task is cancelled (its run is recorded stopped as it unwinds). With no live
+    task, any lingering 'running' row is marked stopped, which recovers the case where a
+    restart left a run showing 'running' with no process behind it."""
+    task = _running.get(instance_id)
+    if task is not None and not task.done():
+        task.cancel()
+        return {"status": "stopping"}
+    cleared = await manager.mark_running_stopped(instance_id)
+    return {"status": "stopped" if cleared else "not_running"}
+
+
+async def cleanup_orphan_runs(manager: ConnectorManager) -> int:
+    """Close out runs left 'running' by a previous process. Called once at startup."""
+    return await manager.mark_all_running_interrupted()
 
 
 def _build_connector(instance: dict[str, Any]) -> Any:

@@ -18,6 +18,7 @@ import {
   type SpecField,
   type SpecFieldKind,
   syncInstance,
+  stopInstance,
 } from "../api.ts";
 import {
   Alert,
@@ -147,12 +148,18 @@ function runKind(status?: string): StatusKind {
 function oauthErrorMessage(code: string): string {
   const known: Record<string, string> = {
     access_denied: "You declined access, so the connector was not connected.",
-    invalid_scope: "The app requested a scope the provider rejected. Check the app config.",
-    server_error: "The provider had an error during sign-in. Try connecting again.",
-    temporarily_unavailable: "The provider is temporarily unavailable. Try again shortly.",
-    state_mismatch: "The sign-in could not be verified (state mismatch). Try connecting again.",
+    invalid_scope:
+      "The app requested a scope the provider rejected. Check the app config.",
+    server_error:
+      "The provider had an error during sign-in. Try connecting again.",
+    temporarily_unavailable:
+      "The provider is temporarily unavailable. Try again shortly.",
+    state_mismatch:
+      "The sign-in could not be verified (state mismatch). Try connecting again.",
   };
-  return known[code] ?? `Connecting the source failed: ${code.replace(/_/g, " ")}.`;
+  return (
+    known[code] ?? `Connecting the source failed: ${code.replace(/_/g, " ")}.`
+  );
 }
 
 // A connector's overall health: green when the last run succeeded, cyan while running,
@@ -202,7 +209,8 @@ function configToValues(
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const f of spec?.fields ?? []) {
-    if (isBoolField(f.kind) || isSecretField(f.kind) || f.kind === "oauth") continue;
+    if (isBoolField(f.kind) || isSecretField(f.kind) || f.kind === "oauth")
+      continue;
     // Resource-bound fields are filled by the picker, not the free-text map.
     if (isResourceField(f)) continue;
     const v = config[f.key];
@@ -266,7 +274,10 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
     });
     // Poll the instance list so a running sync updates its status without a reload.
     const t = setInterval(
-      () => listInstances().then(setInstances).catch(() => {}),
+      () =>
+        listInstances()
+          .then(setInstances)
+          .catch(() => {}),
       6000,
     );
     return () => clearInterval(t);
@@ -344,14 +355,33 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
       await refresh();
       if (expanded === id) setRuns(await instanceRuns(id));
       if (res.status === "success" || res.status === "synced") {
-        push(`Synced. ${res.docs_indexed} documents indexed.`, "ok");
+        push(`Synced. ${res.docs_indexed ?? 0} documents indexed.`, "ok");
       } else if (res.error) {
         push(`Sync failed: ${res.error}`, "err");
+      } else if (res.status === "already_running") {
+        push("A sync is already running for this connector.", "info");
       } else {
-        push("Sync started.", "info");
+        push("Sync started. It runs in the background.", "info");
       }
     } catch (e) {
       push(`Sync failed: ${String(e)}`, "err");
+    } finally {
+      setSyncing(null);
+    }
+  }
+
+  async function stop(id: string) {
+    setSyncing(id);
+    try {
+      const res = await stopInstance(id);
+      await refresh();
+      if (expanded === id) setRuns(await instanceRuns(id));
+      push(
+        res.status === "not_running" ? "No sync was running." : "Sync stopped.",
+        "info",
+      );
+    } catch (e) {
+      push(`Stop failed: ${String(e)}`, "err");
     } finally {
       setSyncing(null);
     }
@@ -443,7 +473,9 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
                     />
                   )}
                   {t.label}
-                  <span className="ml-1.5 tabular-nums opacity-60">{t.count}</span>
+                  <span className="ml-1.5 tabular-nums opacity-60">
+                    {t.count}
+                  </span>
                 </button>
               );
             })}
@@ -478,7 +510,11 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
         />
       ) : shown.length === 0 ? (
         <EmptyState
-          title={filter === "healthy" ? "No healthy connectors" : "Nothing needs attention"}
+          title={
+            filter === "healthy"
+              ? "No healthy connectors"
+              : "Nothing needs attention"
+          }
           description={
             filter === "healthy"
               ? "None of your connectors reported a successful run yet."
@@ -499,10 +535,12 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
               title={titleOf(inst.connector)}
               canManage={canManage}
               syncing={syncing === inst.id}
+              running={healthLabel(inst) === "syncing"}
               expanded={expanded === inst.id}
               runs={expanded === inst.id ? runs : []}
               runsLoading={expanded === inst.id && runsLoading}
               onSync={() => sync(inst.id)}
+              onStop={() => stop(inst.id)}
               onToggleRuns={() => toggleRuns(inst.id)}
               onEdit={() => setEditing(inst)}
               onDelete={() => remove(inst)}
@@ -513,7 +551,10 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
       )}
 
       {viewingDocs && (
-        <DocumentsPanel inst={viewingDocs} onClose={() => setViewingDocs(null)} />
+        <DocumentsPanel
+          inst={viewingDocs}
+          onClose={() => setViewingDocs(null)}
+        />
       )}
 
       {(adding || editing || configuring) && (
@@ -585,7 +626,13 @@ function ConnectorSkeletons() {
 // DocumentsPanel: browse what an instance actually indexed. Answers the "where are these
 // documents" question by listing each source document with its id and a content snippet,
 // so an operator can confirm a connector pulled real, meaningful content.
-function DocumentsPanel({ inst, onClose }: { inst: Instance; onClose: () => void }) {
+function DocumentsPanel({
+  inst,
+  onClose,
+}: {
+  inst: Instance;
+  onClose: () => void;
+}) {
   const [docs, setDocs] = useState<IndexedDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -612,7 +659,9 @@ function DocumentsPanel({ inst, onClose }: { inst: Instance; onClose: () => void
     >
       <div className="max-h-[60vh] overflow-y-auto">
         {error ? (
-          <div className="px-2 py-8 text-center text-[13px] text-err">{error}</div>
+          <div className="px-2 py-8 text-center text-[13px] text-err">
+            {error}
+          </div>
         ) : docs === null ? (
           <div className="flex justify-center py-10">
             <Spinner />
@@ -655,10 +704,12 @@ function ConnectorCard({
   title,
   canManage,
   syncing,
+  running,
   expanded,
   runs,
   runsLoading,
   onSync,
+  onStop,
   onToggleRuns,
   onEdit,
   onDelete,
@@ -668,10 +719,12 @@ function ConnectorCard({
   title: string;
   canManage: boolean;
   syncing: boolean;
+  running: boolean;
   expanded: boolean;
   runs: RunInfo[];
   runsLoading: boolean;
   onSync: () => void;
+  onStop: () => void;
   onToggleRuns: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -705,7 +758,18 @@ function ConnectorCard({
             <span className="truncate text-[15px] font-semibold tracking-[-0.02em] text-text">
               {inst.name}
             </span>
-            <Badge kind={health === "ok" ? "ok" : health === "run" ? "cyan" : health === "err" ? "err" : "warn"} dot>
+            <Badge
+              kind={
+                health === "ok"
+                  ? "ok"
+                  : health === "run"
+                    ? "cyan"
+                    : health === "err"
+                      ? "err"
+                      : "warn"
+              }
+              dot
+            >
               {healthLabel(inst)}
             </Badge>
           </div>
@@ -737,11 +801,17 @@ function ConnectorCard({
           <Stat value={fmtCount(docs)} label="documents" />
         )}
         <Stat
-          value={last ? relativeTime(last.started_at).replace(" ago", "") : "never"}
+          value={
+            last ? relativeTime(last.started_at).replace(" ago", "") : "never"
+          }
           label="synced ago"
           tone="cyan"
         />
-        <Stat value={fmtCount(inst.indexed_chunks ?? chunkEstimate(inst))} label="chunks" mono />
+        <Stat
+          value={fmtCount(inst.indexed_chunks ?? chunkEstimate(inst))}
+          label="chunks"
+          mono
+        />
         <div className="ml-auto text-right">
           <div className="flex items-center justify-end gap-1.5 font-mono text-[13px] text-muted">
             <IconClock width={13} height={13} />
@@ -758,14 +828,17 @@ function ConnectorCard({
         <div className="mb-4 flex items-start gap-2 rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.3)] bg-err-soft px-3 py-2 text-[11.5px] text-err">
           <IconAlert width={14} height={14} className="mt-px shrink-0" />
           <span className="min-w-0">
-            {last.error.length > 180 ? `${last.error.slice(0, 180)}...` : last.error}
+            {last.error.length > 180
+              ? `${last.error.slice(0, 180)}...`
+              : last.error}
           </span>
         </div>
       ) : (
         <div className="mb-4 inline-flex items-center gap-2 self-start rounded-[var(--radius-sm)] border border-border bg-elevated px-2.5 py-1.5 text-[11.5px] text-muted">
           <IconLock width={13} height={13} className="text-accent" />
           Source ACLs mapped to the{" "}
-          <b className="mx-0.5 font-semibold text-text">{scopeText}</b> namespace
+          <b className="mx-0.5 font-semibold text-text">{scopeText}</b>{" "}
+          namespace
         </div>
       )}
 
@@ -800,19 +873,36 @@ function ConnectorCard({
                 <IconTrash width={15} height={15} />
               </Button>
             </Tooltip>
-            <Button size="sm" onClick={onSync} disabled={syncing}>
-              {syncing ? (
-                <>
-                  <Spinner className="border-white/40 border-t-white" />
-                  Syncing
-                </>
-              ) : (
-                <>
-                  <IconSync width={14} height={14} />
-                  {errored ? "Retry sync" : "Sync now"}
-                </>
-              )}
-            </Button>
+            {running ? (
+              <Tooltip label="Stop the running sync">
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  onClick={onStop}
+                  disabled={syncing}
+                  className="hover:text-err"
+                >
+                  <span className="grid h-3.5 w-3.5 place-items-center">
+                    <span className="h-2.5 w-2.5 rounded-[2px] bg-current" />
+                  </span>
+                  Stop
+                </Button>
+              </Tooltip>
+            ) : (
+              <Button size="sm" onClick={onSync} disabled={syncing}>
+                {syncing ? (
+                  <>
+                    <Spinner className="border-white/40 border-t-white" />
+                    Syncing
+                  </>
+                ) : (
+                  <>
+                    <IconSync width={14} height={14} />
+                    {errored ? "Retry sync" : "Sync now"}
+                  </>
+                )}
+              </Button>
+            )}
           </>
         )}
       </div>
@@ -851,7 +941,11 @@ function ConnectorCard({
                     </TD>
                     <TD>
                       <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold">
-                        <StatusDot kind={runKind(r.status)} size={6} pulse={r.status === "running"} />
+                        <StatusDot
+                          kind={runKind(r.status)}
+                          size={6}
+                          pulse={r.status === "running"}
+                        />
                         <span
                           className={
                             r.status === "success"
@@ -937,7 +1031,9 @@ function ConnectorForm({
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
-  const [connector, setConnector] = useState(editing?.connector ?? specs[0]?.name ?? "");
+  const [connector, setConnector] = useState(
+    editing?.connector ?? specs[0]?.name ?? "",
+  );
   const [name, setName] = useState(editing?.name ?? "");
   const def = useMemo<ConnectorSpec | undefined>(
     () => specs.find((s) => s.name === connector),
@@ -945,19 +1041,28 @@ function ConnectorForm({
   );
   const [values, setValues] = useState<Record<string, string>>(() =>
     editing
-      ? configToValues(specs.find((s) => s.name === editing.connector), editing.config)
+      ? configToValues(
+          specs.find((s) => s.name === editing.connector),
+          editing.config,
+        )
       : {},
   );
   const [checks, setChecks] = useState<Record<string, boolean>>(() =>
     editing
-      ? configToChecks(specs.find((s) => s.name === editing.connector), editing.config)
+      ? configToChecks(
+          specs.find((s) => s.name === editing.connector),
+          editing.config,
+        )
       : {},
   );
   // Resource-picker selections, keyed by field key. Filled from an existing config on edit /
   // configure, then written back into the config on submit.
   const [resources, setResources] = useState<Record<string, string[]>>(() =>
     editing
-      ? configToResources(specs.find((s) => s.name === editing.connector), editing.config)
+      ? configToResources(
+          specs.find((s) => s.name === editing.connector),
+          editing.config,
+        )
       : {},
   );
   const [schedule, setSchedule] = useState(editing?.schedule_seconds ?? 0);
@@ -1113,13 +1218,23 @@ function ConnectorForm({
         <>
           <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
             <IconShield width={13} height={13} className="shrink-0 text-ok" />
-            <span className="truncate">Credentials encrypted at rest, never logged</span>
+            <span className="truncate">
+              Credentials encrypted at rest, never logged
+            </span>
           </span>
           <div className="flex-1" />
-          <Button variant="ghost" className="shrink-0 whitespace-nowrap" onClick={onClose}>
+          <Button
+            variant="ghost"
+            className="shrink-0 whitespace-nowrap"
+            onClick={onClose}
+          >
             Cancel
           </Button>
-          <Button className="shrink-0 whitespace-nowrap" onClick={submit} disabled={busy}>
+          <Button
+            className="shrink-0 whitespace-nowrap"
+            onClick={submit}
+            disabled={busy}
+          >
             {busy ? (
               <>
                 <Spinner className="border-white/40 border-t-white" />
@@ -1159,7 +1274,11 @@ function ConnectorForm({
         </Field>
 
         {/* Name */}
-        <Field label="Display name" required help="Shown in the connectors list.">
+        <Field
+          label="Display name"
+          required
+          help="Shown in the connectors list."
+        >
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -1243,7 +1362,10 @@ function ConnectorForm({
           label="Scope"
           help="Which slice this instance covers. An individual or group scope narrows the source ACL so only that user or group can retrieve these documents. Organization keeps the source ACL as is. Scope can only remove reach, never widen it. An individual scope must be the person's EMAIL, the canonical identity retrieval checks; a username there matches no one and the documents reach nobody."
         >
-          <Select value={scopeType} onChange={(e) => setScopeType(e.target.value)}>
+          <Select
+            value={scopeType}
+            onChange={(e) => setScopeType(e.target.value)}
+          >
             <option value="org">Organization (whole source)</option>
             <option value="group">Group</option>
             <option value="individual">Individual</option>
@@ -1254,7 +1376,9 @@ function ConnectorForm({
               value={scopeRef}
               onChange={(e) => setScopeRef(e.target.value)}
               placeholder={
-                scopeType === "group" ? "group id, e.g. g1" : "user email, e.g. alice@acme.com"
+                scopeType === "group"
+                  ? "group id, e.g. g1"
+                  : "user email, e.g. alice@acme.com"
               }
             />
           )}
@@ -1289,7 +1413,8 @@ function ConnectorForm({
                 placeholder="0 */6 * * *"
               />
               <span className="mt-1 block text-xs text-muted">
-                Standard 5-field cron (min hour day month weekday), evaluated in UTC.
+                Standard 5-field cron (min hour day month weekday), evaluated in
+                UTC.
               </span>
             </>
           )}
@@ -1309,7 +1434,9 @@ function ConnectorForm({
               <div className="space-y-4 rounded-[var(--radius-md)] border border-dashed border-border bg-bg/40 p-4">
                 <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-[0.09em] text-muted">
                   <span className="h-px flex-1 bg-border" />
-                  {connected ? "Additional options" : "Or connect manually with a token"}
+                  {connected
+                    ? "Additional options"
+                    : "Or connect manually with a token"}
                   <span className="h-px flex-1 bg-border" />
                 </div>
                 {manualFields.map((f) => (
@@ -1371,10 +1498,17 @@ function OAuthConnect({
     setErr(null);
     setBusy(true);
     try {
-      const url = await oauthAuthorizeUrl(authorizeSlug, connector, instanceId, tenant);
+      const url = await oauthAuthorizeUrl(
+        authorizeSlug,
+        connector,
+        instanceId,
+        tenant,
+      );
       window.location.href = url;
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "could not start the connect flow");
+      setErr(
+        e instanceof Error ? e.message : "could not start the connect flow",
+      );
       setBusy(false);
     }
   }
@@ -1446,10 +1580,17 @@ function CredentialBanner({
     setErr(null);
     setBusy(true);
     try {
-      const url = await oauthAuthorizeUrl(authorizeSlug, connector, instanceId, tenant);
+      const url = await oauthAuthorizeUrl(
+        authorizeSlug,
+        connector,
+        instanceId,
+        tenant,
+      );
       window.location.href = url;
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "could not start the reconnect flow");
+      setErr(
+        e instanceof Error ? e.message : "could not start the reconnect flow",
+      );
       setBusy(false);
     }
   }
@@ -1467,7 +1608,11 @@ function CredentialBanner({
             (needsReauth ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok")
           }
         >
-          {needsReauth ? <IconAlert width={15} height={15} /> : <IconCheck width={15} height={15} />}
+          {needsReauth ? (
+            <IconAlert width={15} height={15} />
+          ) : (
+            <IconCheck width={15} height={15} />
+          )}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-[13px] font-semibold text-text">
@@ -1479,7 +1624,8 @@ function CredentialBanner({
           <div className="mt-0.5 truncate text-[11.5px] text-muted">
             {account ? (
               <>
-                Connected as <span className="font-medium text-text">{account}</span>
+                Connected as{" "}
+                <span className="font-medium text-text">{account}</span>
               </>
             ) : needsReauth ? (
               "The credential expired. Reconnect to keep syncing."
@@ -1548,7 +1694,9 @@ function SpecFieldInput({
         required={required}
         help={
           help ??
-          (multi ? "Pick one or more to sync. Drill in to narrow the scope." : "Pick one to sync.")
+          (multi
+            ? "Pick one or more to sync. Drill in to narrow the scope."
+            : "Pick one to sync.")
         }
       >
         <ResourcePicker
@@ -1578,7 +1726,10 @@ function SpecFieldInput({
         >
           <svg
             viewBox="0 0 24 24"
-            className={"h-3 w-3 text-white transition-opacity " + (on ? "opacity-100" : "opacity-0")}
+            className={
+              "h-3 w-3 text-white transition-opacity " +
+              (on ? "opacity-100" : "opacity-0")
+            }
             fill="none"
             stroke="currentColor"
             strokeWidth="3"
@@ -1589,8 +1740,14 @@ function SpecFieldInput({
           </svg>
         </span>
         <span className="min-w-0">
-          <span className="block text-[13px] font-medium text-text">{label}</span>
-          {help && <span className="mt-0.5 block text-[11.5px] text-muted">{help}</span>}
+          <span className="block text-[13px] font-medium text-text">
+            {label}
+          </span>
+          {help && (
+            <span className="mt-0.5 block text-[11.5px] text-muted">
+              {help}
+            </span>
+          )}
         </span>
       </button>
     );
@@ -1667,7 +1824,11 @@ function SecretInput({
           aria-label={revealed ? "Hide secret" : "Reveal secret"}
           className="absolute right-1.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-[7px] text-muted transition hover:bg-surface hover:text-text"
         >
-          {revealed ? <IconEyeOff width={15} height={15} /> : <IconEye width={15} height={15} />}
+          {revealed ? (
+            <IconEyeOff width={15} height={15} />
+          ) : (
+            <IconEye width={15} height={15} />
+          )}
         </button>
       </div>
     </Field>
