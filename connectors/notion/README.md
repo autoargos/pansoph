@@ -1,85 +1,20 @@
 # pansoph-connector-notion
 
-A pansoph connector for Notion.
+A pansoph connector for Notion. It ingests pages shared with a Notion integration, reads their block content as plain text, and maps Notion's connection scope to a fail-closed pansoph ACL. Implemented against the official Notion API, `Notion-Version 2025-09-03`, verified 2026-07-05. See the header of `src/pansoph_connector_notion/connector.py` for the endpoint-by-endpoint provenance.
 
-Implemented against the latest official Notion API documentation. See the header of
-`src/pansoph_connector_notion/connector.py` for the verified endpoints, the mandatory
-`Notion-Version` header, the bearer auth, cursor pagination, why deletions are not
-declared, and the verified date (2026-07-05).
+## What it syncs
 
-It passes the shared conformance suite (`assert_conforms` from
-`pansoph-connector-sdk`), wired in `tests/test_notion_conformance.py`.
+- `list_changes` pages through `POST /v1/search`, filtered to `object=page`, yielding one `DocRef` per shared page. It follows Notion's intra-listing `next_cursor` to the end, so one call returns the complete listing.
+- `fetch` reads `GET /v1/blocks/{id}/children` and joins the `plain_text` of every block's `rich_text` spans into a `text/plain` document.
+- Databases are reachable only in that pages shared through a database appear in search results. There is no dedicated database-schema or property extraction; content is block text only.
 
-## What it ingests
+## Setup
 
-- `list_changes` pages through `POST /v1/search` filtered to pages, yielding one live
-  `DocRef` per shared page.
-- `fetch` reads `GET /v1/blocks/{id}/children` and joins the `plain_text` of every
-  block's rich text into a plain text document.
+1. Create a Notion internal integration at https://www.notion.so/my-integrations and copy its integration token.
+2. Share the pages and databases you want to ingest with that integration (open the page, use the share/connections menu, add the integration). Notion only exposes shared objects to the connection, so this share step defines the sync scope.
+3. Configure a pansoph instance of this connector. The connector needs one secret, `token`, which carries the internal integration token. An OAuth access token works in the same field; both are sent as `Authorization: Bearer <token>`.
 
-## Deletions: no bulk feed, so the capability is `False`
-
-`capabilities.deletions` is `False`, and that is honest. `POST /v1/search`
-**excludes trashed pages**: a page moved to trash (or un-shared from the connection)
-simply stops appearing in search results, it is never returned carrying
-`in_trash=True`
-([post-search](https://developers.notion.com/reference/post-search); confirmed by
-[notion-sdk-js #524](https://github.com/makenotion/notion-sdk-js/issues/524)). Notion
-exposes no "list deleted objects" feed, and `list_changes` receives only a cursor,
-never the prior synced id set, so the connector cannot emit a tombstone from a single
-poll. Declaring `True` would promise a tombstone stream the API can never produce, so
-instead the runtime purges removals by reconciling the full-scan listing against the
-previously synced set (search-absence is the removal signal). A live re-fetch of a
-trashed or un-shared page `404`s and is surfaced, so revoked content is never served,
-and a stale index entry carries only the integration-scoped grant, so it under-shares
-rather than leaks.
-
-## Access control: the integration is the principal
-
-A Notion integration behaves like a **restricted user**. `POST /v1/search` returns
-**only the pages that have been shared with the connection**, and results adhere to
-the connection's capabilities. So the integration's reachable set is a real,
-observable permission signal: what the connector can see is exactly what search
-returns.
-
-Notion has no single "which principals can see this page" endpoint, so a full
-per-principal readout is not constructible from the API. The faithful, minimal ACL
-that never overshares is therefore: **each ingested page is readable only by this
-instance's integration principal**, namespaced by the instance. The principal id is
-the bot id read from `GET /v1/users/me` (cached), overridable via config
-`integration_principal`. This mirrors the gmail connector's owner-only model: coarse,
-but it can never grant a page to anyone the integration could not already reach.
-
-Because the connector maps a real (if coarse) source-scoped ACL,
-`capabilities.permission_sync` is `True` and `list_acls` returns the integration
-grant for a page.
-
-### `public` is an explicit, audited override
-
-| config key              | type   | default | meaning                                           |
-| ----------------------- | ------ | ------- | ------------------------------------------------- |
-| `public`                | bool   | `False` | audited override: publish every page to the instance |
-| `integration_principal` | string | (auto)  | override the ACL principal; else bot id from `/v1/users/me` |
-
-`public` **never** defaults the grant wider than the integration scope. Setting
-`public: true` is a deliberate decision to publish every ingested page to every user
-in the instance, regardless of who could see it in Notion. Leave it off (the default)
-to keep access scoped to the integration principal.
-
-### Operator responsibility
-
-1. Scope the instance's Notion integration to only the pages you intend to expose.
-   The connector's ACL follows that scope automatically.
-2. Only set `public: true` when you truly intend a tenant-wide grant, and audit it.
-3. Use separate instances (each with its own integration token and ACL namespace)
-   when different page sets need different audiences.
-
-On Business/Enterprise, Notion supports page-level access rules expressed through
-`Person` / `Created-by` page properties, and user enumeration via `GET /v1/users`.
-Enriching the ACL to those real per-page principals is a documented follow-up, not a
-current feature.
-
-## Config
+Config fields (from `spec()`):
 
 ```json
 {
@@ -89,3 +24,63 @@ current feature.
   "integration_principal": ""
 }
 ```
+
+- `token` (secret, required): sealed in the secret store.
+- `base_url` (string, optional): override only for a proxy or self-managed gateway. Defaults to `https://api.notion.com`.
+- `public` (bool, optional): audited ACL override, default `false`. See below.
+- `integration_principal` (string, optional): override for the ACL principal id.
+
+## Required scopes / permissions
+
+The integration needs read capability on the shared content: read page content, and read user information (for `GET /v1/users/me`, used to resolve the ACL principal). A Notion integration behaves like a restricted user, so its capability set and the pages shared with it together bound what the connector can see. The connector performs read-only calls (`POST /v1/search`, `GET /v1/blocks/{id}/children`, `GET /v1/users/me`); no write or content capabilities are required.
+
+## Permission model (ACL mapping)
+
+Security-critical, exact from the code.
+
+A Notion integration behaves like a restricted user: `POST /v1/search` returns only pages shared with the connection. So the integration's reachable set is a real, observable permission signal, and what the connector can see is exactly what search returns.
+
+Notion exposes no per-page "which principals can see this" endpoint, so the connector emits the faithful minimal ACL: each ingested page is readable only by this instance's integration principal, namespaced by the instance (`principal_ns = instance_id`). The principal id resolves in this order: config `integration_principal`, then the bot id from `GET /v1/users/me` (cached), then the instance id as a last resort. If the `/v1/users/me` lookup fails, the connector keeps the instance-id principal and never widens the grant. `capabilities.permission_sync` is `True`; `list_acls` returns this grant.
+
+Fail-closed behavior:
+- A stale index entry carries only the integration-scoped grant (`allow_users=[principal]`), which no end user is, so it under-shares rather than leaks.
+- A live re-fetch of a trashed or un-shared page returns `404`/`403`, surfaced by `_raise_for_notion`, so revoked content is never served.
+- `public` is an explicit, audited operator override, default `false`. It never defaults wider than the integration scope. Setting it `true` deliberately publishes every ingested page to every user in the instance, so scope the integration accordingly.
+
+On Business/Enterprise, page-level access rules via `Person`/`Created-by` properties plus `GET /v1/users` could enrich this to real per-page principals. That is a documented follow-up, not a current feature.
+
+## Sync
+
+- Change feed: full listing each run via `POST /v1/search`. Incremental is `False`; every yielded ref carries a stable full-scan sentinel cursor (`notion:full-scan`) rather than reusing Notion's intra-listing `next_cursor`, which the contract forbids across runs.
+- Cursor replay: a run that resumes from the sentinel is a no-op replay, since the prior run already returned the complete listing.
+- Pagination: cursor based. `POST /v1/search` and `GET /v1/blocks/{id}/children` return `has_more` + `next_cursor`; the connector passes `start_cursor` to continue internally.
+- Deletions/archived: `deletions` is `False`, and honestly so. `POST /v1/search` excludes trashed pages, so a removed or un-shared page simply stops appearing; the API never returns a page carrying `in_trash=True`, and there is no bulk deletion feed. The runtime purges removals by reconciling the full-scan listing against the previously synced set (search-absence is the removal signal), not a tombstone stream.
+- Rate limits: ~3 req/s per connection; `429` carries `Retry-After`. The connector surfaces the `429` code and lets the runtime own backoff.
+
+## Known limits
+
+- No incremental high-water mark; each run is a full scan. A `last_edited_time` sort/filter is a documented follow-up.
+- No tombstone/deletion feed (see Sync above); removals are inferred by reconciliation.
+- Content extraction is block `plain_text` only; database schemas, page properties, and non-text block payloads are not extracted.
+- `on_webhook` accepts events but returns no change events.
+- ACL is integration-principal granularity; real per-page principals on Business/Enterprise are not yet mapped.
+
+## Conformance
+
+This connector passes the shared conformance suite (`assert_conforms` from `pansoph-connector-sdk`), run hermetically with `uv run pytest -m conformance`.
+
+## References
+
+- Notion API intro and auth: https://developers.notion.com/reference/intro
+- Search (list shared pages): https://developers.notion.com/reference/post-search
+- Block children (page content): https://developers.notion.com/reference/get-block-children
+- Rich text (`plain_text`): https://developers.notion.com/reference/rich-text
+- Bot user (ACL principal): https://developers.notion.com/reference/get-self
+- Users: https://developers.notion.com/reference/get-user
+- Errors: https://developers.notion.com/reference/errors
+- Request limits: https://developers.notion.com/reference/request-limits
+- Versioning: https://developers.notion.com/reference/versioning
+- Trash semantics: https://developers.notion.com/reference/trash-page
+- 2025-09-03 data_sources model: https://developers.notion.com/docs/upgrade-faqs-2025-09-03
+
+API version: `Notion-Version 2025-09-03` (mandatory header on every request). Verified 2026-07-05.
