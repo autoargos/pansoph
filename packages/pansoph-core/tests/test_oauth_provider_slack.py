@@ -36,6 +36,7 @@ def test_provider_endpoints_and_flags_match_slack_docs() -> None:
     assert set(PROVIDER.default_scopes) == {
         "channels:read",
         "channels:history",
+        "channels:join",
         "groups:read",
         "groups:history",
         "users:read",
@@ -71,7 +72,9 @@ def test_build_authorize_url_uses_comma_scopes_and_no_pkce() -> None:
     assert qs["response_type"] == ["code"]
     # Scopes are joined with a comma into the single scope param (parse_qs already
     # url-decoded it), and there is no user_scope for a bot-only connector.
-    assert qs["scope"] == ["channels:read,channels:history,groups:read,groups:history,users:read"]
+    assert qs["scope"] == [
+        "channels:read,channels:history,channels:join,groups:read,groups:history,users:read"
+    ]
     assert "user_scope" not in qs
     # uses_pkce is False, so no PKCE challenge leaks into the URL even if one is passed.
     assert "code_challenge" not in qs

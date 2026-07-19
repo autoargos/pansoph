@@ -51,8 +51,9 @@ Provider-specific behavior this module encodes:
 
 Default scopes are read-only bot scopes: channels:read and groups:read to list
 public and private channels, channels:history and groups:history to read
-messages, and users:read for the membership ACL lookup. These match exactly what
-the Slack connector needs and nothing more.
+messages, channels:join so the bot can join a public channel it needs to read,
+and users:read for the membership ACL lookup. These match exactly what the Slack
+connector needs and nothing more.
 
 No em dashes anywhere.
 """

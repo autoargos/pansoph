@@ -53,10 +53,16 @@ class OpenFGAAuthz(AuthzPort):
 
     @staticmethod
     def _key(t: Tuple) -> dict[str, str]:
+        # A namespaced object (a group) combines (object_ns, object_id) the same way
+        # _fga_user combines a group subject's (ns, id), so a membership tuple's group
+        # matches the group granted in a reader tuple. The object type comes from the
+        # tuple (a membership tuple targets a group, a reader tuple targets a document),
+        # not a hardcoded "document".
+        ident = f"{t.object_ns}_{t.object_id}" if t.object_ns else t.object_id
         return {
             "user": _fga_user(t.subject),
             "relation": t.relation,
-            "object": f"document:{t.object_id}",
+            "object": f"{t.object_type}:{ident}",
         }
 
     async def _write(self, tuples: list[Tuple], mode: str) -> ConsistencyToken:

@@ -74,18 +74,23 @@ def _safe_obj(object_id: str) -> str:
     return _encode(object_id, _SAFE_CHARS)
 
 
-def _safe_ns_id(principal: Principal) -> str:
-    """Encode a principal into a valid, unambiguous SpiceDB subject object id. The
-    namespace and id are each encoded (with the separator underscore escaped inside them)
-    and joined with a literal underscore, so two principals with an underscore at a
-    different boundary can never collide across tenants."""
-    if principal.id == "*":
+def _safe_ns_pair(ns: str, obj_id: str) -> str:
+    """Encode a namespaced identity (ns, id) into a valid, unambiguous SpiceDB object id.
+    The namespace and id are each encoded (with the separator underscore escaped inside
+    them) and joined with a literal underscore, so two identities with an underscore at a
+    different boundary can never collide across tenants. Used for both a namespaced
+    subject and a namespaced object (a group), so the same group encodes identically
+    whether it appears as a reader tuple subject or a membership tuple object."""
+    if obj_id == "*":
         return "*"
-    if principal.ns:
-        ns = _encode(principal.ns, _SAFE_COMPONENT_CHARS)
-        pid = _encode(principal.id, _SAFE_COMPONENT_CHARS)
-        return f"{ns}_{pid}"
-    return _encode(principal.id, _SAFE_COMPONENT_CHARS)
+    if ns:
+        return f"{_encode(ns, _SAFE_COMPONENT_CHARS)}_{_encode(obj_id, _SAFE_COMPONENT_CHARS)}"
+    return _encode(obj_id, _SAFE_COMPONENT_CHARS)
+
+
+def _safe_ns_id(principal: Principal) -> str:
+    """Encode a principal into a valid SpiceDB subject object id (see _safe_ns_pair)."""
+    return _safe_ns_pair(principal.ns, principal.id)
 
 
 class SpiceDBAuthz(AuthzPort):
@@ -144,7 +149,16 @@ class SpiceDBAuthz(AuthzPort):
     def _relationship(self, tup: Tuple) -> Any:
         from authzed.api.v1 import ObjectReference, Relationship, SubjectReference
 
-        resource = ObjectReference(object_type=tup.object_type, object_id=_safe_obj(tup.object_id))
+        # A namespaced object (a group) is encoded with the same (ns, id) scheme as a
+        # namespaced subject, so the group in a membership tuple matches the group granted
+        # in a reader tuple. A plain resource (a document) has no object_ns and is encoded
+        # as a document id.
+        resource_id = (
+            _safe_ns_pair(tup.object_ns, tup.object_id)
+            if tup.object_ns
+            else _safe_obj(tup.object_id)
+        )
+        resource = ObjectReference(object_type=tup.object_type, object_id=resource_id)
         subject_type = "group" if tup.subject.type == "group" else "user"
         subject = SubjectReference(
             # Subject ids go through the same encoding as resource ids: a principal id can

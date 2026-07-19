@@ -60,6 +60,13 @@ def _rid(principal: Principal) -> str:
     return f"{principal.ns}_{principal.id}" if principal.ns else principal.id
 
 
+def _oid(t: Tuple) -> str:
+    """Render a namespaced object id (a group's) exactly like `_rid` renders a namespaced
+    subject, so a group referenced as a membership object matches the same group granted as
+    a reader tuple subject."""
+    return f"{t.object_ns}_{t.object_id}" if t.object_ns else t.object_id
+
+
 class FakeAuthz(AuthzPort):
     """Resolves reader tuples like a real engine, honoring the principal namespace:
     wildcard, a direct user reader, or a group the subject is a member of. Membership is
@@ -74,7 +81,7 @@ class FakeAuthz(AuthzPort):
     async def write_tuples(self, tuples: list[Tuple]) -> ConsistencyToken:
         for t in tuples:
             if t.relation == "member":
-                self.members.add((_rid(t.subject), t.object_id))
+                self.members.add((_rid(t.subject), _oid(t)))
             else:
                 self.readers.add((t.subject.type, _rid(t.subject), t.object_id))
         return ConsistencyToken("z")
@@ -82,7 +89,7 @@ class FakeAuthz(AuthzPort):
     async def delete_tuples(self, tuples: list[Tuple]) -> ConsistencyToken:
         for t in tuples:
             if t.relation == "member":
-                self.members.discard((_rid(t.subject), t.object_id))
+                self.members.discard((_rid(t.subject), _oid(t)))
             else:
                 self.readers.discard((t.subject.type, _rid(t.subject), t.object_id))
         return ConsistencyToken("z")

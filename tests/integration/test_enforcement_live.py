@@ -38,7 +38,10 @@ async def _ids(
     )
     hits = await retrieve(
         query=query,
-        subject=Principal(type="user", id=user),
+        # Namespace the query subject by tenant, exactly as routes._retrieve does. The
+        # membership tuples above are written in the tenant namespace, so the subject must
+        # be too, or the engine sees a different principal and resolves no group grants.
+        subject=Principal(type="user", id=user, ns=tenant),
         tenant_id=tenant,
         subject_groups=groups,
         final_k=10,
@@ -58,9 +61,14 @@ async def test_live_public_is_tenant_scoped_at_authz_layer(authz, seed) -> None:
     await authz.write_tuples(membership_tuples("alice", [TENANT_EVERYONE], "t1"))
     await authz.write_tuples(membership_tuples("mallory", [TENANT_EVERYONE], "t2"))
 
-    in_tenant = await authz.bulk_check(Principal(type="user", id="alice"), "read", ["doc:t1pub"])
+    # Subjects are namespaced by their own tenant, as the real path does. alice is in t1
+    # (so a member of group:t1_everyone), mallory is in t2 (group:t2_everyone), so only
+    # alice resolves the t1 public grant.
+    in_tenant = await authz.bulk_check(
+        Principal(type="user", id="alice", ns="t1"), "read", ["doc:t1pub"]
+    )
     cross_tenant = await authz.bulk_check(
-        Principal(type="user", id="mallory"), "read", ["doc:t1pub"]
+        Principal(type="user", id="mallory", ns="t2"), "read", ["doc:t1pub"]
     )
 
     assert "doc:t1pub" in in_tenant, "a tenant member reads its tenant's public document"
