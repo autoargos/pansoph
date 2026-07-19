@@ -27,8 +27,6 @@ jobs:
     env:
       REGISTRY: docker.io
       IMAGE: ${{ secrets.DOCKER_USERNAME }}/pansoph-${{ matrix.service }}
-      # Pass the tag through env, never inline into a shell, to avoid ref injection.
-      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'manual' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -72,7 +70,7 @@ jobs:
       - name: Generate SBOM (Syft)
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE }}:${{ env.VERSION }}
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           format: cyclonedx-json
           output-file: sbom-${{ matrix.service }}.cdx.json
 
@@ -87,7 +85,7 @@ jobs:
       - name: Scan image for vulnerabilities (Grype)
         uses: anchore/scan-action@v6
         with:
-          image: ${{ env.IMAGE }}:${{ env.VERSION }}
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           severity-cutoff: high
           only-fixed: true
           fail-build: true
