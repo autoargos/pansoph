@@ -48,7 +48,11 @@ async def test_list_drives_top_level(respx_mock: respx.MockRouter) -> None:
     page = await conn.list_resources()
 
     assert isinstance(page, ResourcePage)
+    # A synthetic, non-selectable My Drive root leads (drives.list returns only shared
+    # drives, so a personal account would otherwise show an empty picker), then the real
+    # shared drives follow.
     assert page.items == [
+        Resource(id="root", kind="drive", label="My Drive", selectable=False),
         Resource(id="d1", kind="drive", label="Engineering"),
         Resource(id="d2", kind="drive", label="Sales"),
     ]
@@ -102,9 +106,11 @@ async def test_list_drives_paginates(respx_mock: respx.MockRouter) -> None:
     conn = _factory()
 
     first = await conn.list_resources()
-    assert [r.id for r in first.items] == ["d1"]
+    # The synthetic My Drive root leads only the first page; real shared drives follow.
+    assert [r.id for r in first.items] == ["root", "d1"]
     assert first.next_cursor == "TKN2"
 
+    # A later page (called back with the cursor) must NOT repeat the My Drive root.
     second = await conn.list_resources(cursor=first.next_cursor)
     assert [r.id for r in second.items] == ["d2"]
     assert second.next_cursor is None
@@ -112,6 +118,22 @@ async def test_list_drives_paginates(respx_mock: respx.MockRouter) -> None:
     assert route.call_count == 2
     # The opaque cursor is passed back verbatim as the source's pageToken.
     assert route.calls[1].request.url.params["pageToken"] == "TKN2"
+
+
+@pytest.mark.conformance
+@respx.mock(assert_all_called=True)
+async def test_drill_into_my_drive_lists_its_folders(respx_mock: respx.MockRouter) -> None:
+    # Entering the synthetic My Drive root (id "root") lists My Drive's top-level folders:
+    # the picker sends the field's resource_kind ("folder") with parent "root", and the
+    # Drive API resolves "'root' in parents" to the user's My Drive.
+    route = respx_mock.get(path="/drive/v3/files").mock(
+        return_value=httpx.Response(200, json={"files": [{"id": "f9", "name": "Projects"}]})
+    )
+    conn = _factory()
+    page = await conn.list_resources(kind="folder", parent_id="root")
+
+    assert page.items == [Resource(id="f9", kind="folder", label="Projects", parent_id="root")]
+    assert "'root' in parents" in route.calls.last.request.url.params["q"]
 
 
 @pytest.mark.conformance

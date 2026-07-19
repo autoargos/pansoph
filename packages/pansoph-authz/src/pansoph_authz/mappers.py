@@ -68,11 +68,15 @@ def narrow(acl: AccessControl, scope_type: str, scope_ref: str) -> AccessControl
     even when the source is more permissive than the operator intends.
 
     - org (or no scope_ref): the source ACL governs unchanged.
-    - individual: effective audience = source ACL intersected with {scope_ref}. The user
-      is reachable when the source doc is public or already grants them directly. Group
-      membership is not known at ingest time, so a doc shared only to a group the user
-      belongs to is treated as not reachable: the safe closure is to deny, since scope
-      may only narrow. Reachable -> readable by scope_ref alone; not reachable -> nobody.
+    - individual: a personal connector whose credential belongs to scope_ref. The source
+      enforces access at fetch time (a personal token only returns what its owner may
+      read), so every doc the credential returned is one scope_ref is already allowed to
+      see. The source ACL principals are source-native ids (an Atlassian accountId, a
+      Slack member id) in a different namespace than the pansoph scope_ref, so a direct
+      "scope_ref in allow_users" membership test is a category error that always fails
+      (it would grant the owner NONE of their own synced docs). The doc is therefore
+      granted to scope_ref alone, in their private namespace (no groups, never public),
+      which can only narrow, never widen, and never leaks to another user.
     - group: effective audience = source ACL intersected with the group. Reachable when
       the source doc is public or already grants that group.
 
@@ -81,11 +85,10 @@ def narrow(acl: AccessControl, scope_type: str, scope_ref: str) -> AccessControl
     if scope_type == "org" or not scope_ref:
         return acl
     if scope_type == "individual":
-        reachable = acl.public or scope_ref in acl.allow_users
         return AccessControl(
             public=False,
             allow_groups=[],
-            allow_users=[scope_ref] if reachable else [],
+            allow_users=[scope_ref],
             deny=list(acl.deny),
             principal_ns=acl.principal_ns,
         )

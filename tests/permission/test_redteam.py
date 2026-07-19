@@ -162,6 +162,32 @@ async def test_scope_narrows_public_source_to_individual() -> None:
 
 
 @pytest.mark.permission
+async def test_individual_scope_grants_owner_despite_source_native_ids() -> None:
+    # Regression: a personal connector's source ACL names source-native principals (an
+    # Atlassian accountId, a Slack member id), never the pansoph scope_ref. The doc must
+    # still be granted to its owner: the owner's own credential fetched it, so they are
+    # already allowed to see it. Before the fix, "scope_ref in allow_users" compared across
+    # identity namespaces, always failed, and granted the owner NONE of their own docs
+    # (the reported "I do not have that information" on freshly synced Confluence pages).
+    store, authz = FakeVectorStore(), FakeAuthz()
+    c = InMemoryConnector(instance_id="mem")
+    # The source ACL grants an opaque source account id, not "alice".
+    c.put("page", "binding plane notes", AccessControl(allow_users=["605635b245a3bb00"]))
+    await _pipeline(c, store, authz).sync(
+        connector_name="memory", tenant_id="t1", scope_type="individual", scope_ref="alice"
+    )
+
+    alice = await _ids(store, authz, "alice", [], "t1")
+    bob = await _ids(store, authz, "bob", [], "t1")
+    account = await _ids(store, authz, "605635b245a3bb00", [], "t1")
+    assert "memory:mem:page" in alice, "the owner retrieves their own synced doc"
+    assert "memory:mem:page" not in bob, "individual scope stays private to the owner"
+    assert "memory:mem:page" not in account, (
+        "the source-native id is not a pansoph principal and grants nobody"
+    )
+
+
+@pytest.mark.permission
 async def test_scope_never_widens() -> None:
     # Scope only narrows. A doc shared with alice, scoped to a group that was not in the
     # source ACL, is reachable by no one (safe closure), never widened to that group.

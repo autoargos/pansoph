@@ -213,6 +213,12 @@ class JiraConnector:
         self._api_token: str = cfg.get("api_token", "")
         self._oauth_token: str = cfg.get("oauth_token", "")
         self._project_key: str = cfg.get("project_key", "")
+        # Atlassian Cloud (OAuth) addresses the API through a gateway keyed by a cloud id,
+        # not the site host. When only an OAuth token is sealed (no base_url), the base is
+        # resolved from the token at run time (see _ensure_base). These optional fields
+        # disambiguate which site to use when the grant reaches several.
+        self._cloud_id: str = str(cfg.get("cloud_id", "")).strip()
+        self._site_url: str = str(cfg.get("site_url", "")).strip()
         # The project browse audience is constant for a sync run, so it is resolved once
         # and reused. A connector instance lives for exactly one sync (the runtime builds
         # a fresh instance per sync), so caching on the instance never serves stale data
@@ -239,8 +245,13 @@ class JiraConnector:
                     key="base_url",
                     label="Site URL",
                     kind=FieldKind.STRING,
+                    required=False,
                     placeholder="https://acme.atlassian.net",
-                    help="The Jira Cloud site origin, without a trailing path.",
+                    help=(
+                        "The Jira Cloud site origin, without a trailing path. Only needed "
+                        "for the email plus API token option; a Connect-with-Atlassian "
+                        "instance resolves its site from the token automatically."
+                    ),
                 ),
                 ConfigField(
                     key="oauth_token",
@@ -286,9 +297,8 @@ class JiraConnector:
 
     # --- contract ---
     def validate(self, config: dict[str, Any]) -> ValidationResult:
-        missing = [k for k in ("base_url", "project_key") if not config.get(k)]
-        if missing:
-            return ValidationResult(ok=False, error=f"missing config: {', '.join(missing)}")
+        if not config.get("project_key"):
+            return ValidationResult(ok=False, error="missing config: project_key")
         # Auth is satisfied either by an OAuth token or by an email plus API token.
         has_oauth = bool(config.get("oauth_token"))
         has_basic = bool(config.get("email")) and bool(config.get("api_token"))
@@ -297,7 +307,52 @@ class JiraConnector:
                 ok=False,
                 error="missing auth: connect with Atlassian, or set email and api_token",
             )
+        # A manual (basic-auth) instance must give its base_url; an OAuth (Atlassian Cloud)
+        # instance resolves its API base from the token at run time (_ensure_base), so
+        # requiring base_url up front would wrongly reject a freshly connected Cloud one.
+        if not has_oauth and not config.get("base_url"):
+            return ValidationResult(ok=False, error="missing config: base_url")
         return ValidationResult(ok=True)
+
+    async def _ensure_base(self) -> None:
+        """Resolve the Atlassian Cloud API base for an OAuth credential, once.
+
+        A manually configured instance sets base_url directly, so this is a no op. An
+        OAuth (Atlassian Cloud) connect seals only a token: the API base
+        (https://api.atlassian.com/ex/jira/{cloud_id}) is discovered from the token via
+        GET /oauth/token/accessible-resources, which lists the sites the grant can reach.
+        The configured site is preferred (by cloud_id, else by a site_url substring), else
+        the first. Resolved once, then cached on _base_url.
+        """
+        if self._base_url or not self._oauth_token:
+            return
+        headers = {
+            "Authorization": f"Bearer {self._oauth_token}",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+            resp = await client.get("https://api.atlassian.com/oauth/token/accessible-resources")
+            resp.raise_for_status()
+            sites = resp.json()
+        if not sites:
+            raise RuntimeError(
+                "the Atlassian grant can reach no sites; re-connect and grant a site"
+            )
+        chosen = self._pick_site(sites)
+        self._base_url = f"https://api.atlassian.com/ex/jira/{chosen['id']}"
+
+    def _pick_site(self, sites: list[dict[str, Any]]) -> dict[str, Any]:
+        """Choose which accessible Atlassian site to use: cloud_id, then site_url, then first."""
+        if self._cloud_id:
+            for site in sites:
+                if str(site.get("id")) == self._cloud_id:
+                    return site
+        if self._site_url:
+            want = self._site_url.lower()
+            for site in sites:
+                if want in str(site.get("url", "")).lower():
+                    return site
+        return sites[0]
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
         """Yield a ref for every issue in the project, plus deletion tombstones.
@@ -312,6 +367,7 @@ class JiraConnector:
         previous_keys = self._decode_cursor(cursor)
         current_keys: set[str] = set()
         jql = f"project = {self._project_key} ORDER BY updated ASC"
+        await self._ensure_base()
         async with self._client() as client:
             page_token: str | None = None
             while True:
@@ -341,6 +397,7 @@ class JiraConnector:
             )
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
+        await self._ensure_base()
         async with self._client() as client:
             resp = await client.get(
                 f"/rest/api/3/issue/{ref.source_doc_id}",
@@ -363,6 +420,7 @@ class JiraConnector:
     async def list_acls(self, ref: DocRef) -> AccessControl:
         # The ACL depends on the issue's own security level, so read just that field for
         # this issue rather than assuming the project audience.
+        await self._ensure_base()
         async with self._client() as client:
             resp = await client.get(
                 f"/rest/api/3/issue/{ref.source_doc_id}",

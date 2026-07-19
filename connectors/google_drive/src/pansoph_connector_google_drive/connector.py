@@ -412,11 +412,21 @@ class GoogleDriveConnector:
         resp = await client.get("/drives", params=params)
         resp.raise_for_status()
         data = resp.json()
-        items = [
+        items: list[Resource] = []
+        # My Drive is not a "drive" in the Drive API (drives.list returns only SHARED
+        # drives), so a personal account with no shared drives would show an empty picker.
+        # Surface a synthetic My Drive root on the first page so the folder picker always
+        # has something to drill into. Its id "root" is the Drive API alias for the user's
+        # My Drive, and "'root' in parents" is a valid folder query. It is NOT selectable:
+        # the drive_id field wants a real shared-drive id (root is not one), while the
+        # folder picker treats it as a container to descend into, not a pickable leaf.
+        if not cursor:
+            items.append(Resource(id="root", kind="drive", label="My Drive", selectable=False))
+        items.extend(
             Resource(id=d["id"], kind="drive", label=d.get("name") or d["id"])
             for d in data.get("drives", [])
             if d.get("id")
-        ]
+        )
         return ResourcePage(items=items, next_cursor=data.get("nextPageToken"))
 
     async def _list_folders(
