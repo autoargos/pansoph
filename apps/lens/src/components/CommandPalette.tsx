@@ -131,7 +131,7 @@ export function CommandPalette({
 
   return (
     <div
-      className="animate-fade fixed inset-0 z-50 grid place-items-start justify-items-center bg-[rgba(4,4,8,0.72)] p-6 pt-[12vh] backdrop-blur-sm"
+      className="animate-fade fixed inset-0 z-50 grid place-items-start justify-items-center bg-[rgba(12,10,7,0.72)] p-6 pt-[12vh] backdrop-blur-sm"
       onClick={onClose}
       role="presentation"
     >
@@ -139,13 +139,13 @@ export function CommandPalette({
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="animate-rise w-full max-w-xl overflow-hidden rounded-[var(--radius-xl)] border border-border bg-elevated shadow-[var(--shadow-float)]"
+        className="animate-rise w-full max-w-xl overflow-hidden rounded-[var(--radius-xl)] border border-border border-t-accent-line bg-elevated shadow-[var(--shadow-float)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
           <svg
             viewBox="0 0 24 24"
-            className="h-[17px] w-[17px] shrink-0 text-muted"
+            className="h-[17px] w-[17px] shrink-0 text-faint"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.8"
@@ -160,7 +160,7 @@ export function CommandPalette({
             onKeyDown={onKeyDown}
             placeholder="Search actions and pages"
             aria-label="Search actions and pages"
-            className="min-w-0 flex-1 bg-transparent text-[14px] text-text placeholder:text-muted focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-[14px] text-text placeholder:text-faint focus:outline-none"
           />
           <Kbd>Esc</Kbd>
         </div>
@@ -171,7 +171,7 @@ export function CommandPalette({
           ) : (
             groups.map((group) => (
               <div key={group.name} className="mb-1 last:mb-0">
-                <div className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+                <div className="px-5 pb-1 pt-2 font-mono text-[10px] font-medium uppercase tracking-wide text-faint">
                   {group.name}
                 </div>
                 {group.items.map(({ cmd, index }) => {
@@ -184,10 +184,13 @@ export function CommandPalette({
                       onMouseMove={() => setActive(index)}
                       onClick={() => run(cmd)}
                       aria-selected={selected}
-                      className={`flex w-full items-center gap-3 px-4 py-2 text-left text-[13.5px] transition ${
-                        selected ? "bg-accent-soft text-text" : "text-muted hover:text-text"
+                      className={`relative flex w-full items-center gap-3 px-5 py-2.5 text-left text-[13.5px] transition ${
+                        selected ? "bg-accent-soft text-text" : "text-muted hover:bg-surface hover:text-text"
                       }`}
                     >
+                      {selected && (
+                        <span className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-accent" />
+                      )}
                       <span
                         className={`grid h-[17px] w-[17px] shrink-0 place-items-center ${
                           selected ? "text-accent" : "opacity-85"

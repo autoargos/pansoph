@@ -128,10 +128,10 @@ function AnswerBody({
         type="button"
         onClick={() => onCite(n)}
         aria-label={`Jump to source ${n}`}
-        className={`mx-0.5 -translate-y-1.5 rounded-[4px] px-1 align-super font-mono text-[10.5px] font-bold leading-none transition ${
+        className={`mx-px rounded-[3px] px-0.5 align-super font-mono text-[11px] font-medium leading-none transition ${
           on
-            ? "bg-accent text-white shadow-[0_0_10px_-1px_rgba(124,92,255,0.8)]"
-            : "bg-accent-soft text-accent hover:bg-accent hover:text-white"
+            ? "bg-accent text-white shadow-[0_0_10px_-1px_var(--color-accent-line)]"
+            : "text-accent hover:bg-accent-soft"
         }`}
       >
         {m[1]}
@@ -141,30 +141,49 @@ function AnswerBody({
     key += 1;
   }
   if (last < text.length) out.push(<span key={`t${key}`}>{text.slice(last)}</span>);
-  return <p className="whitespace-pre-wrap text-[14.5px] leading-[1.65] text-text">{out}</p>;
+  return (
+    <p className="font-display whitespace-pre-wrap text-[20px] font-medium leading-[1.55] tracking-[-0.01em] text-text">
+      {out}
+    </p>
+  );
 }
 
-// The pansoph owl-tile avatar for assistant turns, mirroring the mockup's
-// gradient a-avatar with an accent glow ring.
+// The owl-iris aperture glyph: a ring with a filled center. Teal reads as
+// "permitted", text-err as "filtered / denied". Used on the provenance strip
+// and anywhere a permission state needs a small, calm signal.
+function Aperture({
+  className = "",
+  tone = "accent",
+}: {
+  className?: string;
+  tone?: "accent" | "err" | "faint";
+}) {
+  const stroke =
+    tone === "err" ? "var(--color-err)" : tone === "faint" ? "var(--color-faint)" : "var(--color-accent)";
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="2.6" fill={stroke} stroke="none" />
+    </svg>
+  );
+}
+
+// The pansoph owl-tile avatar for assistant turns: a calm teal-soft tile with
+// the owl-iris aperture mark, so the one teal signal reads as "grounded".
 function AssistantAvatar() {
   return (
     <span
-      className="grid h-7 w-7 shrink-0 place-items-center rounded-[8px] text-white"
-      style={{
-        background: "linear-gradient(140deg, var(--ob-accent), #5b3ce0)",
-        boxShadow: "0 0 0 1px var(--ob-accent-line)",
-      }}
+      className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-accent-line bg-accent-soft text-accent"
+      style={{ boxShadow: "0 0 0 1px var(--ob-accent-line)" }}
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" className="h-[15px] w-[15px]">
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 3v9l6.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <Aperture className="h-[17px] w-[17px]" />
     </span>
   );
 }
 
-// A numbered, connector-aware source chip. Clicking it flashes the matching
-// inline citation. Restricted sources wear a lock badge.
+// A numbered provenance footnote row. Clicking it flashes the matching inline
+// citation. Each permitted source wears a teal aperture badge; restricted
+// sources (visible to you, not to everyone) additionally wear a lock.
 function SourceChip({
   source,
   active,
@@ -186,20 +205,22 @@ function SourceChip({
       type="button"
       onClick={() => onActivate(source.id)}
       title={source.docId}
-      className={`group inline-flex max-w-full items-center gap-2 rounded-[8px] border bg-bg px-2.5 py-1.5 text-left text-xs font-medium transition ${
+      className={`group flex w-full items-center gap-3 rounded-[10px] border px-3 py-2 text-left transition ${
         active || flashed
           ? "border-accent-line bg-accent-soft text-text shadow-[0_0_0_1px_var(--color-accent-line)]"
-          : "border-border text-muted hover:border-accent-line hover:bg-accent-soft hover:text-text"
+          : "border-transparent hover:border-accent-line hover:bg-accent-soft"
       }`}
     >
-      <span className="grid h-4 min-w-[18px] place-items-center rounded-[4px] bg-accent-soft px-1 font-mono text-[10px] font-bold tabular-nums text-accent">
+      <span className="w-5 shrink-0 text-right font-mono text-[12px] tabular-nums text-accent">
         {source.id}
       </span>
       <ConnectorLogo connector={conn.logo} size={18} />
-      <span className="truncate">{titleFor(source.docId)}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-muted transition group-hover:text-text">
+        {titleFor(source.docId)}
+      </span>
       {restricted ? (
         <Tooltip label="Access-restricted source. You can see it; not everyone can.">
-          <span className="inline-flex items-center gap-1 rounded-[5px] border border-[rgba(245,158,11,0.3)] bg-warn-soft px-1 py-0.5 text-warn">
+          <span className="inline-flex items-center gap-1 rounded-[5px] border border-[rgba(224,163,59,0.3)] bg-warn-soft px-1 py-0.5 text-warn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-2.5 w-2.5">
               <rect x="4" y="10" width="16" height="11" rx="2" />
               <path d="M8 10V7a4 4 0 0 1 8 0v3" strokeLinecap="round" />
@@ -207,6 +228,10 @@ function SourceChip({
           </span>
         </Tooltip>
       ) : null}
+      <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-accent">
+        <Aperture className="h-[13px] w-[13px]" />
+        permitted
+      </span>
     </button>
   );
 }
@@ -329,14 +354,16 @@ export default function Chat({ identity }: { identity: Identity }) {
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col">
       {/* ---- Header strip: what this surface is, and the grounding promise ---- */}
-      <div className="mb-5 flex items-end justify-between gap-4">
+      <div className="mb-6 flex items-end justify-between gap-4">
         <div className="min-w-0">
-          <div className="mb-1.5 flex items-center gap-1.5 font-mono text-xs text-muted">
+          <div className="mb-2 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.15em] text-faint">
             <span>lens</span>
             <span className="opacity-50">/</span>
             <span>ask</span>
           </div>
-          <h1 className="text-xl font-bold tracking-[-0.03em] text-text">Ask</h1>
+          <h1 className="font-display text-[30px] font-semibold leading-[1.05] tracking-[-0.02em] text-text">
+            Ask across <span className="text-accent">everything you can see.</span>
+          </h1>
         </div>
         <Badge kind="cyan" dot className="shrink-0">
           grounded in permitted sources
@@ -355,16 +382,16 @@ export default function Chat({ identity }: { identity: Identity }) {
           messages.map((msg, i) =>
             msg.role === "user" ? (
               <div key={i} className="flex items-start justify-end gap-3">
-                <div className="max-w-[82%] rounded-[14px] rounded-br-[4px] border border-accent-line bg-accent-soft px-4 py-2.5 text-[14px] font-medium leading-relaxed text-text">
+                <div className="max-w-[82%] rounded-[15px] rounded-br-[5px] border border-accent-line bg-accent-soft px-4 py-2.5 text-[14.5px] font-medium leading-relaxed text-text">
                   {msg.text}
                 </div>
                 <Avatar name={identity.user} size={28} className="mt-0.5" />
               </div>
             ) : (
-              <div key={i} className="flex items-start gap-3">
+              <div key={i} className="flex items-start gap-4">
                 <AssistantAvatar />
                 <div className="min-w-0 flex-1">
-                  <Card className="bg-gradient-to-b from-surface to-[color-mix(in_srgb,var(--ob-surface)_55%,var(--ob-bg))] px-5 py-4">
+                  <Card className="px-6 py-6 shadow-[var(--shadow-float)]">
                     {msg.text ? (
                       <AnswerBody
                         text={msg.text}
@@ -377,20 +404,17 @@ export default function Chat({ identity }: { identity: Identity }) {
 
                     {/* streaming caret while the last turn is still writing */}
                     {msg.text && !msg.done && (
-                      <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-accent align-middle" />
+                      <span className="ml-0.5 inline-block h-5 w-[2px] translate-y-1 animate-pulse bg-accent align-middle" />
                     )}
 
                     {msg.sources.length > 0 && (
-                      <div className="mt-4 border-t border-border pt-3.5">
-                        <div className="mb-2 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5 text-cyan">
-                            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" strokeLinejoin="round" />
-                            <path d="M14 3v6h6" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
+                      <div className="mt-6 border-t border-border pt-4">
+                        <div className="mb-3 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">
+                          <Aperture className="h-[13px] w-[13px]" tone="faint" />
                           Grounded in {msg.sources.length}{" "}
-                          {msg.sources.length === 1 ? "source" : "sources"}
+                          {msg.sources.length === 1 ? "source" : "sources"} you are allowed to read
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="-mx-1 flex flex-col gap-0.5">
                           {msg.sources.map((s) => (
                             <SourceChip
                               key={s.chunkId || s.id}
@@ -426,7 +450,7 @@ export default function Chat({ identity }: { identity: Identity }) {
 
       {/* ---- Composer ---- */}
       <form onSubmit={onSubmit} className="sticky bottom-0 pt-3">
-        <div className="flex items-end gap-2.5 rounded-[12px] border border-border bg-bg p-2 pl-3.5 transition focus-within:border-accent-line">
+        <div className="flex items-end gap-3 rounded-[16px] border border-border bg-surface p-2 pl-5 shadow-[var(--shadow-float)] transition focus-within:border-accent-line">
           <textarea
             ref={composerRef}
             value={q}
@@ -437,36 +461,33 @@ export default function Chat({ identity }: { identity: Identity }) {
             }}
             onKeyDown={onKeyDown}
             placeholder="Ask across everything you can see..."
-            className="max-h-[168px] min-h-[24px] flex-1 resize-none self-center bg-transparent py-1.5 text-[14px] leading-relaxed text-text outline-none placeholder:text-muted"
+            className="max-h-[168px] min-h-[24px] flex-1 resize-none self-center bg-transparent py-2 text-[15px] leading-relaxed text-text outline-none placeholder:text-faint"
           />
           <Button
             type="submit"
             size="sm"
             disabled={busy || !q.trim()}
             aria-label="Send"
-            className="h-9 w-9 rounded-[9px] p-0"
+            className="h-10 w-10 rounded-[12px] p-0 shadow-[0_8px_24px_-8px_var(--color-accent-line)]"
           >
             {busy ? (
               <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
             ) : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
-                <path d="m22 2-7 20-4-9-9-4Z" strokeLinejoin="round" />
-                <path d="M22 2 11 13" strokeLinecap="round" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
+                <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}
           </Button>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3 px-1 text-[11px] text-muted">
-          <span className="inline-flex items-center gap-1.5">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3 w-3 text-ok">
-              <path d="M12 2 4 5v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V5z" strokeLinejoin="round" />
-              <path d="m9 12 2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+        <div className="mt-3 flex items-center justify-between gap-3 px-1 text-[12.5px] text-faint">
+          <span className="inline-flex items-center gap-2">
+            <Aperture className="h-[13px] w-[13px]" tone="faint" />
             Answers are drawn only from what{" "}
-            <span className="font-medium text-text">{identity.user}</span> is permitted to read.
+            <span className="font-medium text-muted">{identity.user}</span> is permitted to read.
+            Nothing you can&rsquo;t see reaches the model.
           </span>
           <span className="hidden shrink-0 items-center gap-1 sm:inline-flex">
-            <kbd className="rounded-[5px] border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted">
+            <kbd className="rounded-[5px] border border-border bg-elevated px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted">
               Enter
             </kbd>
             to send
@@ -480,7 +501,7 @@ export default function Chat({ identity }: { identity: Identity }) {
 // The animated "reading sources" line shown before the first token lands.
 function ThinkingLine() {
   return (
-    <div className="flex items-center gap-2.5 text-sm text-muted">
+    <div className="flex items-center gap-2.5 font-mono text-[13px] text-muted">
       <span className="flex gap-1">
         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent [animation-delay:-0.2s]" />
         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent [animation-delay:-0.1s]" />
@@ -509,28 +530,23 @@ function EmptyAsk({
     <div className="flex min-h-full flex-col items-center py-8 text-center">
       <div className="my-auto flex w-full flex-col items-center">
       <span
-        className="mb-5 grid h-14 w-14 place-items-center rounded-[16px] text-white"
-        style={{
-          background: "linear-gradient(140deg, var(--ob-accent), #5b3ce0)",
-          boxShadow: "0 0 0 1px var(--ob-accent-line), 0 16px 40px -14px rgba(124,92,255,0.7)",
-        }}
+        className="mb-6 grid h-16 w-16 place-items-center rounded-[20px] border border-accent-line bg-accent-soft text-accent"
+        style={{ boxShadow: "0 0 0 1px var(--ob-accent-line), 0 16px 40px -14px var(--color-accent-line)" }}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8" className="h-7 w-7">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" strokeLinejoin="round" />
-        </svg>
+        <Aperture className="h-8 w-8" />
       </span>
 
-      <h2 className="text-[22px] font-bold tracking-[-0.03em] text-text">
-        Ask across everything you can see
+      <h2 className="font-display max-w-[16ch] text-[28px] font-semibold leading-[1.08] tracking-[-0.02em] text-text">
+        Ask across <span className="text-accent">everything you can see.</span>
       </h2>
-      <p className="mt-2 max-w-md text-sm leading-relaxed text-muted">
+      <p className="mt-3 max-w-md text-[14px] leading-relaxed text-muted">
         One question, every connected source. Each answer cites where it came from, and it is drawn
         only from documents{" "}
         <span className="font-medium text-text">{user}</span> is already permitted to read. Nothing
         outside your access reaches the model.
       </p>
 
-      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
         <Badge kind="ok" dot>
           permission-aware
         </Badge>
@@ -542,8 +558,8 @@ function EmptyAsk({
         </Badge>
       </div>
 
-      <div className="mt-8 w-full max-w-lg space-y-2 text-left">
-        <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">
+      <div className="mt-9 w-full max-w-lg space-y-2 text-left">
+        <div className="px-1 font-mono text-[10.5px] uppercase tracking-[0.15em] text-faint">
           Try asking
         </div>
         {SUGGESTIONS.map((s) => (
@@ -552,9 +568,9 @@ function EmptyAsk({
             type="button"
             disabled={busy}
             onClick={() => onPick(s)}
-            className="group flex w-full items-center gap-3 rounded-[10px] border border-border bg-surface px-3.5 py-3 text-left text-[13.5px] text-text transition hover:border-accent-line hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
+            className="group flex w-full items-center gap-3 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3.5 text-left text-[14px] text-text transition hover:border-accent-line hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-[7px] border border-border bg-bg text-muted transition group-hover:border-accent-line group-hover:text-accent">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[9px] border border-border bg-bg text-muted transition group-hover:border-accent-line group-hover:text-accent">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
                 <path d="M12 3v18M3 12h18" strokeLinecap="round" />
               </svg>

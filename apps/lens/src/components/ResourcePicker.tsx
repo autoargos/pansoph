@@ -172,22 +172,22 @@ export function ResourcePicker({
   }
 
   return (
-    <div className="rounded-[var(--radius-md)] border border-border bg-bg">
+    <div className="overflow-hidden rounded-[var(--radius-md)] border border-border bg-bg">
       {/* breadcrumb + search */}
-      <div className="border-b border-border p-2.5">
+      <div className="border-b border-border p-3">
         {stack.length > 1 && (
-          <div className="mb-2 flex flex-wrap items-center gap-1 text-[11.5px] text-muted">
+          <div className="mb-2.5 flex flex-wrap items-center gap-1 font-mono text-[10.5px] uppercase tracking-wide text-faint">
             {stack.map((lv, i) => (
               <span key={i} className="flex items-center gap-1">
-                {i > 0 && <IconChevronRight width={12} height={12} className="opacity-50" />}
+                {i > 0 && <IconChevronRight width={12} height={12} className="opacity-40" />}
                 <button
                   type="button"
                   onClick={() => goTo(i)}
                   disabled={i === stack.length - 1}
                   className={
                     i === stack.length - 1
-                      ? "font-medium text-text"
-                      : "text-muted transition hover:text-text"
+                      ? "text-accent"
+                      : "text-faint transition hover:text-text"
                   }
                 >
                   {i === 0 ? "All" : (lv.label ?? lv.parent)}
@@ -197,11 +197,11 @@ export function ResourcePicker({
           </div>
         )}
         <div className="relative">
-          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint">
             <IconSearch width={14} height={14} />
           </span>
           <Input
-            className="pl-8 text-[13px]"
+            className="pl-9 text-[13px]"
             value={query}
             disabled={disabled}
             onChange={(e) => setQuery(e.target.value)}
@@ -231,7 +231,7 @@ export function ResourcePicker({
                 <li key={r.id}>
                   <div
                     className={
-                      "flex items-center gap-2.5 px-3 py-2 transition " +
+                      "flex items-center gap-2.5 px-3 py-2.5 transition " +
                       (on ? "bg-accent-soft" : "hover:bg-surface")
                     }
                   >
@@ -245,18 +245,19 @@ export function ResourcePicker({
                         aria-label={on ? `Deselect ${r.label}` : `Select ${r.label}`}
                         className={
                           "grid h-[18px] w-[18px] shrink-0 place-items-center border transition " +
-                          (multi ? "rounded-[5px] " : "rounded-full ") +
-                          (on ? "border-accent bg-accent" : "border-border bg-surface hover:border-border-hover")
+                          (multi ? "rounded-[6px] " : "rounded-full ") +
+                          (on ? "border-accent bg-accent" : "border-border bg-surface hover:border-accent-line")
                         }
                       >
                         <IconCheck
                           width={11}
                           height={11}
-                          className={"text-white transition-opacity " + (on ? "opacity-100" : "opacity-0")}
+                          className={"transition-opacity " + (on ? "opacity-100" : "opacity-0")}
+                          style={{ color: "#04140f" }}
                         />
                       </button>
                     ) : (
-                      <span className="grid h-[18px] w-[18px] shrink-0 place-items-center text-muted">
+                      <span className="grid h-[18px] w-[18px] shrink-0 place-items-center text-faint">
                         <IconFolder width={15} height={15} />
                       </span>
                     )}
@@ -285,7 +286,7 @@ export function ResourcePicker({
                         onClick={() => enter(r)}
                         disabled={disabled}
                         aria-label={`Open ${r.label}`}
-                        className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-muted transition hover:bg-elevated hover:text-text"
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-faint transition hover:bg-elevated hover:text-accent"
                       >
                         <IconChevronRight width={15} height={15} />
                       </button>
@@ -302,9 +303,9 @@ export function ResourcePicker({
 
       {/* pagination + selection summary */}
       {(cursor || value.length > 0) && (
-        <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+        <div className="flex items-center gap-2 border-t border-border px-3 py-2.5">
           {value.length > 0 && (
-            <span className="text-[11.5px] text-muted">
+            <span className="font-mono text-[10.5px] uppercase tracking-wide text-accent">
               {multi ? `${value.length} selected` : "1 selected"}
             </span>
           )}

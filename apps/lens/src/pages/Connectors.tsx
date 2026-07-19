@@ -442,49 +442,60 @@ export default function Connectors({ canManage }: { canManage: boolean }) {
         }
       />
 
-      {/* toolbar: segmented health filter + live count */}
+      {/* toolbar: section rule + segmented health filter + live count */}
       {!loading && !loadError && instances.length > 0 && (
-        <div className="mb-5 flex flex-wrap items-center gap-3">
-          <div
-            className="inline-flex gap-0.5 rounded-[var(--radius-md)] border border-border bg-surface p-0.5"
-            role="tablist"
-            aria-label="Filter connectors by health"
-          >
-            {filterTabs.map((t) => {
-              const on = t.value === filter;
-              return (
-                <button
-                  key={t.value}
-                  role="tab"
-                  aria-selected={on}
-                  onClick={() => setFilter(t.value)}
-                  className={
-                    "rounded-[7px] px-3 py-1.5 text-xs font-medium transition " +
-                    (on
-                      ? "bg-elevated text-text shadow-[inset_0_0_0_1px_var(--color-border)]"
-                      : "text-muted hover:text-text")
-                  }
-                >
-                  {t.value !== "all" && (
-                    <StatusDot
-                      kind={t.value === "healthy" ? "ok" : "warn"}
-                      size={6}
-                      className="mr-1.5 inline-block align-middle"
-                    />
-                  )}
-                  {t.label}
-                  <span className="ml-1.5 tabular-nums opacity-60">
-                    {t.count}
-                  </span>
-                </button>
-              );
-            })}
+        <div className="mb-5">
+          <div className="mb-4 flex items-baseline gap-3">
+            <span className="font-display text-[15px] font-semibold tracking-[-0.01em] text-text">
+              Sources
+            </span>
+            <span className="font-mono text-[11px] text-faint">
+              one access layer over every connector
+            </span>
+            <span className="h-px flex-1 bg-border" />
           </div>
-          <div className="flex-1" />
-          <span className="hidden items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-muted sm:inline-flex">
-            <IconShield width={13} height={13} className="text-accent" />
-            ACLs enforced at retrieval
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div
+              className="inline-flex gap-0.5 rounded-[var(--radius-md)] border border-border bg-surface p-0.5"
+              role="tablist"
+              aria-label="Filter connectors by health"
+            >
+              {filterTabs.map((t) => {
+                const on = t.value === filter;
+                return (
+                  <button
+                    key={t.value}
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setFilter(t.value)}
+                    className={
+                      "rounded-[7px] px-3 py-1.5 text-xs font-medium transition " +
+                      (on
+                        ? "bg-elevated text-text shadow-[inset_0_0_0_1px_var(--color-border)]"
+                        : "text-muted hover:text-text")
+                    }
+                  >
+                    {t.value !== "all" && (
+                      <StatusDot
+                        kind={t.value === "healthy" ? "ok" : "warn"}
+                        size={6}
+                        className="mr-1.5 inline-block align-middle"
+                      />
+                    )}
+                    {t.label}
+                    <span className="ml-1.5 font-mono tabular-nums opacity-60">
+                      {t.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex-1" />
+            <span className="hidden items-center gap-2 rounded-full border border-accent-line bg-accent-soft px-3 py-1.5 font-mono text-[11px] tracking-wide text-accent sm:inline-flex">
+              <IconShield width={13} height={13} />
+              ACLs enforced at retrieval
+            </span>
+          </div>
         </div>
       )}
 
@@ -596,9 +607,16 @@ function ConnectorSkeletons() {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-hidden>
       {[0, 1, 2, 3].map((i) => (
-        <Card key={i} className="p-5">
+        <Card
+          key={i}
+          className="relative p-5 shadow-[var(--shadow-float)]"
+        >
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,var(--ob-accent-line),transparent)]"
+          />
           <div className="flex items-center gap-3">
-            <div className="h-[42px] w-[42px] animate-pulse rounded-[11px] bg-elevated" />
+            <div className="h-[42px] w-[42px] animate-pulse rounded-[var(--radius-md)] bg-elevated" />
             <div className="flex-1 space-y-2">
               <div className="h-3.5 w-32 animate-pulse rounded bg-elevated" />
               <div className="h-2.5 w-44 animate-pulse rounded bg-elevated" />
@@ -607,7 +625,7 @@ function ConnectorSkeletons() {
           <div className="my-5 flex gap-6 border-y border-border py-4">
             {[0, 1, 2].map((j) => (
               <div key={j} className="space-y-2">
-                <div className="h-4 w-10 animate-pulse rounded bg-elevated" />
+                <div className="h-6 w-12 animate-pulse rounded bg-elevated" />
                 <div className="h-2 w-14 animate-pulse rounded bg-elevated" />
               </div>
             ))}
@@ -654,7 +672,11 @@ function DocumentsPanel({
     <Modal
       open
       onClose={onClose}
-      title={`${inst.name}: indexed documents`}
+      title={
+        <span className="font-display font-semibold tracking-[-0.01em]">
+          {inst.name}: indexed documents
+        </span>
+      }
       subtitle="What this connector has actually pulled into the index. Retrieval still enforces each document's access control."
     >
       <div className="max-h-[60vh] overflow-y-auto">
@@ -746,8 +768,14 @@ function ConnectorCard({
   return (
     <Card
       glow
-      className="group/card flex flex-col overflow-hidden p-5 transition hover:-translate-y-0.5"
+      className="group/card relative flex flex-col overflow-hidden p-5 shadow-[var(--shadow-float)] transition hover:-translate-y-0.5"
     >
+      {/* teal hairline accent along the top edge */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,var(--ob-accent-line),transparent)]"
+      />
+
       {/* head */}
       <div className="flex items-start gap-3.5">
         <Tooltip label={`${title} connector`}>
@@ -755,32 +783,33 @@ function ConnectorCard({
         </Tooltip>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className="truncate text-[15px] font-semibold tracking-[-0.02em] text-text">
+            <span className="truncate font-display text-[16px] font-semibold tracking-[-0.01em] text-text">
               {inst.name}
             </span>
-            <Badge
-              kind={
-                health === "ok"
-                  ? "ok"
+            <ApertureDot kind={health} pulse={health === "run"} />
+            <span
+              className={
+                "font-mono text-[10.5px] uppercase tracking-wide " +
+                (health === "ok"
+                  ? "text-accent"
                   : health === "run"
-                    ? "cyan"
+                    ? "text-accent"
                     : health === "err"
-                      ? "err"
-                      : "warn"
+                      ? "text-err"
+                      : "text-warn")
               }
-              dot
             >
               {healthLabel(inst)}
-            </Badge>
+            </span>
           </div>
-          <div className="mt-1 truncate font-mono text-[11.5px] text-muted">
+          <div className="mt-1 truncate font-mono text-[11px] text-faint">
             {title}
-            <span className="opacity-40"> . </span>
+            <span className="opacity-50"> · </span>
             {scopeText}
           </div>
         </div>
         <Tooltip label={inst.id}>
-          <span className="hidden shrink-0 rounded-[5px] border border-border bg-bg px-1.5 py-0.5 font-mono text-[10px] text-muted sm:inline-block">
+          <span className="hidden shrink-0 rounded-[5px] border border-border bg-bg px-1.5 py-0.5 font-mono text-[10px] text-faint sm:inline-block">
             {inst.id.length > 14 ? `${inst.id.slice(0, 14)}...` : inst.id}
           </span>
         </Tooltip>
@@ -795,10 +824,10 @@ function ConnectorCard({
             className="text-left transition hover:opacity-70"
             title="See the indexed documents"
           >
-            <Stat value={fmtCount(docs)} label="documents" />
+            <Stat value={fmtCount(docs)} label="documents" big />
           </button>
         ) : (
-          <Stat value={fmtCount(docs)} label="documents" />
+          <Stat value={fmtCount(docs)} label="documents" big />
         )}
         <Stat
           value={
@@ -817,15 +846,15 @@ function ConnectorCard({
             <IconClock width={13} height={13} />
             {instanceSchedule(inst)}
           </div>
-          <div className="mt-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted">
+          <div className="mt-1.5 font-mono text-[10px] uppercase tracking-wide text-faint">
             schedule
           </div>
         </div>
       </div>
 
-      {/* ACL / error note */}
+      {/* ACL namespace pill (the product's soul) / error note */}
       {errored && last?.error ? (
-        <div className="mb-4 flex items-start gap-2 rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.3)] bg-err-soft px-3 py-2 text-[11.5px] text-err">
+        <div className="mb-4 flex items-start gap-2 rounded-[var(--radius-sm)] border border-[rgba(224,104,95,0.3)] bg-err-soft px-3 py-2 text-[11.5px] text-err">
           <IconAlert width={14} height={14} className="mt-px shrink-0" />
           <span className="min-w-0">
             {last.error.length > 180
@@ -834,12 +863,12 @@ function ConnectorCard({
           </span>
         </div>
       ) : (
-        <div className="mb-4 inline-flex items-center gap-2 self-start rounded-[var(--radius-sm)] border border-border bg-elevated px-2.5 py-1.5 text-[11.5px] text-muted">
-          <IconLock width={13} height={13} className="text-accent" />
-          Source ACLs mapped to the{" "}
-          <b className="mx-0.5 font-semibold text-text">{scopeText}</b>{" "}
-          namespace
-        </div>
+        <Tooltip label="Source ACLs are mapped into this namespace and enforced at retrieval">
+          <div className="mb-4 inline-flex items-center gap-2 self-start rounded-full border border-accent-line bg-accent-soft px-3 py-1.5 font-mono text-[11px] text-accent">
+            <IconLock width={12} height={12} className="shrink-0" />
+            {scopeText}
+          </div>
+        </Tooltip>
       )}
 
       {/* actions */}
@@ -910,7 +939,7 @@ function ConnectorCard({
       {/* expandable runs */}
       {expanded && (
         <div className="animate-fade mt-4 overflow-hidden rounded-[var(--radius-md)] border border-border bg-bg">
-          <div className="flex items-center gap-2 border-b border-border bg-surface px-3.5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.09em] text-muted">
+          <div className="flex items-center gap-2 border-b border-border bg-surface px-3.5 py-2.5 font-mono text-[10.5px] uppercase tracking-wide text-faint">
             <IconClock width={13} height={13} />
             Recent runs
           </div>
@@ -940,7 +969,7 @@ function ConnectorCard({
                       {relativeTime(r.started_at)}
                     </TD>
                     <TD>
-                      <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold">
+                      <span className="inline-flex items-center gap-1.5 font-mono text-[12px] font-medium">
                         <StatusDot
                           kind={runKind(r.status)}
                           size={6}
@@ -949,9 +978,9 @@ function ConnectorCard({
                         <span
                           className={
                             r.status === "success"
-                              ? "text-ok"
+                              ? "text-accent"
                               : r.status === "running"
-                                ? "text-cyan"
+                                ? "text-accent"
                                 : "text-err"
                           }
                         >
@@ -979,30 +1008,78 @@ function ConnectorCard({
   );
 }
 
-// One stat cell: a large tabular value over an uppercase muted label.
+// A tiny aperture: a ring with a filled center, sized like a status pip. Teal when
+// healthy or running, warn amber when idle, rose on error. The parent chooses the kind.
+function ApertureDot({
+  kind,
+  pulse = false,
+}: {
+  kind: StatusKind;
+  pulse?: boolean;
+}) {
+  const color =
+    kind === "err"
+      ? "var(--ob-err)"
+      : kind === "warn"
+        ? "var(--ob-warn)"
+        : "var(--ob-accent)";
+  return (
+    <span
+      aria-hidden
+      className={
+        "grid h-3 w-3 shrink-0 place-items-center rounded-full " +
+        (pulse ? "status-pulse" : "")
+      }
+      style={{
+        boxShadow: `inset 0 0 0 1.5px ${color}`,
+        ["--ring-glow" as string]:
+          kind === "err"
+            ? "rgba(224,104,95,0.8)"
+            : kind === "warn"
+              ? "rgba(224,163,59,0.7)"
+              : "rgba(23,176,166,0.7)",
+      }}
+    >
+      <span
+        className="block h-[5px] w-[5px] rounded-full"
+        style={{ background: color }}
+      />
+    </span>
+  );
+}
+
+// One stat cell. The primary count uses Clash Display (font-display) at a large size,
+// the aperture number; secondary cells stay mono. Every cell carries an uppercase mono
+// micro-label beneath it.
 function Stat({
   value,
   label,
   mono = false,
+  big = false,
   tone,
 }: {
   value: string;
   label: string;
   mono?: boolean;
+  big?: boolean;
   tone?: "cyan";
 }) {
   return (
     <div>
       <div
         className={
-          "text-[18px] font-bold leading-none tracking-[-0.03em] tabular-nums " +
-          (tone === "cyan" ? "text-cyan " : "text-text ") +
-          (mono ? "font-mono text-[14px]" : "")
+          "leading-none tabular-nums " +
+          (tone === "cyan" ? "text-accent " : "text-text ") +
+          (big
+            ? "font-display text-[26px] font-semibold tracking-[-0.02em] "
+            : mono
+              ? "font-mono text-[14px] font-medium "
+              : "text-[18px] font-semibold tracking-[-0.02em] ")
         }
       >
         {value}
       </div>
-      <div className="mt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted">
+      <div className="mt-2 font-mono text-[10px] uppercase tracking-wide text-faint">
         {label}
       </div>
     </div>
@@ -1202,7 +1279,11 @@ function ConnectorForm({
     <Modal
       open
       onClose={onClose}
-      title={modalTitle}
+      title={
+        <span className="font-display font-semibold tracking-[-0.01em]">
+          {modalTitle}
+        </span>
+      }
       subtitle={
         configuring
           ? "Your credential is connected. Choose what to sync, then finish."
@@ -1210,8 +1291,8 @@ function ConnectorForm({
             "Connect a source. Its documents inherit the source ACLs, enforced at retrieval.")
       }
       icon={
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[11px] bg-[linear-gradient(140deg,var(--ob-accent),#5b3ce0)] shadow-[0_0_0_1px_var(--ob-accent-line)]">
-          <IconGrid width={20} height={20} className="text-white" />
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius-md)] border border-accent-line bg-accent-soft text-accent shadow-[inset_0_0_0_1px_var(--ob-accent-line)]">
+          <IconGrid width={20} height={20} />
         </span>
       }
       footer={
@@ -1431,8 +1512,8 @@ function ConnectorForm({
               : visibleFields;
             if (manualFields.length === 0) return null;
             return (
-              <div className="space-y-4 rounded-[var(--radius-md)] border border-dashed border-border bg-bg/40 p-4">
-                <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-[0.09em] text-muted">
+              <div className="space-y-4 rounded-[var(--radius-lg)] border border-dashed border-border bg-bg/40 p-4">
+                <div className="flex items-center gap-3 font-mono text-[10.5px] uppercase tracking-wide text-faint">
                   <span className="h-px flex-1 bg-border" />
                   {connected
                     ? "Additional options"
@@ -1514,9 +1595,9 @@ function OAuthConnect({
   }
 
   return (
-    <div className="rounded-[var(--radius-md)] border border-accent-line bg-accent-soft p-4 shadow-[0_10px_30px_-16px_rgba(124,92,255,0.7)]">
+    <div className="rounded-[var(--radius-lg)] border border-accent-line bg-accent-soft p-4 shadow-[0_10px_30px_-16px_rgba(23,176,166,0.7)]">
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-[12.5px] font-semibold text-text">
+        <span className="font-display text-[13px] font-semibold text-text">
           Connect with {label}
         </span>
         <Badge kind="accent">Recommended</Badge>
@@ -1600,7 +1681,7 @@ function CredentialBanner({
     : "border-[rgba(52,211,153,0.3)] bg-ok-soft";
 
   return (
-    <div className={"rounded-[var(--radius-md)] border px-4 py-3 " + tone}>
+    <div className={"rounded-[var(--radius-lg)] border px-4 py-3 " + tone}>
       <div className="flex items-center gap-2.5">
         <span
           className={
@@ -1615,7 +1696,7 @@ function CredentialBanner({
           )}
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-[13px] font-semibold text-text">
+          <div className="flex items-center gap-2 font-display text-[13px] font-semibold text-text">
             {needsReauth ? "Reconnect needed" : "Connected"}
             <Badge kind={needsReauth ? "warn" : "ok"} dot>
               {label}

@@ -2,7 +2,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef
 
 import { type Identity, search, type SearchResult } from "../api.ts";
 import { ConnectorLogo } from "../components/ConnectorLogo.tsx";
-import { Badge, Button, Card, EmptyState, PageHeader, Spinner, Tooltip } from "../ui.tsx";
+import { Button, Card, EmptyState, Spinner, Tooltip } from "../ui.tsx";
 
 // ============================================================
 // Search . permission-filtered retrieval
@@ -152,12 +152,24 @@ function ConnectorMark({ connector }: { connector: string }) {
   return <ConnectorLogo connector={connector} size={32} />;
 }
 
-// A small shield-check glyph used by the access-path badge.
+// A small shield-check glyph used by the access-enforced meta line.
 function ShieldCheck({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <path d="M12 2 4 5v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V5z" strokeLinejoin="round" />
       <path d="m9 12 2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// The owl-iris aperture glyph: a ring with a filled center. Teal reads as
+// "permitted". Used on the per-result permission tag so each hit carries the
+// same calm signal the chat provenance strip uses.
+function Aperture({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -274,11 +286,20 @@ export default function Search({ identity }: { identity: Identity }) {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader
-        breadcrumb={["lens", "search"]}
-        title="Search"
-        subtitle="Permission-filtered retrieval. Results are scoped to what you may read before they reach you, never after."
-      />
+      <div className="mb-6">
+        <div className="mb-2 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.15em] text-faint">
+          <span>lens</span>
+          <span className="opacity-50">/</span>
+          <span>search</span>
+        </div>
+        <h1 className="font-display text-[30px] font-semibold leading-[1.05] tracking-[-0.02em] text-text">
+          Search what you can <span className="text-accent">reach.</span>
+        </h1>
+        <p className="mt-2 max-w-xl text-[14px] leading-relaxed text-muted">
+          Permission-filtered retrieval. Results are scoped to what you may read before they reach
+          you, never after.
+        </p>
+      </div>
 
       {/* ---- Query bar (mono) ---- */}
       <form onSubmit={run} className="group/q">
@@ -329,6 +350,14 @@ export default function Search({ identity }: { identity: Identity }) {
           </Button>
         </div>
       </form>
+
+      {/* ---- How retrieval stays permitted: the one-line provenance of the list ---- */}
+      <p className="mt-3 flex items-start gap-2 px-1 font-mono text-[11px] leading-relaxed text-faint">
+        <Aperture className="mt-0.5 h-[13px] w-[13px] shrink-0 text-accent" />
+        <span>
+          Over-fetch candidates, run one bulk authz check, keep only the allowed subset, then rerank.
+        </span>
+      </p>
 
       {/* ---- Result meta strip: count, timing, active query ---- */}
       {ran && !error && (
@@ -575,8 +604,8 @@ function FacetPill({
 // ------------------------------------------------------------
 function ResultCard({ e }: { e: Enriched }) {
   return (
-    <Card glow className="group/r overflow-hidden">
-      <div className="flex gap-4 p-4">
+    <Card glow className="group/r overflow-hidden shadow-[var(--shadow-float)]">
+      <div className="flex gap-4 p-5">
         {/* rank + connector rail */}
         <div className="flex shrink-0 flex-col items-center gap-2.5">
           <span className="font-mono text-[11px] tabular-nums text-faint">
@@ -588,11 +617,14 @@ function ResultCard({ e }: { e: Enriched }) {
         {/* body */}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
-            <h3 className="truncate text-[14px] font-semibold leading-snug text-text transition group-hover/r:text-accent">
+            <h3 className="font-display truncate text-[16px] font-semibold leading-snug tracking-[-0.01em] text-text transition group-hover/r:text-accent">
               {e.title}
             </h3>
             <Tooltip label={`relevance ${Math.round(e.relevance * 100)}% (raw score ${e.raw.score.toFixed(2)})`}>
-              <span className="mt-1 flex shrink-0 items-center gap-2">
+              <span className="mt-0.5 flex shrink-0 items-center gap-2">
+                <span className="font-mono text-[11px] tabular-nums text-faint">
+                  {e.raw.score.toFixed(2)}
+                </span>
                 <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border">
                   <span
                     className={`block h-full rounded-full ${BAR_FILL[e.scoreClass]}`}
@@ -603,10 +635,17 @@ function ResultCard({ e }: { e: Enriched }) {
             </Tooltip>
           </div>
 
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">{e.snippet}</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-muted">{e.snippet}</p>
 
-          {/* meta: connector source . chunk id . access path */}
-          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 font-mono text-[11px] text-muted">
+          {/* meta: permitted tag . connector source . chunk path */}
+          <div className="mt-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 font-mono text-[11px] text-muted">
+            <Tooltip label={`the grant that makes this result visible to you: ${e.accessGroup}`}>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-accent-line bg-accent-soft px-2 py-0.5 text-accent">
+                <Aperture className="h-3 w-3" />
+                permitted
+              </span>
+            </Tooltip>
+            <span className="opacity-40">.</span>
             <span className="inline-flex items-center gap-1.5">
               <span className="text-faint">source</span>
               <span className="text-muted">{e.connector}</span>
@@ -619,13 +658,6 @@ function ResultCard({ e }: { e: Enriched }) {
                 </Tooltip>
               </>
             )}
-            <span className="opacity-40">.</span>
-            <Tooltip label="the grant that makes this result visible to you">
-              <Badge kind="ok" className="font-mono">
-                <ShieldCheck className="h-3 w-3" />
-                {e.accessGroup}
-              </Badge>
-            </Tooltip>
           </div>
         </div>
       </div>

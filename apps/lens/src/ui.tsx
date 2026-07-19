@@ -11,14 +11,21 @@ import {
 } from "react";
 
 // ============================================================
-// pansoph . lens . Obsidian component kit
+// pansoph . lens . "aperture" component kit
 //
-// One consistent voice for the whole app. Dark-first, sharp,
-// 1px borders, accent glow on active/hover, focus-visible rings.
-// These names and prop shapes are the CONTRACT that page agents
-// build against, so keep them stable. Each export carries a short
-// doc comment describing its API.
+// One consistent voice for the whole app. Warm, calm, premium.
+// One teal signal color (the owl's iris), hairline 1px borders,
+// generous padding, designed type (Clash Display + General Sans +
+// JetBrains Mono). Both themes are first-class via the index.css
+// tokens. These names and prop shapes are the CONTRACT that page
+// agents build against, so keep them stable. Each export carries a
+// short doc comment describing its API.
 // ============================================================
+
+// The warm near-black "ink" used for text/icons on a teal fill, per
+// the aperture mockup. On teal, white looks cold; this warm ink reads
+// premium and matches the mockup's #04140f.
+const ON_ACCENT = "#04140f";
 
 // Small class-name joiner. Filters out falsy values so callers can
 // pass conditional classes inline.
@@ -43,9 +50,10 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const BTN_VARIANT: Record<ButtonVariant, string> = {
   primary:
-    "border border-accent-line bg-accent text-white shadow-[0_8px_24px_-10px_rgba(124,92,255,0.8)] hover:brightness-110",
+    "border border-transparent bg-accent shadow-[0_8px_24px_-8px_rgba(23,176,166,0.5)] hover:brightness-[1.06]",
   ghost: "border border-border bg-surface text-text hover:bg-elevated hover:border-border-hover",
-  danger: "border border-[rgba(244,63,94,0.35)] bg-err-soft text-err hover:brightness-110",
+  danger:
+    "border border-[rgba(224,104,95,0.35)] bg-err-soft text-err hover:border-[rgba(224,104,95,0.5)]",
   subtle: "border border-transparent bg-transparent text-muted hover:bg-elevated hover:text-text",
 };
 
@@ -61,6 +69,7 @@ export function Button({
   block = false,
   className = "",
   children,
+  style,
   ...rest
 }: ButtonProps) {
   return (
@@ -72,6 +81,9 @@ export function Button({
         block && "w-full",
         className,
       )}
+      // Primary carries a warm near-black ink on the teal fill, per the
+      // aperture mockup. Caller style still wins (spread last).
+      style={variant === "primary" ? { color: ON_ACCENT, ...style } : style}
       {...rest}
     >
       {children}
@@ -81,8 +93,10 @@ export function Button({
 
 // ------------------------------------------------------------
 // Card
-// Elevated surface with 1px border and rounded corners. Forwards
-// div attrs (onClick, etc). `glow` adds an accent hover glow.
+// Elevated warm surface with a hairline 1px border, aperture-round
+// corners, and a soft float shadow. A subtle 1px teal top hairline
+// gives it the aperture signature. Forwards div attrs (onClick, etc).
+// `glow` lifts the border + shadow on hover.
 // ------------------------------------------------------------
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   glow?: boolean;
@@ -92,8 +106,8 @@ export function Card({ glow = false, className = "", children, ...rest }: CardPr
   return (
     <div
       className={cx(
-        "rounded-[var(--radius-lg)] border border-border bg-surface",
-        glow && "transition hover:border-border-hover hover:shadow-[var(--shadow-float)]",
+        "rounded-[var(--radius-lg)] border border-border border-t-accent-line bg-surface shadow-[var(--shadow-float)]",
+        glow && "transition hover:border-border-hover hover:border-t-accent hover:shadow-[var(--shadow-glow)]",
         className,
       )}
       {...rest}
@@ -113,7 +127,7 @@ export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInpu
     <input
       {...props}
       className={cx(
-        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 text-sm text-text outline-none transition placeholder:text-muted focus:border-accent-line",
+        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3.5 py-2.5 text-sm text-text outline-none transition placeholder:text-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)]",
         className,
       )}
     />
@@ -132,7 +146,7 @@ export function Textarea({
     <textarea
       {...props}
       className={cx(
-        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 text-sm text-text outline-none transition placeholder:text-muted focus:border-accent-line",
+        "w-full rounded-[var(--radius-md)] border border-border bg-bg px-3.5 py-2.5 text-sm text-text outline-none transition placeholder:text-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)]",
         className,
       )}
     />
@@ -154,7 +168,7 @@ export function Select({
       <select
         {...props}
         className={cx(
-          "w-full appearance-none rounded-[var(--radius-md)] border border-border bg-bg px-3 py-2 pr-9 text-sm text-text outline-none transition focus:border-accent-line disabled:opacity-60",
+          "w-full appearance-none rounded-[var(--radius-md)] border border-border bg-bg px-3.5 py-2.5 pr-9 text-sm text-text outline-none transition focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)] disabled:opacity-60",
           className,
         )}
       >
@@ -195,15 +209,15 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-text">
+      <span className="mb-1.5 flex items-center gap-1 font-mono text-[10.5px] font-medium uppercase tracking-wide text-faint">
         {label}
-        {required && <span className="font-mono text-accent">*</span>}
+        {required && <span className="text-accent">*</span>}
       </span>
       {children}
       {error ? (
-        <span className="mt-1 block text-xs text-err">{error}</span>
+        <span className="mt-1.5 block text-xs text-err">{error}</span>
       ) : (
-        help && <span className="mt-1 block text-xs text-muted">{help}</span>
+        help && <span className="mt-1.5 block text-xs text-muted">{help}</span>
       )}
     </label>
   );
@@ -218,12 +232,12 @@ export function Field({
 export type BadgeKind = "ok" | "warn" | "err" | "neutral" | "accent" | "cyan";
 
 const BADGE_KIND: Record<BadgeKind, string> = {
-  ok: "text-ok bg-ok-soft border-[rgba(52,211,153,0.3)]",
-  warn: "text-warn bg-warn-soft border-[rgba(245,158,11,0.3)]",
-  err: "text-err bg-err-soft border-[rgba(244,63,94,0.32)]",
+  ok: "text-ok bg-ok-soft border-accent-line",
+  warn: "text-warn bg-warn-soft border-[rgba(224,163,59,0.32)]",
+  err: "text-err bg-err-soft border-[rgba(224,104,95,0.32)]",
   neutral: "text-muted bg-surface border-border",
   accent: "text-accent bg-accent-soft border-accent-line",
-  cyan: "text-cyan bg-cyan-soft border-[rgba(34,211,238,0.3)]",
+  cyan: "text-cyan bg-cyan-soft border-accent-line",
 };
 
 export function Badge({
@@ -255,9 +269,10 @@ export const Chip = Badge;
 
 // ------------------------------------------------------------
 // StatusDot
-// A colored status dot with an optional glow ring and pulse.
-// kind: ok | warn | err | run (cyan) | neutral. `pulse` animates
-// the glow ring, `size` is the diameter in px.
+// The owl's iris, rendered as a tiny aperture: a thin ring with a
+// filled center, both in the kind color. `pulse` breathes a soft glow
+// ring (the eye "opening"), `size` is the diameter in px.
+// kind: ok | warn | err | run (cyan) | neutral. API unchanged.
 // ------------------------------------------------------------
 export type StatusKind = "ok" | "warn" | "err" | "run" | "neutral";
 
@@ -269,11 +284,11 @@ const DOT_COLOR: Record<StatusKind, string> = {
   neutral: "var(--ob-muted)",
 };
 const DOT_GLOW: Record<StatusKind, string> = {
-  ok: "rgba(52,211,153,0.7)",
-  warn: "rgba(245,158,11,0.7)",
-  err: "rgba(244,63,94,0.8)",
-  run: "rgba(34,211,238,0.7)",
-  neutral: "rgba(154,154,166,0.4)",
+  ok: "rgba(23,176,166,0.7)",
+  warn: "rgba(224,163,59,0.7)",
+  err: "rgba(224,104,95,0.8)",
+  run: "rgba(23,176,166,0.7)",
+  neutral: "rgba(169,158,140,0.4)",
 };
 
 export function StatusDot({
@@ -287,18 +302,31 @@ export function StatusDot({
   pulse?: boolean;
   className?: string;
 }) {
+  const color = DOT_COLOR[kind];
   return (
     <span
-      className={cx("inline-block shrink-0 rounded-full", pulse && "status-pulse", className)}
+      className={cx("inline-grid shrink-0 place-items-center rounded-full", pulse && "status-pulse", className)}
       style={{
         width: size,
         height: size,
-        background: DOT_COLOR[kind],
-        boxShadow: `0 0 6px 0 ${DOT_GLOW[kind]}`,
         // consumed by the status-pulse keyframes
         ["--ring-glow" as string]: DOT_GLOW[kind],
       }}
-    />
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        fill="none"
+        stroke={color}
+        strokeWidth={2.4}
+        aria-hidden="true"
+        style={{ display: "block" }}
+      >
+        <circle cx="12" cy="12" r="8" />
+        <circle cx="12" cy="12" r="3" fill={color} stroke="none" />
+      </svg>
+    </span>
   );
 }
 
@@ -311,7 +339,8 @@ export function Dot({ kind }: { kind: "ok" | "warn" | "err" }) {
 // ------------------------------------------------------------
 // Avatar
 // Circular identity chip. Renders the first initial of `name` on a
-// cyan-to-violet gradient. `size` in px. Optional `title` tooltip.
+// warm teal gradient with a near-black warm ink, per the aperture
+// mark. `size` in px. Optional `title` tooltip.
 // ------------------------------------------------------------
 export function Avatar({
   name,
@@ -328,15 +357,13 @@ export function Avatar({
   return (
     <span
       title={title ?? name}
-      className={cx(
-        "inline-grid shrink-0 place-items-center rounded-full font-bold text-white",
-        className,
-      )}
+      className={cx("inline-grid shrink-0 place-items-center rounded-full font-bold", className)}
       style={{
         width: size,
         height: size,
         fontSize: Math.round(size * 0.42),
-        background: "linear-gradient(140deg, var(--ob-cyan), var(--ob-accent))",
+        color: ON_ACCENT,
+        background: "linear-gradient(140deg, var(--ob-accent), var(--ob-cyan))",
       }}
     >
       {initial}
@@ -399,7 +426,7 @@ export function Modal({
 
   return (
     <div
-      className="animate-fade fixed inset-0 z-50 grid place-items-center bg-[rgba(4,4,8,0.72)] p-6 backdrop-blur-sm"
+      className="animate-fade fixed inset-0 z-50 grid place-items-center bg-[rgba(12,10,7,0.72)] p-6 backdrop-blur-sm"
       onClick={onClose}
       role="presentation"
     >
@@ -407,24 +434,26 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         className={cx(
-          "animate-rise max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-[var(--radius-xl)] border border-border bg-elevated shadow-[var(--shadow-float)]",
+          "animate-rise max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-[var(--radius-xl)] border border-border border-t-accent-line bg-elevated shadow-[var(--shadow-float)]",
           className,
         )}
         onClick={(e) => e.stopPropagation()}
       >
         {(title || icon) && (
-          <div className="flex items-start gap-3.5 border-b border-border px-5 pb-4 pt-5">
+          <div className="flex items-start gap-3.5 border-b border-border px-6 pb-5 pt-6">
             {icon}
             <div className="min-w-0 flex-1">
               {title && (
-                <div className="text-[17px] font-bold tracking-[-0.025em] text-text">{title}</div>
+                <div className="font-display text-[18px] font-medium tracking-[-0.01em] text-text">
+                  {title}
+                </div>
               )}
-              {subtitle && <div className="mt-0.5 text-xs text-muted">{subtitle}</div>}
+              {subtitle && <div className="mt-1 text-xs text-muted">{subtitle}</div>}
             </div>
             <button
               onClick={onClose}
               aria-label="Close"
-              className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] border border-border bg-surface text-muted transition hover:border-border-hover hover:text-text"
+              className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-muted transition hover:border-accent-line hover:text-text"
             >
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
@@ -432,9 +461,9 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="p-5">{children}</div>
+        <div className="p-6">{children}</div>
         {footer && (
-          <div className="flex items-center gap-3 border-t border-border bg-[color-mix(in_srgb,var(--ob-surface)_50%,transparent)] px-5 py-4">
+          <div className="flex items-center gap-3 border-t border-border bg-[color-mix(in_srgb,var(--ob-surface)_50%,transparent)] px-6 py-4">
             {footer}
           </div>
         )}
@@ -483,7 +512,7 @@ export function TH({ className = "", children, ...rest }: HTMLAttributes<HTMLTab
   return (
     <th
       className={cx(
-        "px-3 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wide text-muted",
+        "px-3.5 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wide text-faint",
         className,
       )}
       {...rest}
@@ -494,7 +523,7 @@ export function TH({ className = "", children, ...rest }: HTMLAttributes<HTMLTab
 }
 export function TD({ className = "", children, ...rest }: HTMLAttributes<HTMLTableCellElement>) {
   return (
-    <td className={cx("px-3 py-2.5 text-text", className)} {...rest}>
+    <td className={cx("px-3.5 py-3 text-text", className)} {...rest}>
       {children}
     </td>
   );
@@ -543,9 +572,9 @@ export function EmptyState({
 export type AlertKind = "ok" | "warn" | "err" | "info";
 
 const ALERT_KIND: Record<AlertKind, string> = {
-  ok: "border-[rgba(52,211,153,0.3)] bg-ok-soft text-ok",
-  warn: "border-[rgba(245,158,11,0.3)] bg-warn-soft text-warn",
-  err: "border-[rgba(244,63,94,0.32)] bg-err-soft text-err",
+  ok: "border-accent-line bg-ok-soft text-ok",
+  warn: "border-[rgba(224,163,59,0.32)] bg-warn-soft text-warn",
+  err: "border-[rgba(224,104,95,0.32)] bg-err-soft text-err",
   info: "border-accent-line bg-accent-soft text-accent",
 };
 
@@ -703,7 +732,7 @@ export function Tooltip({
 // ------------------------------------------------------------
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded-[5px] border border-border bg-bg px-1.5 py-0.5 font-mono text-[10.5px] font-medium leading-none text-muted shadow-[0_1px_0_rgba(0,0,0,0.4)]">
+    <span className="rounded-[6px] border border-border bg-surface px-1.5 py-0.5 font-mono text-[10.5px] font-medium leading-none text-muted">
       {children}
     </span>
   );
@@ -730,7 +759,7 @@ export function PageHeader({
     <div className="mb-6 flex items-end justify-between gap-4">
       <div className="min-w-0">
         {breadcrumb && breadcrumb.length > 0 && (
-          <div className="mb-2 flex items-center gap-1.5 font-mono text-xs text-muted">
+          <div className="mb-2 flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-wide text-faint">
             {breadcrumb.map((b, i) => (
               <span key={i} className="flex items-center gap-1.5">
                 {i > 0 && <span className="opacity-50">/</span>}
@@ -739,7 +768,7 @@ export function PageHeader({
             ))}
           </div>
         )}
-        <h1 className="text-xl font-bold tracking-[-0.03em] text-text">{title}</h1>
+        <h1 className="font-display text-2xl font-medium tracking-[-0.01em] text-text">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
       </div>
       {action}

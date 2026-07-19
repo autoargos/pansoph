@@ -1,11 +1,11 @@
 import type { SVGProps } from "react";
 
 // The pansoph brand mark: an abstract owl / eye-of-wisdom monogram. The two big
-// eyes double as apertures, the right pupil and the beak carry the cyan accent
+// eyes double as apertures, the right pupil and the beak carry the teal accent
 // (seeing / access-aware). Strokes use currentColor so the mark inherits its
-// color from context; the accent pupil and beak stay cyan.
+// color from context; the accent pupil and beak follow the theme's teal.
 
-const ACCENT = "#22D3EE"; // Obsidian secondary cyan, the fixed accent in the mark.
+const ACCENT = "var(--ob-accent)"; // aperture teal, theme-aware.
 
 /**
  * OwlMark
@@ -56,36 +56,31 @@ export function OwlMark({
 
 /**
  * BrandMark
- * The mark inside the app's signature gradient tile (violet, with accent glow).
- * Used at the top of the sidebar and in modal headers. `size` in px.
+ * The owl mark, rendered directly (no colored tile) so the aperture eyes read clean
+ * against the warm canvas, matching the mockup. Follows currentColor for the strokes,
+ * with the teal accent pupil + beak. Used at the top of the rail and in modal headers.
  */
 export function BrandMark({ size = 34, className = "" }: { size?: number; className?: string }) {
-  const inner = Math.round(size * 0.62);
   return (
     <span
-      className={`inline-grid place-items-center rounded-[9px] text-white ${className}`}
-      style={{
-        width: size,
-        height: size,
-        background: "linear-gradient(140deg, var(--ob-accent), #5b3ce0)",
-        boxShadow: "var(--ob-glow)",
-      }}
+      className={`inline-grid shrink-0 place-items-center text-text ${className}`}
+      style={{ width: size, height: size }}
     >
-      <OwlMark style={{ width: inner, height: inner }} />
+      <OwlMark style={{ width: size, height: size }} />
     </span>
   );
 }
 
 /**
  * Wordmark
- * The "pansoph" wordmark rendered as styled text (Inter, tight tracking). Kept as
- * text rather than the SVG path so it inherits currentColor and stays crisp.
+ * The "pansoph" wordmark in the Clash Display face, the aperture display type. Kept as
+ * text (not the SVG path) so it inherits currentColor and stays crisp.
  */
 export function Wordmark({ className = "" }: { className?: string }) {
   return (
     <span
-      className={`font-sans font-bold tracking-[-0.03em] ${className}`}
-      style={{ letterSpacing: "-0.03em" }}
+      className={`font-display font-semibold tracking-[-0.02em] ${className}`}
+      style={{ fontFamily: "var(--font-display)" }}
     >
       pansoph
     </span>

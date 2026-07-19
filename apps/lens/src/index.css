@@ -1,98 +1,97 @@
 @import "tailwindcss";
 
 /* ============================================================
-   pansoph . lens . Obsidian design language
-   Dark-first, sharp, technical. Linear / Vercel energy.
-   High contrast, precise, 1px borders, subtle accent glow.
+   pansoph . lens . "aperture" design language
+   The owl's iris as the organizing motif. A WARM canvas (not the
+   usual cool blue-black), one teal signal color, designed type
+   (Clash Display + General Sans, not Inter). Dark-first, both
+   themes first-class. Token NAMES are unchanged from the previous
+   system, so every component inherits the new palette and type
+   without edits; only the VALUES changed.
    ============================================================ */
 
 :root {
   color-scheme: dark;
 
-  /* Core palette (exact hexes, do not alter) */
-  --ob-bg: #0b0b0f;
-  --ob-surface: #16161e;
-  --ob-elevated: #1c1c26;
-  --ob-border: #262631;
-  --ob-text: #e7e7ea;
-  --ob-muted: #9a9aa6;
-  --ob-accent: #7c5cff; /* electric violet */
-  --ob-cyan: #22d3ee; /* secondary */
+  /* Core palette (warm ink) */
+  --ob-bg: #13110e;
+  --ob-surface: #1e1a15;
+  --ob-elevated: #241f19;
+  --ob-border: #2b251d;
+  --ob-text: #f2ece1;
+  --ob-muted: #a99e8c;
+  --ob-accent: #17b0a6; /* teal - the owl's eye */
+  --ob-cyan: #17b0a6; /* one signal color: cyan folds into teal */
 
-  /* Derived tokens */
-  --ob-accent-soft: rgba(124, 92, 255, 0.14);
-  --ob-accent-line: rgba(124, 92, 255, 0.4);
-  --ob-cyan-soft: rgba(34, 211, 238, 0.12);
-  --ob-ok: #34d399;
-  --ob-ok-soft: rgba(52, 211, 153, 0.12);
-  --ob-warn: #f59e0b;
-  --ob-warn-soft: rgba(245, 158, 11, 0.12);
-  --ob-err: #f43f5e;
-  --ob-err-soft: rgba(244, 63, 94, 0.12);
+  --ob-accent-soft: rgba(23, 176, 166, 0.15);
+  --ob-accent-line: rgba(23, 176, 166, 0.4);
+  --ob-cyan-soft: rgba(23, 176, 166, 0.12);
+  --ob-ok: #17b0a6;
+  --ob-ok-soft: rgba(23, 176, 166, 0.14);
+  --ob-warn: #e0a33b;
+  --ob-warn-soft: rgba(224, 163, 59, 0.14);
+  --ob-err: #e0685f;
+  --ob-err-soft: rgba(224, 104, 95, 0.14);
 
-  --ob-border-hover: #34343f;
+  --ob-border-hover: #3a3327;
 
-  --ob-shadow: 0 20px 60px -18px rgba(0, 0, 0, 0.75);
-  --ob-glow: 0 0 0 1px var(--ob-accent-line), 0 8px 22px -8px rgba(124, 92, 255, 0.65);
+  --ob-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.7);
+  --ob-glow: 0 0 0 1px var(--ob-accent-line), 0 8px 24px -8px rgba(23, 176, 166, 0.5);
 
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "General Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Clash Display", "General Sans", ui-sans-serif, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* ------------------------------------------------------------
-   Tailwind v4 theme mapping. These become utility classes:
-   bg-*, text-*, border-*, rounded-*, shadow-*, font-*.
-   Both the Obsidian names (bg, surface, elevated, accent, cyan)
-   and the legacy semantic names still used by the page bodies
-   (canvas, ink, muted, faint, line, accent-soft, ok, warn, err)
-   are mapped, so existing markup renders in the new palette
-   without touching page files.
+   Tailwind v4 theme mapping -> utility classes (bg-*, text-*,
+   border-*, rounded-*, shadow-*, font-*). Both the raw names and
+   the legacy semantic aliases used by page bodies are mapped, so
+   existing markup renders in aperture without touching pages.
    ------------------------------------------------------------ */
 @theme {
-  /* Obsidian core */
-  --color-bg: #0b0b0f;
-  --color-surface: #16161e;
-  --color-elevated: #1c1c26;
-  --color-border: #262631;
-  --color-border-hover: #34343f;
-  --color-text: #e7e7ea;
-  --color-accent: #7c5cff;
-  --color-accent-line: rgba(124, 92, 255, 0.4);
-  --color-cyan: #22d3ee;
-  --color-cyan-soft: rgba(34, 211, 238, 0.12);
+  --color-bg: #13110e;
+  --color-surface: #1e1a15;
+  --color-elevated: #241f19;
+  --color-border: #2b251d;
+  --color-border-hover: #3a3327;
+  --color-text: #f2ece1;
+  --color-accent: #17b0a6;
+  --color-accent-line: rgba(23, 176, 166, 0.4);
+  --color-cyan: #17b0a6;
+  --color-cyan-soft: rgba(23, 176, 166, 0.12);
 
-  /* Status */
-  --color-ok: #34d399;
-  --color-ok-soft: rgba(52, 211, 153, 0.12);
-  --color-warn: #f59e0b;
-  --color-warn-soft: rgba(245, 158, 11, 0.12);
-  --color-err: #f43f5e;
-  --color-err-soft: rgba(244, 63, 94, 0.12);
+  --color-ok: #17b0a6;
+  --color-ok-soft: rgba(23, 176, 166, 0.14);
+  --color-warn: #e0a33b;
+  --color-warn-soft: rgba(224, 163, 59, 0.14);
+  --color-err: #e0685f;
+  --color-err-soft: rgba(224, 104, 95, 0.14);
 
-  /* Legacy semantic aliases (still referenced by page bodies).
-     Remapped onto Obsidian values so old class names look right. */
-  --color-canvas: #0b0b0f;
-  --color-ink: #e7e7ea;
-  --color-ink-soft: #cfcfd6;
-  --color-muted: #9a9aa6;
-  --color-faint: #6b6b77;
-  --color-line: #262631;
-  --color-accent-ink: #a68dff;
-  --color-accent-soft: rgba(124, 92, 255, 0.14);
+  /* Legacy semantic aliases (still referenced by page bodies) */
+  --color-canvas: #13110e;
+  --color-ink: #f2ece1;
+  --color-ink-soft: #ddd5c7;
+  --color-muted: #a99e8c;
+  --color-faint: #6e6558;
+  --color-line: #2b251d;
+  --color-accent-ink: #34c7bd;
+  --color-accent-soft: rgba(23, 176, 166, 0.15);
 
-  /* Radii */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 18px;
-  --radius-card: 14px;
+  /* Radii - a touch rounder, aperture-soft */
+  --radius-sm: 9px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-card: 16px;
 
   /* Shadows */
-  --shadow-glow: 0 0 0 1px rgba(124, 92, 255, 0.4), 0 8px 22px -8px rgba(124, 92, 255, 0.65);
-  --shadow-float: 0 20px 60px -18px rgba(0, 0, 0, 0.75);
+  --shadow-glow: 0 0 0 1px rgba(23, 176, 166, 0.4), 0 8px 24px -8px rgba(23, 176, 166, 0.5);
+  --shadow-float: 0 24px 60px -24px rgba(0, 0, 0, 0.7);
 
   /* Fonts */
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "General Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Clash Display", "General Sans", ui-sans-serif, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -116,19 +115,25 @@ body {
   color: var(--ob-text);
   font-size: 14px;
   line-height: 1.5;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.1px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Ambient glow field behind the whole shell */
+/* Display face: applied via the font-display utility on headings. */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* Ambient iris field behind the whole shell (the owl's eye, faint teal) */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(720px 420px at 78% -8%, rgba(124, 92, 255, 0.14), transparent 60%),
-    radial-gradient(620px 380px at 6% 108%, rgba(34, 211, 238, 0.08), transparent 60%);
+    radial-gradient(900px 520px at 82% -10%, rgba(23, 176, 166, 0.13), transparent 62%),
+    radial-gradient(680px 420px at 4% 108%, rgba(23, 176, 166, 0.05), transparent 60%);
   pointer-events: none;
   z-index: 0;
 }
@@ -146,9 +151,8 @@ pre,
   font-variant-numeric: tabular-nums;
 }
 
-/* Selection */
 ::selection {
-  background: var(--ob-accent-soft);
+  background: rgba(23, 176, 166, 0.28);
   color: var(--ob-text);
 }
 
@@ -180,9 +184,6 @@ pre,
 /* ------------------------------------------------------------
    Focus-visible rings for keyboard users
    ------------------------------------------------------------ */
-/* Keyboard focus for actionable controls only. Inputs, textareas, and selects get a
-   clean border-color focus from their own component classes instead, so there is never a
-   hard outline or a glowing ring stacked on a text field. */
 a:focus-visible,
 button:focus-visible,
 [tabindex]:focus-visible {
@@ -190,7 +191,6 @@ button:focus-visible,
   outline-offset: 2px;
   border-radius: 6px;
 }
-/* Never show the browser's default focus ring on text fields. */
 input:focus,
 input:focus-visible,
 textarea:focus,
@@ -219,10 +219,10 @@ select:focus-visible {
 @keyframes ob-status-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 3px var(--ring-soft, var(--ob-ok-soft)), 0 0 8px 0 var(--ring-glow, rgba(52, 211, 153, 0.7));
+    box-shadow: 0 0 0 3px var(--ring-soft, var(--ob-ok-soft)), 0 0 8px 0 var(--ring-glow, rgba(23, 176, 166, 0.7));
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.03), 0 0 10px 1px var(--ring-glow, rgba(52, 211, 153, 0.9));
+    box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.03), 0 0 10px 1px var(--ring-glow, rgba(23, 176, 166, 0.9));
   }
 }
 .status-pulse {
@@ -264,68 +264,66 @@ select:focus-visible {
 }
 
 /* ------------------------------------------------------------
-   Light theme. Toggled by setting data-theme="light" on <html>.
-   Overrides both the raw --ob-* vars (used in a few inline styles)
-   and the Tailwind @theme --color-* tokens (used by every utility),
-   so the whole app flips with one attribute.
+   Light theme (warm bone). Toggled by data-theme="light" on
+   <html>. Overrides both the raw --ob-* vars and the Tailwind
+   @theme --color-* tokens, so the whole app flips with one attr.
    ------------------------------------------------------------ */
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --ob-bg: #f7f8fb;
-  --ob-surface: #ffffff;
-  --ob-elevated: #ffffff;
-  --ob-border: #e5e7ec;
-  --ob-border-hover: #d3d6de;
-  --ob-text: #17171d;
-  --ob-muted: #5b6070;
-  --ob-accent: #6d4aff;
-  --ob-cyan: #0891b2;
-  --ob-accent-soft: rgba(109, 74, 255, 0.1);
-  --ob-accent-line: rgba(109, 74, 255, 0.32);
-  --ob-cyan-soft: rgba(8, 145, 178, 0.1);
-  --ob-ok: #059669;
-  --ob-ok-soft: rgba(5, 150, 105, 0.12);
-  --ob-warn: #b45309;
-  --ob-warn-soft: rgba(180, 83, 9, 0.12);
-  --ob-err: #e11d48;
-  --ob-err-soft: rgba(225, 29, 72, 0.1);
-  --ob-shadow: 0 20px 50px -22px rgba(20, 22, 45, 0.22);
-  --ob-glow: 0 0 0 1px var(--ob-accent-line), 0 10px 26px -12px rgba(109, 74, 255, 0.4);
+  --ob-bg: #f1ece2;
+  --ob-surface: #fbf9f3;
+  --ob-elevated: #f3efe6;
+  --ob-border: #e4ddce;
+  --ob-border-hover: #d6cdbb;
+  --ob-text: #221d16;
+  --ob-muted: #6a6256;
+  --ob-accent: #128c86;
+  --ob-cyan: #128c86;
+  --ob-accent-soft: rgba(18, 140, 134, 0.12);
+  --ob-accent-line: rgba(18, 140, 134, 0.34);
+  --ob-cyan-soft: rgba(18, 140, 134, 0.1);
+  --ob-ok: #128c86;
+  --ob-ok-soft: rgba(18, 140, 134, 0.13);
+  --ob-warn: #b8791c;
+  --ob-warn-soft: rgba(184, 121, 28, 0.13);
+  --ob-err: #c4483f;
+  --ob-err-soft: rgba(196, 72, 63, 0.1);
+  --ob-shadow: 0 24px 50px -28px rgba(30, 24, 16, 0.28);
+  --ob-glow: 0 0 0 1px var(--ob-accent-line), 0 10px 26px -12px rgba(18, 140, 134, 0.4);
 
-  /* Tailwind @theme tokens (utilities reference these via var()) */
-  --color-bg: #f7f8fb;
-  --color-surface: #ffffff;
-  --color-elevated: #ffffff;
-  --color-border: #e5e7ec;
-  --color-border-hover: #d3d6de;
-  --color-text: #17171d;
-  --color-accent: #6d4aff;
-  --color-accent-line: rgba(109, 74, 255, 0.32);
-  --color-cyan: #0891b2;
-  --color-cyan-soft: rgba(8, 145, 178, 0.1);
-  --color-ok: #059669;
-  --color-ok-soft: rgba(5, 150, 105, 0.12);
-  --color-warn: #b45309;
-  --color-warn-soft: rgba(180, 83, 9, 0.12);
-  --color-err: #e11d48;
-  --color-err-soft: rgba(225, 29, 72, 0.1);
-  --color-canvas: #f7f8fb;
-  --color-ink: #17171d;
-  --color-ink-soft: #2c2d38;
-  --color-muted: #5b6070;
-  --color-faint: #969aa6;
-  --color-line: #e5e7ec;
-  --color-accent-ink: #5a34d6;
-  --color-accent-soft: rgba(109, 74, 255, 0.1);
+  --color-bg: #f1ece2;
+  --color-surface: #fbf9f3;
+  --color-elevated: #f3efe6;
+  --color-border: #e4ddce;
+  --color-border-hover: #d6cdbb;
+  --color-text: #221d16;
+  --color-accent: #128c86;
+  --color-accent-line: rgba(18, 140, 134, 0.34);
+  --color-cyan: #128c86;
+  --color-cyan-soft: rgba(18, 140, 134, 0.1);
+  --color-ok: #128c86;
+  --color-ok-soft: rgba(18, 140, 134, 0.13);
+  --color-warn: #b8791c;
+  --color-warn-soft: rgba(184, 121, 28, 0.13);
+  --color-err: #c4483f;
+  --color-err-soft: rgba(196, 72, 63, 0.1);
+  --color-canvas: #f1ece2;
+  --color-ink: #221d16;
+  --color-ink-soft: #37301f;
+  --color-muted: #6a6256;
+  --color-faint: #9a9081;
+  --color-line: #e4ddce;
+  --color-accent-ink: #0e7871;
+  --color-accent-soft: rgba(18, 140, 134, 0.12);
 
-  --shadow-glow: 0 0 0 1px rgba(109, 74, 255, 0.32), 0 10px 26px -12px rgba(109, 74, 255, 0.4);
-  --shadow-float: 0 20px 50px -22px rgba(20, 22, 45, 0.22);
+  --shadow-glow: 0 0 0 1px rgba(18, 140, 134, 0.34), 0 10px 26px -12px rgba(18, 140, 134, 0.4);
+  --shadow-float: 0 24px 50px -28px rgba(30, 24, 16, 0.28);
 }
 
-/* Softer, lighter ambient glow field for the light theme */
+/* Softer ambient iris for the light theme */
 :root[data-theme="light"] body::before {
   background:
-    radial-gradient(720px 420px at 78% -8%, rgba(109, 74, 255, 0.07), transparent 60%),
-    radial-gradient(620px 380px at 6% 108%, rgba(8, 145, 178, 0.05), transparent 60%);
+    radial-gradient(900px 520px at 82% -10%, rgba(18, 140, 134, 0.08), transparent 62%),
+    radial-gradient(680px 420px at 4% 108%, rgba(18, 140, 134, 0.04), transparent 60%);
 }

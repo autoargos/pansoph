@@ -142,7 +142,7 @@ export default function Access({ identity }: { identity: Identity }) {
   const groups = identity.groups;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-7">
       <PageHeader
         breadcrumb={["lens", "access"]}
         title="Profile and access"
@@ -173,9 +173,9 @@ function IdentityCard({ identity }: { identity: Identity }) {
   const groupCount = identity.groups.length;
 
   return (
-    <Card glow className="overflow-hidden">
-      {/* banded header with the ambient accent wash */}
-      <div className="relative flex items-center gap-5 px-6 py-6">
+    <Card glow className="overflow-hidden shadow-[var(--shadow-float)]">
+      {/* banded header with the ambient iris wash */}
+      <div className="relative flex items-center gap-5 px-7 py-7">
         <div
           className="pointer-events-none absolute inset-0"
           style={{
@@ -191,11 +191,16 @@ function IdentityCard({ identity }: { identity: Identity }) {
         </div>
 
         <div className="relative min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h2 className="text-[22px] font-bold tracking-[-0.03em] text-text">{identity.user}</h2>
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-faint">
+            signed-in identity
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
+            <h2 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-text">
+              {identity.user}
+            </h2>
             {identity.roles.includes("admin") && <Badge kind="accent" dot>admin</Badge>}
           </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
             <span className="inline-flex items-center gap-1.5">
               <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
                 <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -203,7 +208,7 @@ function IdentityCard({ identity }: { identity: Identity }) {
               </svg>
               <span className="font-mono text-xs">{identity.user}@{identity.tenant_id}</span>
             </span>
-            <span className="opacity-40">.</span>
+            <span className="text-faint">.</span>
             <Tooltip label="The signed-in session, active now">
               <span className="inline-flex items-center gap-1.5">
                 <StatusDot kind="ok" size={6} />
@@ -250,10 +255,10 @@ function IdentityCard({ identity }: { identity: Identity }) {
 
       {/* identity facts strip */}
       <div className="grid grid-cols-2 border-t border-border sm:grid-cols-4">
-        <Fact label="Handle" value={identity.user} mono />
-        <Fact label="Tenant" value={identity.tenant_id} mono />
-        <Fact label="Roles" value={String(roleCount)} accent={roleCount > 0} />
-        <Fact label="Groups" value={String(groupCount)} accent={groupCount > 0} />
+        <Fact label="handle" value={identity.user} mono />
+        <Fact label="tenant" value={identity.tenant_id} mono />
+        <Fact label="roles" value={String(roleCount)} accent={roleCount > 0} />
+        <Fact label="groups" value={String(groupCount)} accent={groupCount > 0} />
       </div>
     </Card>
   );
@@ -271,11 +276,11 @@ function Fact({
   accent?: boolean;
 }) {
   return (
-    <div className="border-r border-border px-5 py-3.5 last:border-r-0 [&:nth-child(2)]:border-r-0 sm:[&:nth-child(2)]:border-r">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.09em] text-muted">{label}</div>
+    <div className="border-r border-border px-5 py-4 last:border-r-0 [&:nth-child(2)]:border-r-0 sm:[&:nth-child(2)]:border-r">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">{label}</div>
       <div
-        className={`mt-1 truncate text-[15px] font-semibold tabular-nums ${
-          mono ? "font-mono text-[13.5px]" : ""
+        className={`mt-1.5 truncate text-[15px] font-semibold tabular-nums ${
+          mono ? "font-mono text-[13.5px]" : "font-display"
         } ${accent ? "text-accent" : "text-text"}`}
       >
         {value}
@@ -291,7 +296,7 @@ function RolesCard({ roles }: { roles: string[] }) {
   const held = new Set(roles);
 
   return (
-    <Card className="flex flex-col p-6">
+    <Card className="flex flex-col p-6 shadow-[var(--shadow-float)]">
       <SectionTitle
         icon={
           <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -303,34 +308,34 @@ function RolesCard({ roles }: { roles: string[] }) {
         note="gate management actions"
       />
 
-      <div className="mt-4 space-y-2.5">
+      <div className="mt-5 space-y-2.5">
         {ROLE_GRANTS.map((r) => {
           const active = held.has(r.role);
           return (
             <div
               key={r.role}
-              className={`rounded-[var(--radius-md)] border px-4 py-3 transition ${
+              className={`rounded-[var(--radius-lg)] border px-4 py-3.5 transition ${
                 active
                   ? "border-accent-line bg-accent-soft/40"
-                  : "border-border bg-bg opacity-75"
+                  : "border-border bg-bg opacity-70"
               }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
                   <Badge kind={active ? r.kind : "neutral"} dot={active}>
                     {r.role}
                   </Badge>
-                  <span className="text-[13px] font-semibold text-text">{r.title}</span>
+                  <span className="font-display text-[14px] font-semibold text-text">{r.title}</span>
                 </div>
                 {active ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-ok">
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-wide text-accent">
                     <StatusDot kind="ok" size={6} /> held
                   </span>
                 ) : (
-                  <span className="text-[11px] font-medium text-muted">not held</span>
+                  <span className="font-mono text-[10.5px] uppercase tracking-wide text-faint">not held</span>
                 )}
               </div>
-              <p className="mt-1.5 text-xs leading-relaxed text-muted">{r.grants}</p>
+              <p className="mt-2 text-xs leading-relaxed text-muted">{r.grants}</p>
             </div>
           );
         })}
@@ -349,7 +354,7 @@ function RolesCard({ roles }: { roles: string[] }) {
 // ------------------------------------------------------------
 function GroupsCard({ groups }: { groups: string[] }) {
   return (
-    <Card className="flex flex-col p-6">
+    <Card className="flex flex-col p-6 shadow-[var(--shadow-float)]">
       <SectionTitle
         icon={GroupIcon}
         title="Groups"
@@ -360,15 +365,15 @@ function GroupsCard({ groups }: { groups: string[] }) {
         <>
           <p className="mt-3 text-xs leading-relaxed text-muted">
             You belong to{" "}
-            <span className="font-semibold text-text tabular-nums">{groups.length}</span>{" "}
+            <span className="font-mono font-semibold text-text tabular-nums">{groups.length}</span>{" "}
             {groups.length === 1 ? "group" : "groups"}. Any document whose source ACLs name one of
             these becomes retrievable for you.
           </p>
-          <div className="mt-4 flex flex-col gap-2">
+          <div className="mt-5 flex flex-col gap-2">
             {groups.map((g) => (
               <div
                 key={g}
-                className="group flex items-center gap-3 rounded-[var(--radius-md)] border border-border bg-bg px-3.5 py-2.5 transition hover:border-accent-line hover:bg-accent-soft/30"
+                className="group flex items-center gap-3 rounded-[var(--radius-lg)] border border-border bg-bg px-3.5 py-3 transition hover:border-accent-line hover:bg-accent-soft/30"
               >
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-sm)] border border-border bg-surface text-accent transition group-hover:border-accent-line">
                   {GroupIcon}
@@ -376,11 +381,9 @@ function GroupsCard({ groups }: { groups: string[] }) {
                 <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium text-text">
                   {g}
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ok">
-                  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4">
-                    <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  grants access
+                <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-wide text-accent">
+                  <StatusDot kind="ok" size={6} />
+                  live
                 </span>
               </div>
             ))}
@@ -408,7 +411,7 @@ function GroupsCard({ groups }: { groups: string[] }) {
 // ------------------------------------------------------------
 function AccessModelCard() {
   return (
-    <Card className="p-6">
+    <Card className="p-6 shadow-[var(--shadow-float)]">
       <SectionTitle
         icon={
           <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -425,23 +428,23 @@ function AccessModelCard() {
         subset, then rerank. A document you cannot see never reaches the model.
       </p>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="mt-6 grid gap-3 md:grid-cols-3">
         {ACCESS_PATHS.map((p, i) => (
           <div
             key={p.title}
-            className="relative flex flex-col gap-2.5 rounded-[var(--radius-lg)] border border-border bg-bg p-4 transition hover:border-border-hover"
+            className="relative flex flex-col gap-3 rounded-[var(--radius-lg)] border border-border bg-bg p-4 shadow-[var(--shadow-float)] transition hover:border-border-hover"
           >
             <div className="flex items-center gap-2.5">
               <span className={`${TONE_TEXT[p.tone]}`}>{p.icon}</span>
-              <span className="font-mono text-[10px] font-semibold text-muted">0{i + 1}</span>
+              <span className="ml-auto font-mono text-[10px] font-medium tracking-wide text-faint">0{i + 1}</span>
             </div>
-            <div className="text-sm font-semibold text-text">{p.title}</div>
+            <div className="font-display text-[15px] font-semibold text-text">{p.title}</div>
             <p className="text-xs leading-relaxed text-muted">{p.body}</p>
           </div>
         ))}
       </div>
 
-      <div className="mt-5 flex items-start gap-3 rounded-[var(--radius-md)] border border-[rgba(244,63,94,0.28)] bg-err-soft px-4 py-3">
+      <div className="mt-6 flex items-start gap-3 rounded-[var(--radius-lg)] border border-[rgba(224,104,95,0.32)] bg-err-soft px-4 py-3.5">
         <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 text-err" fill="none" stroke="currentColor" strokeWidth="1.9">
           <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
           <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" strokeLinejoin="round" />
@@ -452,6 +455,11 @@ function AccessModelCard() {
           granted. There is no override, no god mode, no back door. The only way to see a document is
           one of the three paths above.
         </p>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
+        <StatusDot kind="ok" size={6} />
+        spicedb is the source of truth . revocations propagate on re-sync
       </div>
     </Card>
   );
@@ -487,7 +495,7 @@ function ScopeCard() {
   }, [instances]);
 
   return (
-    <Card className="p-6">
+    <Card className="p-6 shadow-[var(--shadow-float)]">
       <SectionTitle
         icon={
           <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -500,7 +508,7 @@ function ScopeCard() {
         title="Sources by scope"
         note="each instance owns its ACL namespace"
       />
-      <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted">
+      <p className="mt-4 max-w-2xl text-xs leading-relaxed text-muted">
         Each connected source is one or more independent instances, scoped to the organization, a
         group, or an individual, each with its own credential and ACL namespace. Different scopes
         never collide, so a personal source never leaks into an org one.
@@ -529,22 +537,22 @@ function ScopeCard() {
           description="Once a connector instance is added, it appears here grouped by the scope its credential covers."
         />
       ) : (
-        <div className="mt-5 grid gap-4 sm:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
           {SCOPES.map((sc) => {
             const list = byScope[sc.key] ?? [];
             return (
               <div
                 key={sc.key}
-                className="flex flex-col rounded-[var(--radius-lg)] border border-border bg-bg p-4"
+                className="flex flex-col rounded-[var(--radius-lg)] border border-border bg-bg p-4 shadow-[var(--shadow-float)]"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-semibold text-text">{sc.label}</span>
-                  <span className="font-mono text-[11px] tabular-nums text-muted">
+                  <span className="font-display text-[14px] font-semibold text-text">{sc.label}</span>
+                  <span className="font-mono text-[12px] tabular-nums text-accent">
                     {list.length}
                   </span>
                 </div>
-                <span className="mt-0.5 text-[11px] leading-snug text-muted">{sc.blurb}</span>
-                <div className="mt-3 space-y-1.5">
+                <span className="mt-1 text-[11px] leading-snug text-muted">{sc.blurb}</span>
+                <div className="mt-3.5 space-y-1.5">
                   {list.length > 0 ? (
                     list.map((i) => (
                       <div
@@ -559,7 +567,7 @@ function ScopeCard() {
                       </div>
                     ))
                   ) : (
-                    <div className="rounded-[var(--radius-sm)] border border-dashed border-border px-2.5 py-2 text-center text-[11px] text-muted">
+                    <div className="rounded-[var(--radius-sm)] border border-dashed border-border px-2.5 py-2 text-center font-mono text-[10.5px] uppercase tracking-wide text-faint">
                       none
                     </div>
                   )}
@@ -614,7 +622,7 @@ function AccessCheck({ identity }: { identity: Identity }) {
   }
 
   return (
-    <Card glow className="p-6">
+    <Card glow className="p-6 shadow-[var(--shadow-float)]">
       <SectionTitle
         icon={
           <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -672,21 +680,21 @@ function AccessCheck({ identity }: { identity: Identity }) {
       )}
 
       {results != null && !error && (
-        <div className="mt-5">
-          <div className="mb-2.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+        <div className="mt-6">
+          <div className="mb-3 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
             <StatusDot kind={results.length > 0 ? "ok" : "err"} size={6} />
             {results.length > 0 ? (
               <span>
-                <span className="tabular-nums text-text">{results.length}</span> retrievable{" "}
+                <span className="tabular-nums text-accent">{results.length}</span> retrievable{" "}
                 {results.length === 1 ? "document" : "documents"}
               </span>
             ) : (
-              <span>no permitted results</span>
+              <span className="text-err">no permitted results</span>
             )}
           </div>
 
           {results.length === 0 ? (
-            <div className="rounded-[var(--radius-md)] border border-border bg-bg px-4 py-4 text-sm text-muted">
+            <div className="rounded-[var(--radius-lg)] border border-border bg-bg px-4 py-4 text-sm text-muted">
               This identity cannot retrieve anything for that query. Every candidate was filtered out
               by the access check, which is the enforcement working as intended.
             </div>
@@ -695,9 +703,9 @@ function AccessCheck({ identity }: { identity: Identity }) {
               {results.map((r) => (
                 <li
                   key={r.chunk_id}
-                  className="flex items-center gap-3 rounded-[var(--radius-md)] border border-border bg-bg px-3.5 py-2.5 transition hover:border-border-hover"
+                  className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-border bg-bg px-3.5 py-2.5 transition hover:border-border-hover"
                 >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-ok" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="2.2">
                     <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                   <span className="min-w-0 flex-1 truncate font-mono text-xs text-text">{r.doc_id}</span>
@@ -726,12 +734,12 @@ function SectionTitle({
 }) {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-sm)] border border-border bg-bg text-cyan">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-sm)] border border-border bg-bg text-accent">
         {icon}
       </span>
-      <h3 className="text-[15px] font-bold tracking-[-0.02em] text-text">{title}</h3>
+      <h3 className="font-display text-[16px] font-semibold tracking-[-0.01em] text-text">{title}</h3>
       {note && (
-        <span className="ml-auto font-mono text-[10.5px] font-medium lowercase text-muted">
+        <span className="ml-auto font-mono text-[10px] font-medium uppercase tracking-wide text-faint">
           {note}
         </span>
       )}

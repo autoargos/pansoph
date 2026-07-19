@@ -206,11 +206,11 @@ export default function System() {
       <PageHeader
         breadcrumb={["pansoph", "system"]}
         title="System"
-        subtitle="Every role is a replaceable port. This is what is wired and answering right now."
+        subtitle="Local-first by default, and every part is a swappable port. This is what is wired and answering right now."
         action={
           <div className="flex items-center gap-2.5">
             {lastPoll && !loading && (
-              <span className="hidden items-center gap-1.5 text-xs text-muted sm:inline-flex">
+              <span className="hidden items-center gap-1.5 font-mono text-[11px] text-muted sm:inline-flex">
                 <StatusDot kind={refreshing ? "run" : "neutral"} size={6} pulse={refreshing} />
                 <span className="tabular-nums">synced {relativeTime(lastPoll)}</span>
               </span>
@@ -228,11 +228,11 @@ export default function System() {
       />
 
       {/* Top status ribbon: overall verdict + build meta. */}
-      <Card className="mb-6 overflow-hidden" glow>
-        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="mb-7 overflow-hidden shadow-[var(--shadow-float)]" glow>
+        <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <div
-              className="grid h-11 w-11 place-items-center rounded-[var(--radius-md)] border border-border bg-bg"
+              className="grid h-12 w-12 place-items-center rounded-[var(--radius-md)] border border-border bg-bg"
               aria-hidden
             >
               <StatusDot
@@ -242,7 +242,7 @@ export default function System() {
               />
             </div>
             <div>
-              <div className="text-[15px] font-bold tracking-[-0.02em] text-text">
+              <div className="font-display text-[17px] font-semibold tracking-[-0.01em] text-text">
                 {loading
                   ? "Reading system state…"
                   : error
@@ -251,11 +251,11 @@ export default function System() {
                       ? "All services operational"
                       : "Degraded"}
               </div>
-              <div className="mt-0.5 text-xs text-muted">
+              <div className="mt-1 font-mono text-[11px] text-muted">
                 {loading ? (
-                  "Contacting agora"
+                  "contacting agora"
                 ) : error ? (
-                  "Could not reach the health endpoint"
+                  "could not reach the health endpoint"
                 ) : (
                   <span className="tabular-nums">
                     {healthy} of {reported} service {reported === 1 ? "port" : "ports"} healthy
@@ -359,14 +359,14 @@ export default function System() {
 
       {/* Logs and runs footer. */}
       <div className="mt-9">
-        <Card className="flex flex-col items-start justify-between gap-4 p-5 sm:flex-row sm:items-center">
+        <Card className="flex flex-col items-start justify-between gap-4 p-6 shadow-[var(--shadow-float)] sm:flex-row sm:items-center">
           <div className="flex items-center gap-3.5">
-            <div className="grid h-10 w-10 place-items-center rounded-[var(--radius-md)] border border-border bg-bg text-muted">
+            <div className="grid h-11 w-11 place-items-center rounded-[var(--radius-md)] border border-border bg-bg text-muted">
               <IconLogs />
             </div>
             <div>
-              <div className="text-sm font-semibold text-text">Logs and ingestion runs</div>
-              <div className="mt-0.5 text-xs text-muted">
+              <div className="font-display text-[15px] font-semibold text-text">Logs and ingestion runs</div>
+              <div className="mt-1 text-xs text-muted">
                 Every connector sync and admin action is written to the immutable audit log.
               </div>
             </div>
@@ -400,9 +400,11 @@ export default function System() {
 // ------------------------------------------------------------
 function SectionLabel({ title, hint }: { title: string; hint?: ReactNode }) {
   return (
-    <div className="mb-3 flex items-baseline justify-between gap-3">
-      <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">{title}</h2>
-      {hint && <span className="font-mono text-[10.5px] text-muted opacity-80">{hint}</span>}
+    <div className="mb-4 flex items-baseline justify-between gap-3">
+      <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-faint">
+        {title}
+      </h2>
+      {hint && <span className="font-mono text-[10.5px] text-faint">{hint}</span>}
     </div>
   );
 }
@@ -416,17 +418,17 @@ function ServiceCard({ svc, check }: { svc: ServiceDef; check: Check | null }) {
   const state: "up" | "down" | "unknown" = check ? (check.ok ? "up" : "down") : "unknown";
   const dot: StatusKind = state === "up" ? "ok" : state === "down" ? "err" : "neutral";
   const label = state === "up" ? "healthy" : state === "down" ? "down" : "not reported";
-  const labelKind = state === "up" ? "text-ok" : state === "down" ? "text-err" : "text-muted";
+  const labelKind = state === "up" ? "text-accent" : state === "down" ? "text-err" : "text-faint";
 
   return (
     <Card
       glow
-      className="group flex flex-col gap-3 p-4"
+      className="group flex flex-col gap-3.5 p-4 shadow-[var(--shadow-float)]"
       aria-label={`${svc.label} ${label}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] border border-border bg-bg text-muted transition group-hover:text-text">
+          <span className="grid h-9 w-9 place-items-center rounded-[var(--radius-sm)] border border-border bg-bg text-muted transition group-hover:text-accent">
             {svc.icon}
           </span>
           <div>
@@ -434,22 +436,22 @@ function ServiceCard({ svc, check }: { svc: ServiceDef; check: Check | null }) {
             <div className="text-[11px] text-muted">{svc.role}</div>
           </div>
         </div>
-        <StatusDot kind={dot} size={8} pulse={state === "up"} />
+        <StatusDot kind={dot} size={9} pulse={state === "up"} />
       </div>
 
-      <div className="flex items-center justify-between border-t border-border pt-3">
-        <span className={`text-xs font-medium ${labelKind}`}>{label}</span>
+      <div className="flex items-center justify-between border-t border-border pt-3.5">
+        <span className={`font-mono text-[11px] uppercase tracking-wide ${labelKind}`}>{label}</span>
         <span className="text-xs tabular-nums text-muted">
           {state === "up" ? (
-            <span className="font-mono">{check?.latency_ms ?? "–"} ms</span>
+            <span className="font-mono text-accent">{check?.latency_ms ?? "–"} ms</span>
           ) : state === "down" ? (
             <Tooltip label={check?.error ?? "unreachable"}>
-              <span className="max-w-[8rem] cursor-help truncate text-err/90">
+              <span className="max-w-[8rem] cursor-help truncate font-mono text-err/90">
                 {check?.error ?? "unreachable"}
               </span>
             </Tooltip>
           ) : (
-            <span className="text-muted/70">no check</span>
+            <span className="font-mono text-faint">no check</span>
           )}
         </span>
       </div>
@@ -459,10 +461,10 @@ function ServiceCard({ svc, check }: { svc: ServiceDef; check: Check | null }) {
 
 function ServiceSkeleton({ svc }: { svc: ServiceDef }) {
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card className="flex flex-col gap-3.5 p-4 shadow-[var(--shadow-float)]">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] border border-border bg-bg text-muted/50">
+          <span className="grid h-9 w-9 place-items-center rounded-[var(--radius-sm)] border border-border bg-bg text-muted/50">
             {svc.icon}
           </span>
           <div>
@@ -470,9 +472,9 @@ function ServiceSkeleton({ svc }: { svc: ServiceDef }) {
             <div className="h-3 w-16 animate-pulse rounded bg-elevated" />
           </div>
         </div>
-        <StatusDot kind="neutral" size={8} />
+        <StatusDot kind="neutral" size={9} />
       </div>
-      <div className="flex items-center justify-between border-t border-border pt-3">
+      <div className="flex items-center justify-between border-t border-border pt-3.5">
         <span className="h-3 w-14 animate-pulse rounded bg-elevated" />
         <span className="h-3 w-10 animate-pulse rounded bg-elevated" />
       </div>
@@ -498,9 +500,9 @@ function ConfigCard({
   const isDefault = !live;
 
   return (
-    <Card glow className="flex flex-col gap-2.5 p-4">
+    <Card glow className="flex flex-col gap-3 p-4 shadow-[var(--shadow-float)]">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+        <span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-faint">
           {row.role}
         </span>
         {loading ? (
@@ -552,7 +554,7 @@ function PortsGrid({
     return (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {[0, 1, 2, 3].map((i) => (
-          <Card key={i} className="p-4">
+          <Card key={i} className="p-4 shadow-[var(--shadow-float)]">
             <div className="mb-3 h-3 w-20 animate-pulse rounded bg-elevated" />
             <div className="flex gap-1.5">
               <div className="h-5 w-16 animate-pulse rounded-full bg-elevated" />
@@ -581,18 +583,18 @@ function PortsGrid({
         const port = group.replace("pansoph.", "");
         const active = meta?.adapters[ACTIVE_KEY[port] ?? port];
         return (
-          <Card key={group} glow className="p-4">
-            <div className="mb-2.5 flex items-center justify-between">
-              <span className="font-mono text-xs font-semibold uppercase tracking-wide text-muted">
+          <Card key={group} glow className="p-4 shadow-[var(--shadow-float)]">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="font-mono text-xs font-semibold uppercase tracking-[0.12em] text-faint">
                 {port}
               </span>
-              <span className="text-[10.5px] tabular-nums text-muted/70">
+              <span className="font-mono text-[10.5px] tabular-nums text-faint">
                 {names.length} installed
               </span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {names.length === 0 && (
-                <span className="text-xs text-muted/70">none installed</span>
+                <span className="font-mono text-[10.5px] uppercase tracking-wide text-faint">none installed</span>
               )}
               {names.map((n) => {
                 const on = n === active;
