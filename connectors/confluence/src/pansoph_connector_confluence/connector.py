@@ -69,10 +69,11 @@ Incremental (list_changes, upsert phase)
 
 Deletions (list_changes, tombstone phase)
   Trashed pages are the deletion signal. CQL cannot search trash, so the connector
-  polls GET /wiki/rest/api/content?status=trashed&type=page&spaceKey=KEY&limit=100
-  (start/limit pagination) for each in-scope space and yields a DocRef(deleted=True)
-  per trashed page. Tombstones carry the current upsert checkpoint so the persisted
-  cursor stays a valid lastmodified bound.
+  polls GET /wiki/api/v2/pages?status=trashed (cursor pagination), scoped to the
+  configured space by numeric space-id when one is set, and yields a
+  DocRef(deleted=True) per trashed page. Tombstones carry the current upsert checkpoint
+  so the persisted cursor stays a valid lastmodified bound. (The v1 content list is not
+  used: it 401s under a granular token, like all v1 content endpoints.)
 
 ACL model (the security-critical part)
   Confluence VIEW is a conjunction of independent gates. To view a page a user must:
@@ -90,8 +91,10 @@ ACL model (the security-critical part)
   allow_groups OR public, minus deny), so it structurally cannot express an AND. The
   connector therefore MATERIALIZES the conjunction to concrete principals at import
   time, and always maps to the NARROWER side, never the broader one:
-    - It expands ancestors on the page and fetches each ancestor's read restriction
-      directly (GET content/{id}?expand=restrictions.read...).
+    - It walks the page's parentId chain (v2 pages carry only the immediate parentId)
+      and reads each ancestor's read restriction directly from GET
+      /wiki/rest/api/content/{id}/restriction/byOperation/read (the one v1 content
+      endpoint that accepts a granular token, covered by read:content.restriction).
     - It reads the space View audience (the real principals holding the space "read"
       permission) from GET /wiki/api/v2/spaces/{id}/permissions.
     - The emitted audience is the per-axis intersection (allow_users and allow_groups
@@ -110,12 +113,12 @@ ACL model (the security-critical part)
       (RBAC tenants) to a namespaced "space-role:{id}" group the authz layer must
       materialize; an unmaterialized role simply grants no one, so it under-shares
       rather than leaks.
-  Fail-closed on an unconfirmable restriction: if the read-restriction expansion is
-  ABSENT from a page or ancestor payload (a missing read:content.restriction scope, or
-  a silently-empty 200 that raise_for_status cannot catch), the connector cannot
-  confirm the content is unrestricted, so it emits the empty (grants-no-one) audience
-  rather than falling back to the space-wide audience. Under-sharing is a UX bug;
-  over-sharing is a security bug.
+  Fail-closed on an unconfirmable restriction: the byOperation/read endpoint answers
+  200 with empty result sets for an unrestricted page, so "unrestricted" is a positive
+  signal, not an absence. If any restriction, ancestor, or space-permission read cannot
+  complete (a non-2xx), the connector cannot confirm the audience, so it emits the empty
+  (grants-no-one) audience rather than falling back to the space-wide one. Under-sharing
+  is a UX bug; over-sharing is a security bug.
   Restriction groups are keyed by groupId (the stable identifier; group name is
   mutable and privacy-restricted), falling back to name only if the payload omits the
   id, so a layer is never mistakenly treated as unrestricted. There is no deny concept
@@ -129,16 +132,20 @@ Discovery (list_resources)
   escalation. Read scope: read:space:confluence.
 
 REST versions
-  Discovery and the space View audience use the v2 endpoints (GET
-  /wiki/api/v2/spaces and /wiki/api/v2/spaces/{id}/permissions). Content list/fetch,
-  the content restrictions expansions, and the trashed-content poll use the v1
-  content endpoints (/wiki/rest/api/content*). This is deliberate: Atlassian is
-  deprecating v1 endpoints that have v2 equivalents
-  (https://community.developer.atlassian.com/t/rfc-19-deprecation-of-confluence-cloud-rest-api-v1-endpoints/71752),
-  but the v1 content endpoints here are kept because v2 does not yet offer parity for
-  the read-restriction expansions the ACL cascade needs, nor a CQL/trash equivalent,
-  and Atlassian's feature-parity guarantee keeps them working. Migrate to
-  /wiki/api/v2/pages once v2 exposes the restriction data; re-verify against the docs.
+  Content is read through v2 (GET /wiki/api/v2/pages/{id} for body/space/parent, the
+  parentId walk for ancestry, /wiki/api/v2/pages?status=trashed for deletions), as are
+  discovery and the space View audience (/wiki/api/v2/spaces and
+  /wiki/api/v2/spaces/{id}/permissions). This is not optional: an OAuth token that
+  carries any granular scope makes Atlassian evaluate the v1 content endpoints in
+  granular mode, where they answer 401 "scope does not match" regardless of scopes held
+  (verified 2026-07-19 against a live token). Two v1 endpoints are kept because they
+  still accept the granular token and have no v2 parity the connector needs: the CQL
+  change feed (GET /wiki/rest/api/content/search) and the read-restriction read (GET
+  /wiki/rest/api/content/{id}/restriction/byOperation/read). Atlassian is deprecating v1
+  endpoints that have v2 equivalents
+  (https://community.developer.atlassian.com/t/rfc-19-deprecation-of-confluence-cloud-rest-api-v1-endpoints/71752);
+  migrate these two once v2 exposes a CQL/lastmodified search and a content-restriction
+  read, and re-verify against the docs.
 
 Note: connector.py is the authoritative implementation for this source. The sibling
 manifest.yaml is not used; see its banner.
@@ -184,12 +191,12 @@ from pansoph_types import (
 #   search:confluence                     -> GET /wiki/rest/api/content/search (CQL change
 #                                            feed). Distinct from the content-read scopes;
 #                                            the search endpoint 401s without it.
-#   read:page:confluence                  -> GET /wiki/rest/api/content/{id} and
-#                                            GET /wiki/api/v2/pages/{id} page-content reads
-#                                            (granular). The classic scope below does not
-#                                            satisfy these once granular scopes are present.
-#   read:confluence-content.all           -> the classic equivalent of the page-content read,
-#                                            for a classic-only app; also the trashed sweep.
+#   read:page:confluence                  -> GET /wiki/api/v2/pages/{id} page-content and
+#                                            trashed reads (granular). The connector reads
+#                                            content only through v2, because the v1
+#                                            content endpoint 401s under a granular token.
+#   read:confluence-content.all           -> the classic equivalent, kept only so a
+#                                            classic-only Atlassian app can still read content.
 #   read:confluence-space.summary         -> space info.
 #   read:content.restriction:confluence   -> a page's read restrictions (the ACL).
 #   read:space:confluence                 -> GET /wiki/api/v2/spaces (space discovery).
@@ -232,32 +239,30 @@ def _cql_minute(when: datetime) -> str:
     return when.strftime("%Y-%m-%d %H:%M")
 
 
-def _restrictions_present(content: dict[str, Any]) -> bool:
-    """True if the read-restriction expansion is present in `content`.
+def _read_restriction_by_operation(data: dict[str, Any]) -> tuple[list[str], list[str]] | None:
+    """Parse the GET .../restriction/byOperation/read response into (accountIds, groupIds).
 
-    Distinguishes a genuinely unrestricted page (the expansion is present and names
-    no principals) from a payload where the expansion is ABSENT (a missing
-    read:content.restriction scope, or a silently empty 200). Only the former may
-    fall back to the space-wide audience; the latter must fail closed, because an
-    absent expansion cannot confirm the content is unrestricted. When the expansion
-    ran, Confluence always returns restrictions.read (with empty results if none),
-    so the "read" key is the reliable presence signal.
+    Returns None when the content carries no direct read restriction (the endpoint
+    answers 200 with empty user and group result sets), which means the layer does not
+    narrow the audience. Unlike the retired expand-based reader, presence is not in
+    question here: a 200 is proof the restriction was read, and the caller fails closed
+    only on a non-2xx (which it cannot interpret as unrestricted). Groups are keyed by
+    the stable groupId, falling back to name only when id is absent so a layer is never
+    mistaken for unrestricted.
+
+    The byOperation/read body nests the principals one level shallower than the old
+    content expansion did: restrictions.user/group here, versus
+    restrictions.read.restrictions.user/group on the content object.
     """
-    return "read" in content.get("restrictions", {})
-
-
-def _read_restriction(content: dict[str, Any]) -> tuple[list[str], list[str]] | None:
-    """Return (accountIds, groupIds) directly restricted to view `content`, or None.
-
-    None means no direct read restriction on this content. Groups are keyed by the
-    stable groupId, falling back to name only if id is absent so the layer is never
-    mistakenly counted as unrestricted.
-    """
-    read = content.get("restrictions", {}).get("read", {}).get("restrictions", {})
-    users = [u["accountId"] for u in read.get("user", {}).get("results", []) if u.get("accountId")]
+    restrictions = data.get("restrictions", {})
+    users = [
+        u["accountId"]
+        for u in restrictions.get("user", {}).get("results", [])
+        if u.get("accountId")
+    ]
     groups = [
         g["id"] if g.get("id") else g["name"]
-        for g in read.get("group", {}).get("results", [])
+        for g in restrictions.get("group", {}).get("results", [])
         if g.get("id") or g.get("name")
     ]
     if not users and not groups:
@@ -494,60 +499,57 @@ class ConfluenceConnector:
                 yield ref, checkpoint
 
     async def _trashed(self, client: httpx.AsyncClient) -> AsyncIterator[DocRef]:
-        space_keys = [self._space] if self._space else await self._all_space_keys(client)
-        for key in space_keys:
-            start = 0
-            while True:
-                params: dict[str, Any] = {
-                    "type": "page",
-                    "status": "trashed",
-                    "spaceKey": key,
-                    "limit": 100,
-                    "start": start,
-                }
-                resp = await client.get("/wiki/rest/api/content", params=params)
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-                for page in results:
-                    if page.get("id"):
-                        yield DocRef(
-                            source_doc_id=page["id"],
-                            instance_id=self.instance_id,
-                            deleted=True,
-                        )
-                if len(results) < 100:
-                    break
-                start += 100
-
-    async def _all_space_keys(self, client: httpx.AsyncClient) -> list[str]:
-        keys: list[str] = []
+        # v2 pages with status=trashed is the removal signal. The v1 content list rejects
+        # a granular token (401 "scope does not match"), so this path is v2 only. When a
+        # space is configured the sweep is scoped to it by numeric space-id (the v2 filter);
+        # otherwise it lists every trashed page the credential can reach.
+        params_base: dict[str, Any] = {"status": "trashed", "limit": 100}
+        if self._space:
+            space_id = await self._space_id_for_key(client, self._space)
+            if space_id is None:
+                return
+            params_base["space-id"] = space_id
         cursor: str | None = None
         while True:
-            params: dict[str, Any] = {"limit": 100}
+            params = dict(params_base)
             if cursor:
                 params["cursor"] = cursor
-            resp = await client.get("/wiki/api/v2/spaces", params=params)
+            resp = await client.get("/wiki/api/v2/pages", params=params)
             resp.raise_for_status()
             data = resp.json()
-            keys.extend(s["key"] for s in data.get("results", []) if s.get("key"))
+            for page in data.get("results", []):
+                if page.get("id"):
+                    yield DocRef(
+                        source_doc_id=str(page["id"]),
+                        instance_id=self.instance_id,
+                        deleted=True,
+                    )
             cursor = self._next_cursor(data)
             if not cursor:
                 break
-        return keys
+
+    async def _space_id_for_key(self, client: httpx.AsyncClient, key: str) -> str | None:
+        """Resolve a space key (e.g. "ENG" or a "~personal" key) to its numeric v2 id.
+
+        The v2 endpoints filter by numeric space-id, but the connector's space_key config
+        and the picker both speak keys, so this bridges the two. Returns None when the key
+        matches no reachable space, so the caller can skip rather than sweep every space.
+        """
+        resp = await client.get("/wiki/api/v2/spaces", params={"keys": key, "limit": 1})
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        first = results[0] if results else None
+        return str(first["id"]) if first and first.get("id") is not None else None
 
     # --- documents + ACL ---
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
+        # Read the page body through the v2 API. The v1 content endpoint rejects a
+        # granular OAuth token (401 "scope does not match" once any granular scope is
+        # present), while v2 /pages/{id} accepts it, so all content reads are v2.
         await self._ensure_base()
         async with self._client() as client:
             resp = await client.get(
-                f"/wiki/rest/api/content/{ref.source_doc_id}",
-                params={
-                    "expand": (
-                        "body.storage,ancestors,"
-                        "restrictions.read.restrictions.user,"
-                        "restrictions.read.restrictions.group,space"
-                    )
-                },
+                f"/wiki/api/v2/pages/{ref.source_doc_id}", params={"body-format": "storage"}
             )
             resp.raise_for_status()
             page = resp.json()
@@ -558,117 +560,155 @@ class ConfluenceConnector:
                 mime="text/html",
                 text=body,
                 title=page.get("title"),
-                source_url=(
-                    f"{self._site_web_url or self._base}"
-                    f"/wiki/pages/viewpage.action?pageId={ref.source_doc_id}"
-                ),
+                source_url=self._page_url(page, ref.source_doc_id),
             )
-            return raw, await self._acl_from_page(client, page)
+            return raw, await self._acl_from_v2_page(client, page)
 
     async def list_acls(self, ref: DocRef) -> AccessControl:
         await self._ensure_base()
         async with self._client() as client:
-            resp = await client.get(
-                f"/wiki/rest/api/content/{ref.source_doc_id}",
-                params={
-                    "expand": (
-                        "ancestors,restrictions.read.restrictions.user,"
-                        "restrictions.read.restrictions.group,space"
-                    )
-                },
-            )
+            # A metadata-only v2 read: enough to learn the space and parent for the ACL
+            # cascade, without pulling the body.
+            resp = await client.get(f"/wiki/api/v2/pages/{ref.source_doc_id}")
             resp.raise_for_status()
-            return await self._acl_from_page(client, resp.json())
+            return await self._acl_from_v2_page(client, resp.json())
+
+    def _page_url(self, page: dict[str, Any], content_id: str) -> str:
+        """The human-openable page URL, from the v2 page's _links (base + webui).
+
+        Falls back to the resolved site web URL (or the API base) with the legacy
+        viewpage.action link when _links is absent, so a document always has a URL.
+        """
+        links = page.get("_links", {}) or {}
+        base = str(links.get("base") or self._site_web_url or self._base).rstrip("/")
+        webui = links.get("webui")
+        if base and webui:
+            return f"{base}{webui}"
+        fallback = (self._site_web_url or self._base).rstrip("/")
+        return f"{fallback}/wiki/pages/viewpage.action?pageId={content_id}"
 
     def _denied(self) -> AccessControl:
         """A fail-closed ACL that grants no one (not public, no allow principals).
 
-        Emitted when a page's or an ancestor's read-restriction expansion is absent,
-        so the content cannot be confirmed unrestricted. Under-sharing is a UX bug;
+        Emitted when a page's or an ancestor's read restriction cannot be read, so the
+        content cannot be confirmed unrestricted. Under-sharing is a UX bug;
         over-sharing is a security bug, so an unconfirmable page grants no one.
         """
         return AccessControl(allow_users=[], allow_groups=[], principal_ns=self.instance_id)
 
-    async def _acl_from_page(
+    async def _acl_from_v2_page(
         self, client: httpx.AsyncClient, page: dict[str, Any]
     ) -> AccessControl:
-        # Confluence view is a conjunction: satisfy the page's own read restriction
-        # AND every ancestor's AND hold space View. A restriction can only narrow
-        # within the space, never grant beyond it, so the effective audience of a
-        # restricted page is the per-axis intersection of the restriction layers AND
-        # the space View audience, materialized to concrete principals (AccessControl
-        # is a pure union and cannot express the AND directly).
+        """Build the ACL for a v2 page, failing closed on any unreadable input.
 
-        # The page's own read-restriction expansion must be present. An absent
-        # expansion cannot be confirmed unrestricted, so fail closed rather than fall
-        # back to the space-wide audience.
-        if not _restrictions_present(page):
+        A restriction, ancestor, or space-permission read that cannot complete (a
+        non-2xx) leaves the audience unconfirmable, and over-sharing is worse than
+        under-sharing, so any such failure collapses the whole page to _denied rather
+        than risk a leak. The HTTPStatusError catch is the single fail-closed seam;
+        _build_acl below is the happy path.
+        """
+        try:
+            return await self._build_acl(client, page)
+        except httpx.HTTPStatusError:
             return self._denied()
 
-        # Reconstruct the restriction cascade: the page's own read restriction plus
-        # every ancestor's. The restrictions API never returns inherited restrictions,
-        # so each ancestor is fetched directly.
+    async def _build_acl(self, client: httpx.AsyncClient, page: dict[str, Any]) -> AccessControl:
+        # Confluence view is a conjunction: satisfy the page's own read restriction AND
+        # every ancestor's AND hold space View. A restriction only narrows within the
+        # space, never grants beyond it, so a restricted page's effective audience is the
+        # per-axis intersection of the restriction layers AND the space View audience,
+        # materialized to concrete principals (AccessControl is a pure union and cannot
+        # express the AND directly).
+        content_id = str(page.get("id"))
+        space_id = page.get("spaceId")
+
+        # Reconstruct the restriction cascade: the page's own read restriction plus every
+        # ancestor's. The byOperation/read endpoint never returns inherited restrictions,
+        # so each ancestor is read directly. v2 gives ancestry as a parentId chain (the v2
+        # ancestors endpoint needs a scope the granular token may lack), so it is walked.
         layers: list[tuple[list[str], list[str]]] = []
-        own = _read_restriction(page)
+        own = await self._fetch_read_restriction(client, content_id)
         if own is not None:
             layers.append(own)
-        for ancestor in page.get("ancestors", []):
-            ancestor_id = ancestor.get("id")
-            if not ancestor_id:
-                continue
-            ancestor_content = await self._fetch_content_restrictions(client, str(ancestor_id))
-            if not _restrictions_present(ancestor_content):
-                # Cannot confirm this ancestor is unrestricted: fail closed.
-                return self._denied()
-            inherited = _read_restriction(ancestor_content)
+        for ancestor_id in await self._ancestor_ids(client, page.get("parentId")):
+            inherited = await self._fetch_read_restriction(client, ancestor_id)
             if inherited is not None:
                 layers.append(inherited)
 
-        # The space View audience is a MANDATORY layer (a viewer must hold space View
-        # in addition to satisfying every restriction), so it is read for restricted
-        # and unrestricted pages alike.
-        space = await self._space_acl(client, page.get("space", {}) or {})
+        # The space View audience is a MANDATORY layer (a viewer must hold space View in
+        # addition to satisfying every restriction), read for restricted and unrestricted
+        # pages alike.
+        space = await self._space_acl(client, space_id)
 
         if not layers:
             # Confirmed unrestricted on the whole chain: the audience equals the space
             # View audience alone.
             return space
 
-        # Restricted: intersect the restriction-layer audience (per axis) with the
-        # space View audience. A restriction principal that does not also hold space
-        # View is dropped, so a page restricted to a broad group inside a narrow space
-        # never over-shares to that whole group. This is a subset of the true
-        # audience, so it never widens a grant.
+        # Restricted: intersect the restriction-layer audience (per axis) with the space
+        # View audience. A restriction principal that does not also hold space View is
+        # dropped, so a page restricted to a broad group inside a narrow space never
+        # over-shares to that whole group. This is a subset of the true audience, so it
+        # never widens a grant.
         restriction_users = _intersect([set(u) for u, _ in layers])
         restriction_groups = _intersect([set(g) for _, g in layers])
         users = sorted(restriction_users & set(space.allow_users))
         groups = sorted(restriction_groups & set(space.allow_groups))
         return AccessControl(allow_users=users, allow_groups=groups, principal_ns=self.instance_id)
 
-    async def _fetch_content_restrictions(
-        self, client: httpx.AsyncClient, content_id: str
-    ) -> dict[str, Any]:
-        """Fetch a content item's read-restriction expansion, returning the raw JSON.
+    async def _ancestor_ids(
+        self, client: httpx.AsyncClient, first_parent_id: Any
+    ) -> list[str]:
+        """Walk the parentId chain upward from a page, returning ancestor ids.
 
-        The caller checks _restrictions_present on the result to distinguish a
-        confirmed-unrestricted ancestor from one whose expansion is absent (which must
-        fail closed), then reads the named principals with _read_restriction.
+        Each v2 page carries only its immediate parentId, so the full chain is walked one
+        page at a time (pages are typically shallow). A seen-set guards against a cycle in
+        malformed data. A page read that fails propagates, which the ACL builder turns into
+        a fail-closed audience.
+        """
+        ids: list[str] = []
+        seen: set[str] = set()
+        parent = first_parent_id
+        while parent is not None:
+            pid = str(parent)
+            if pid in seen:
+                break
+            seen.add(pid)
+            ids.append(pid)
+            resp = await client.get(f"/wiki/api/v2/pages/{pid}")
+            resp.raise_for_status()
+            parent = resp.json().get("parentId")
+        return ids
+
+    async def _fetch_read_restriction(
+        self, client: httpx.AsyncClient, content_id: str
+    ) -> tuple[list[str], list[str]] | None:
+        """Read a content item's direct read restriction via the v1 byOperation endpoint.
+
+        This endpoint accepts the granular token (unlike the v1 content-read endpoint) and
+        is covered by read:content.restriction:confluence. Returns (accountIds, groupIds)
+        when restricted, or None when unrestricted (a 200 with empty result sets). A
+        non-2xx propagates and the ACL builder fails closed, so an unreadable restriction
+        is never mistaken for unrestricted.
         """
         resp = await client.get(
-            f"/wiki/rest/api/content/{content_id}",
-            params={
-                "expand": (
-                    "restrictions.read.restrictions.user,restrictions.read.restrictions.group"
-                )
-            },
+            f"/wiki/rest/api/content/{content_id}/restriction/byOperation/read"
         )
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
-        return result
+        return _read_restriction_by_operation(result)
 
-    async def _space_acl(self, client: httpx.AsyncClient, space: dict[str, Any]) -> AccessControl:
-        key = space.get("key") or self._space
-        if key and key in self._space_acl_cache:
+    async def _space_acl(self, client: httpx.AsyncClient, space_id: Any) -> AccessControl:
+        """The space View audience for a numeric v2 space id, cached per id.
+
+        A missing space id cannot yield a View audience, so it fails closed (grants no
+        one). The View-space permission is exactly operation key=="read" AND
+        targetType=="space"; a broad grant must rest on that positive signal.
+        """
+        if space_id is None:
+            return self._denied()
+        key = str(space_id)
+        if key in self._space_acl_cache:
             cached_users, cached_groups = self._space_acl_cache[key]
             return AccessControl(
                 allow_users=list(cached_users),
@@ -676,50 +716,41 @@ class ConfluenceConnector:
                 principal_ns=self.instance_id,
             )
 
-        space_id = space.get("id")
         users: list[str] = []
         groups: list[str] = []
-        if space_id is not None:
-            cursor: str | None = None
-            while True:
-                params: dict[str, Any] = {"limit": 100}
-                if cursor:
-                    params["cursor"] = cursor
-                resp = await client.get(
-                    f"/wiki/api/v2/spaces/{space_id}/permissions", params=params
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                for perm in data.get("results", []):
-                    operation = perm.get("operation", {})
-                    # The View-space permission is exactly key=="read" AND
-                    # targetType=="space". Require the explicit space target: a broad
-                    # grant must rest on a positive signal, so a missing or non-space
-                    # targetType is skipped (fail closed), never accepted defensively.
-                    if operation.get("key") != "read":
-                        continue
-                    if operation.get("targetType") != "space":
-                        continue
-                    principal = perm.get("principal", {})
-                    principal_id = principal.get("id")
-                    principal_type = principal.get("type")
-                    if not principal_id:
-                        continue
-                    if principal_type == "user":
-                        users.append(principal_id)
-                    elif principal_type == "group":
-                        groups.append(principal_id)
-                    elif principal_type == "role":
-                        # RBAC role: the authz layer materializes its membership.
-                        groups.append(f"space-role:{principal_id}")
-                cursor = self._next_cursor(data)
-                if not cursor:
-                    break
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {"limit": 100}
+            if cursor:
+                params["cursor"] = cursor
+            resp = await client.get(f"/wiki/api/v2/spaces/{key}/permissions", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            for perm in data.get("results", []):
+                operation = perm.get("operation", {})
+                if operation.get("key") != "read":
+                    continue
+                if operation.get("targetType") != "space":
+                    continue
+                principal = perm.get("principal", {})
+                principal_id = principal.get("id")
+                principal_type = principal.get("type")
+                if not principal_id:
+                    continue
+                if principal_type == "user":
+                    users.append(principal_id)
+                elif principal_type == "group":
+                    groups.append(principal_id)
+                elif principal_type == "role":
+                    # RBAC role: the authz layer materializes its membership.
+                    groups.append(f"space-role:{principal_id}")
+            cursor = self._next_cursor(data)
+            if not cursor:
+                break
 
         users = sorted(set(users))
         groups = sorted(set(groups))
-        if key:
-            self._space_acl_cache[key] = (users, groups)
+        self._space_acl_cache[key] = (users, groups)
         return AccessControl(
             allow_users=list(users), allow_groups=list(groups), principal_ns=self.instance_id
         )

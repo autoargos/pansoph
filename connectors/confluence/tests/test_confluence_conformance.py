@@ -1,7 +1,8 @@
 """Hermetic conformance for the confluence connector, driven by respx mocks.
 
-No live API token: the Confluence Cloud content search, content-with-restrictions,
-trashed-content, and space-permissions calls are mocked with representative payloads.
+No live API token: the Confluence Cloud content search (v1 CQL), the v2 page reads, the
+byOperation read-restriction endpoint, the v2 trashed-page list, and the v2
+space-permissions calls are mocked with representative payloads.
 The suite pins:
   - assert_conforms end to end (a real non-empty lastmodified cursor, no leak on
     replay, discovery, fetch, list_acls, resource discovery),
@@ -59,15 +60,79 @@ def _one_page_search(respx_mock: respx.MockRouter, when: str = "2026-07-05T12:34
     )
 
 
+def _mock_v2_page(
+    respx_mock: respx.MockRouter,
+    pid: str,
+    *,
+    space_id: str = "10",
+    parent_id: str | None = None,
+    title: str = "Page",
+    body: str = "hello",
+) -> None:
+    """Mock GET /wiki/api/v2/pages/{pid}, the v2 content read the connector now uses.
+
+    Carries spaceId and parentId (v2 exposes only the immediate parent, so the ACL
+    cascade walks the parentId chain), plus a storage body and a _links.webui for the
+    document URL.
+    """
+    respx_mock.get(path=f"/wiki/api/v2/pages/{pid}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": pid,
+                "status": "current",
+                "title": title,
+                "spaceId": space_id,
+                "parentId": parent_id,
+                "body": {"storage": {"representation": "storage", "value": body}},
+                "_links": {"base": "https://acme.atlassian.net/wiki", "webui": f"/pages/{pid}"},
+            },
+        )
+    )
+
+
+def _mock_restriction(
+    respx_mock: respx.MockRouter,
+    pid: str,
+    *,
+    users: tuple[str, ...] = (),
+    groups: tuple[str, ...] = (),
+) -> None:
+    """Mock GET /wiki/rest/api/content/{pid}/restriction/byOperation/read.
+
+    This is the one v1 content endpoint that accepts a granular token; a 200 with empty
+    result sets means the content is unrestricted. Groups carry a stable groupId.
+    """
+    respx_mock.get(path=f"/wiki/rest/api/content/{pid}/restriction/byOperation/read").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "operation": "read",
+                "restrictions": {
+                    "user": {"results": [{"accountId": u} for u in users]},
+                    "group": {"results": [{"id": g, "name": g} for g in groups]},
+                },
+            },
+        )
+    )
+
+
+def _mock_restriction_error(respx_mock: respx.MockRouter, pid: str, status: int = 403) -> None:
+    """Mock the restriction read failing, so the ACL builder must fail closed."""
+    respx_mock.get(path=f"/wiki/rest/api/content/{pid}/restriction/byOperation/read").mock(
+        return_value=httpx.Response(status, json={"code": status, "message": "no"})
+    )
+
+
 def _no_trash(respx_mock: respx.MockRouter) -> None:
-    # The non-space-scoped factory enumerates spaces before polling each for trash,
-    # so both endpoints must answer. One space, no trashed pages.
+    # The non-space factory lists trashed pages via v2 /pages?status=trashed (no per-space
+    # enumeration). Discovery still lists spaces, so both v2 endpoints answer here.
     respx_mock.get(path="/wiki/api/v2/spaces").mock(
         return_value=httpx.Response(
             200, json={"results": [{"id": "10", "key": "ENG", "name": "Engineering"}]}
         )
     )
-    respx_mock.get(path="/wiki/rest/api/content").mock(
+    respx_mock.get(path="/wiki/api/v2/pages").mock(
         return_value=httpx.Response(200, json={"results": []})
     )
 
@@ -94,26 +159,8 @@ def _space_view(
 
 def _restricted_page(respx_mock: respx.MockRouter) -> None:
     """p1 has a direct read restriction (a user and a group keyed by groupId)."""
-    respx_mock.get(path="/wiki/rest/api/content/p1").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "id": "p1",
-                "title": "Page one",
-                "body": {"storage": {"value": "hello"}},
-                "ancestors": [],
-                "restrictions": {
-                    "read": {
-                        "restrictions": {
-                            "user": {"results": [{"accountId": "alice"}]},
-                            "group": {"results": [{"id": "eng-gid", "name": "eng"}]},
-                        }
-                    }
-                },
-                "space": {"id": "10", "key": "ENG"},
-            },
-        )
-    )
+    _mock_v2_page(respx_mock, "p1", title="Page one")
+    _mock_restriction(respx_mock, "p1", users=("alice",), groups=("eng-gid",))
 
 
 @pytest.mark.conformance
@@ -168,11 +215,14 @@ async def test_confluence_deletions_surface_trashed_as_tombstone(
     respx_mock: respx.MockRouter,
 ) -> None:
     # No upserts; one trashed page in the configured space. The space-scoped factory
-    # polls status=trashed directly without enumerating spaces.
+    # resolves its space key to a numeric id, then lists v2 trashed pages for that space.
     respx_mock.get(path="/wiki/rest/api/content/search").mock(
         return_value=httpx.Response(200, json={"results": []})
     )
-    respx_mock.get(path="/wiki/rest/api/content").mock(
+    respx_mock.get(path="/wiki/api/v2/spaces").mock(
+        return_value=httpx.Response(200, json={"results": [{"id": "10", "key": "ENG"}]})
+    )
+    respx_mock.get(path="/wiki/api/v2/pages").mock(
         return_value=httpx.Response(200, json={"results": [{"id": "gone"}]})
     )
     conn = _space_scoped_factory()
@@ -194,35 +244,12 @@ async def test_confluence_inherited_restriction_is_not_widened(
 ) -> None:
     """A child with no direct restriction but a restricted ancestor must NOT become
     the space-wide audience. This is the reported over-broad-grant bug."""
-    respx_mock.get(path="/wiki/rest/api/content/child").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "id": "child",
-                "ancestors": [{"id": "root"}],
-                "restrictions": {
-                    "read": {"restrictions": {"user": {"results": []}, "group": {"results": []}}}
-                },
-                "space": {"id": "10", "key": "ENG"},
-            },
-        )
-    )
-    respx_mock.get(path="/wiki/rest/api/content/root").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "id": "root",
-                "restrictions": {
-                    "read": {
-                        "restrictions": {
-                            "user": {"results": []},
-                            "group": {"results": [{"id": "leadership-gid", "name": "leadership"}]},
-                        }
-                    }
-                },
-            },
-        )
-    )
+    # child -> root -> (top). The ancestor walk reads each v2 page for its parentId, and
+    # each content's read restriction from the byOperation endpoint.
+    _mock_v2_page(respx_mock, "child", parent_id="root")
+    _mock_restriction(respx_mock, "child")  # child itself is unrestricted
+    _mock_v2_page(respx_mock, "root", parent_id=None)
+    _mock_restriction(respx_mock, "root", groups=("leadership-gid",))
     # Leadership holds space View, so the mandatory space-View intersection preserves
     # the inherited restriction rather than widening it to the space audience.
     _space_view(respx_mock, groups=("leadership-gid",), users=())
@@ -254,24 +281,8 @@ async def test_confluence_restriction_group_without_space_view_is_not_leaked(
     group is dropped. The leaked principal is now DENIED (the page under-shares, which
     is the safe side). If this test ever fails, the over-share leak has returned.
     """
-    respx_mock.get(path="/wiki/rest/api/content/broad").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "id": "broad",
-                "ancestors": [],
-                "restrictions": {
-                    "read": {
-                        "restrictions": {
-                            "user": {"results": []},
-                            "group": {"results": [{"id": "all-employees", "name": "all"}]},
-                        }
-                    }
-                },
-                "space": {"id": "10", "key": "ENG"},
-            },
-        )
-    )
+    _mock_v2_page(respx_mock, "broad", parent_id=None)
+    _mock_restriction(respx_mock, "broad", groups=("all-employees",))
     # The space is viewable only by "engineering", which is NOT the restriction group.
     _space_view(respx_mock, groups=("engineering",), users=())
     conn = _factory()
@@ -287,28 +298,19 @@ async def test_confluence_restriction_group_without_space_view_is_not_leaked(
 @pytest.mark.conformance
 @pytest.mark.permission
 @respx.mock(assert_all_called=False)
-async def test_confluence_absent_restriction_expansion_fails_closed(
+async def test_confluence_unreadable_restriction_fails_closed(
     respx_mock: respx.MockRouter,
 ) -> None:
-    """A page whose read-restriction expansion is ABSENT (a missing scope, or a
-    silently-empty 200) must fail closed, not fall back to the space-wide audience.
+    """A page whose read restriction cannot be read (a non-2xx from the restriction
+    endpoint) must fail closed, not fall back to the space-wide audience.
 
-    Without the expansion the connector cannot confirm the page is unrestricted, so
-    it emits the grants-no-one ACL. A space View endpoint is deliberately NOT mocked:
-    if the connector fell through to the space audience it would call the unmocked
-    endpoint and this test would fail, pinning the fail-closed behavior.
+    A 200 with empty result sets means unrestricted; a non-2xx means the audience is
+    unconfirmable, so the connector emits the grants-no-one ACL. The space View endpoint
+    is deliberately NOT mocked: the own-restriction read fails first, so the builder must
+    never reach it. If it did, the unmocked call would surface the regression.
     """
-    respx_mock.get(path="/wiki/rest/api/content/noscope").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "id": "noscope",
-                "ancestors": [],
-                # No "restrictions" key: the expansion did not run.
-                "space": {"id": "10", "key": "ENG"},
-            },
-        )
-    )
+    _mock_v2_page(respx_mock, "noscope", parent_id=None)
+    _mock_restriction_error(respx_mock, "noscope", status=403)
     conn = _factory()
     acl = await conn.list_acls(DocRef(source_doc_id="noscope", instance_id="conf"))
 
@@ -325,19 +327,8 @@ async def test_confluence_unrestricted_page_maps_real_space_view_audience(
 ) -> None:
     """An unrestricted page (and unrestricted ancestors) falls back to the real
     space View principals: users by accountId, groups by groupId, roles namespaced."""
-    respx_mock.get(path="/wiki/rest/api/content/open").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "id": "open",
-                "ancestors": [],
-                "restrictions": {
-                    "read": {"restrictions": {"user": {"results": []}, "group": {"results": []}}}
-                },
-                "space": {"id": "10", "key": "ENG"},
-            },
-        )
-    )
+    _mock_v2_page(respx_mock, "open", parent_id=None)
+    _mock_restriction(respx_mock, "open")  # unrestricted: empty result sets
     respx_mock.get(path="/wiki/api/v2/spaces/10/permissions").mock(
         return_value=httpx.Response(
             200,

@@ -63,11 +63,14 @@ def test_authorize_url_default_scopes_are_read_only_and_include_offline() -> Non
     assert scopes == list(DEFAULT_SCOPES)
     # offline_access is what makes Atlassian return a refresh token.
     assert "offline_access" in scopes
-    # Every non-offline scope is a read scope: no write / manage / delete verbs.
+    # Every non-offline scope is read-only: a read: scope or the read-only search: verb
+    # (Confluence's CQL change feed), never a write / manage / delete verb.
     for scope in scopes:
         if scope == "offline_access":
             continue
-        assert scope.startswith("read:"), f"non-read scope leaked into defaults: {scope}"
+        assert scope.startswith(("read:", "search:")), (
+            f"non-read scope leaked into defaults: {scope}"
+        )
 
 
 def test_authorize_url_honors_connector_scope_override() -> None:
