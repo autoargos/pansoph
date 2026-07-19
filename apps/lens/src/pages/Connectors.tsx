@@ -1241,7 +1241,7 @@ function ConnectorForm({
         {/* Scope */}
         <Field
           label="Scope"
-          help="Which slice this instance covers. An individual or group scope narrows the source ACL so only that user or group can retrieve these documents. Organization keeps the source ACL as is. Scope can only remove reach, never widen it."
+          help="Which slice this instance covers. An individual or group scope narrows the source ACL so only that user or group can retrieve these documents. Organization keeps the source ACL as is. Scope can only remove reach, never widen it. An individual scope must be the person's EMAIL, the canonical identity retrieval checks; a username there matches no one and the documents reach nobody."
         >
           <Select value={scopeType} onChange={(e) => setScopeType(e.target.value)}>
             <option value="org">Organization (whole source)</option>
@@ -1253,7 +1253,9 @@ function ConnectorForm({
               className="mt-2"
               value={scopeRef}
               onChange={(e) => setScopeRef(e.target.value)}
-              placeholder={scopeType === "group" ? "group id, e.g. g1" : "user id, e.g. alice"}
+              placeholder={
+                scopeType === "group" ? "group id, e.g. g1" : "user email, e.g. alice@acme.com"
+              }
             />
           )}
         </Field>
