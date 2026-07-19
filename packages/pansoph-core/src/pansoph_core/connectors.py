@@ -359,26 +359,26 @@ class ConnectorManager:
 async def run_instance(manager: ConnectorManager, instance: dict[str, Any]) -> dict[str, Any]:
     """Run one connector instance through the ingestion pipeline and record the run."""
     run_id = await manager.record_run_start(instance["id"])
-    # Resolve any sealed secret handles in the config to plaintext for this run only.
-    instance = {**instance, "config": await _resolved_config(instance)}
-    parser = assembly.build_parser()
-    embedder = assembly.build_embedder()
-    vector = assembly.build_vector_store()
-    authz = assembly.build_authz()
-    acl_log = assembly.build_acl_log()
-    pipeline = IngestionPipeline(
-        connector=_build_connector(instance),
-        parser=parser,
-        embedder=embedder,
-        vector_store=vector,
-        authz=authz,
-        acl_log=acl_log,
-    )
     count = 0
     next_cursor = instance.get("cursor")
-    scope_type = instance.get("scope_type") or "org"
-    scope_ref = instance.get("scope_ref") or ""
     try:
+        # Resolve sealed handles to plaintext, then mint a fresh OAuth access token from
+        # the sealed refresh token (so a connector whose token aged out since the last sync
+        # does not 401). Both are inside the try, so a failed refresh (a rotated or revoked
+        # refresh token that needs a reconnect) is recorded as an honest run error.
+        config = await _resolved_config(instance)
+        config = await _refresh_oauth_token(instance, config)
+        instance = {**instance, "config": config}
+        pipeline = IngestionPipeline(
+            connector=_build_connector(instance),
+            parser=assembly.build_parser(),
+            embedder=assembly.build_embedder(),
+            vector_store=assembly.build_vector_store(),
+            authz=assembly.build_authz(),
+            acl_log=assembly.build_acl_log(),
+        )
+        scope_type = instance.get("scope_type") or "org"
+        scope_ref = instance.get("scope_ref") or ""
         async for ref, cur in pipeline.connector.list_changes(instance.get("cursor")):
             if ref.deleted:
                 # A tombstone purges the document from the vector store and deletes its
@@ -542,6 +542,57 @@ async def _resolved_config(instance: dict[str, Any]) -> dict[str, Any]:
     if not any(secret_handle(v) is not None for v in config.values()):
         return config
     return await resolve_config(assembly.build_secret_store(), instance["tenant_id"], config)
+
+
+async def _refresh_oauth_token(
+    instance: dict[str, Any], config: dict[str, Any]
+) -> dict[str, Any]:
+    """Return config with a freshly minted OAuth access token, if one can be refreshed.
+
+    An OAuth access token expires (Google and Atlassian issue ~1h tokens), so reusing the
+    sealed token across syncs 401s once it ages out. When the instance carries a sealed
+    refresh token (the connect flow seals one beside the access token), this mints a current
+    access token through the CredentialProvider, which caches it and single-flights the
+    refresh, and overrides the connector's OAuth field with it. Every OAuth connector then
+    keeps working past expiry with no per-connector change. A connector with no OAuth field,
+    or an instance with no sealed refresh token (a pasted static token, or a provider that
+    granted none), is left untouched. A refresh that fails (a rotated or revoked refresh
+    token) propagates, so the run records an honest error pointing the operator to reconnect.
+    """
+    from pansoph_connector_sdk import AuthRequirement, GrantType, SecretRef
+
+    from .oauth import get_provider
+
+    spec = _connector_spec(instance["connector"])
+    field = next((f for f in spec.fields if f.kind.value == "oauth"), None) if spec else None
+    if field is None:
+        return config
+    provider_name = getattr(field, "oauth_provider", "") or ""
+    if not provider_name:
+        return config
+
+    oauth_key = field.key
+    tenant_id = instance["tenant_id"]
+    refresh_name = f"{instance['id']}/{oauth_key}__refresh_token"
+    store = assembly.build_secret_store()
+    if await store.get_secret(tenant_id, refresh_name) is None:
+        # No sealed refresh token: a pasted static token, or a provider that granted none.
+        return config
+
+    provider = get_provider(provider_name)
+    requirement = AuthRequirement(
+        grant=GrantType.REFRESH_TOKEN,
+        token_url=provider.token_url,
+        scopes=frozenset(getattr(field, "oauth_scopes", None) or ()),
+        secret_refs={
+            "client_secret": SecretRef("_oauth", f"{provider_name}/client_secret"),
+            "refresh_token": SecretRef(tenant_id, refresh_name),
+        },
+        extra={"client_id": await provider.client_id(store)},
+    )
+    source = assembly.build_credential_provider().token_source(tenant_id, requirement)
+    token = await source.get_access_token()
+    return {**config, oauth_key: token.value}
 
 
 async def health(dsn: str) -> dict[str, Any]:
