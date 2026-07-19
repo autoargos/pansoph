@@ -171,28 +171,23 @@ _LICENSED_USERS_GROUP = "__jira_licensed_users"
 # Verified 2026-07-19 against the Jira scope reference
 # (https://developer.atlassian.com/cloud/jira/platform/scopes-for-oauth-2-3LO-and-forge-apps/).
 # GRANULAR scopes, not classic: a modern Atlassian app enables granular scopes, and
-# requesting the classic read:jira-work / read:jira-user then fails the consent with
-# "Something went wrong" because they are not on the app. Each granular scope maps to an
-# endpoint the connector calls:
-#   read:jql:jira                 -> POST /rest/api/3/search/jql (the JQL change feed)
-#   read:issue:jira               -> the issue keys the search returns, and issue reads
-#   read:issue-details:jira       -> the issue fields (summary, description)
-#   read:issue-security-level:jira-> the issue's security field (drives the ACL)
-#   read:issue-security-scheme:jira-> GET issuesecurityschemes/level/member (level members)
-#   read:permission-scheme:jira   -> GET project/{key}/permissionscheme (browse audience)
-#   read:project-role:jira        -> GET project/{key}/role/{id} (project-role actors)
-#   read:user:jira, read:group:jira-> resolve the user and group principals in the above
-#   offline_access                -> a rotating refresh token
+# requesting the classic read:jira-work / read:jira-user fails the consent with "Something
+# went wrong". Consent is also all-or-nothing: if ANY requested scope is not enabled on the
+# operator's app, the whole consent fails. So the request is kept to the minimal core the
+# sync needs, all commonly enabled:
+#   read:jql:jira   -> POST /rest/api/3/search/jql (the JQL change feed)
+#   read:issue:jira -> the issue keys the search returns, plus each issue's summary,
+#                      description, and security field (the issue read)
+#   offline_access  -> a rotating refresh token
+# The ACL endpoints (permission scheme, project role, issue security members) each need
+# their own granular scope, but _browse_acl and _security_acl already FAIL CLOSED on a
+# missing-scope error, so omitting them from the request never crashes a sync (an individual
+# scope still grants the owner; an org scope under-shares, the safe side). An operator who
+# wants full org-wide Jira ACLs should additionally enable read:permission-scheme:jira,
+# read:project-role:jira, read:user:jira, and read:group:jira on the app AND here.
 _OAUTH_SCOPES: tuple[str, ...] = (
     "read:jql:jira",
     "read:issue:jira",
-    "read:issue-details:jira",
-    "read:issue-security-level:jira",
-    "read:issue-security-scheme:jira",
-    "read:permission-scheme:jira",
-    "read:project-role:jira",
-    "read:user:jira",
-    "read:group:jira",
     "offline_access",
 )
 
