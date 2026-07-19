@@ -1,0 +1,52 @@
+# pre-commit hooks for pansoph. https://pre-commit.com
+#
+# Install once with: uv run pre-commit install
+# Run on the whole tree with: uv run pre-commit run --all-files
+#
+# The lint and format hooks call ruff through uv (language: system) rather than a
+# pinned mirror, so the version that runs locally is exactly the one in the workspace
+# and the one CI uses. That means a passing pre-commit run and a passing CI run can
+# never disagree because of a ruff version skew.
+
+repos:
+  # Generic file hygiene: whitespace, final newlines, valid config files, no giant
+  # blobs, no committed private keys, no leftover merge markers.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '^.*\.md$'
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        exclude: '^apps/lens/tsconfig.*\.json$'  # tsconfig files use JSON with comments
+      - id: detect-private-key
+
+  # Secret scanning. A commit that would introduce a credential fails here before it
+  # can ever reach a public remote. Config lives in .gitleaks.toml when present.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # Ruff lint and format, run through uv so the version matches the workspace and CI.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true

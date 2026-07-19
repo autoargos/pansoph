@@ -1,0 +1,30 @@
+# EditorConfig for pansoph. https://editorconfig.org
+# Keeps whitespace, line endings, and charset consistent across editors so
+# diffs stay clean and ruff format / prettier do not fight the editor.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Python: 4 spaces, line length mirrors ruff (line-length = 100).
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+# Frontend and config: 2 spaces (matches the lens Vite/TS setup).
+[*.{ts,tsx,js,jsx,mjs,cjs,json,css,html,yaml,yml,toml}]
+indent_size = 2
+
+# Markdown: keep trailing whitespace off (two-space line breaks are not used here).
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefiles require real tabs.
+[Makefile]
+indent_style = tab
