@@ -1,10 +1,55 @@
-# pansoph
+<div align="center">
 
-> A self hostable, highly modular knowledge platform with ground up, removable, document level access control.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="design/logo/owl-lockup-ondark.svg">
+  <img alt="pansoph" src="design/logo/owl-lockup.svg" width="380">
+</picture>
 
-pansoph (from pansophy, universal knowledge, always lower case) ingests an organization's knowledge from many disconnected sources into one access controlled retrieval, search, and chat layer. Its headline feature is relationship based access control enforced at retrieval, built from the ground up and also fully removable, so an operator can plug in their own identity and authorization stack or switch it off entirely.
+<h3>Document level access control, enforced at retrieval, built in and fully removable.</h3>
 
-Apache 2.0 licensed. Self host first. No required cloud. No paywalled security. Bring your own model.
+<p>A self hostable, highly modular knowledge platform. Ingest an organization's knowledge from many disconnected sources into one access controlled retrieval, search, and chat layer, where a user can only ever retrieve what they are already allowed to see.</p>
+
+[![CI](https://github.com/autoargos/pansoph/actions/workflows/ci.yml/badge.svg)](https://github.com/autoargos/pansoph/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)](#status)
+
+<p>
+  <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
+  <a href="#status"><b>What works today</b></a> &nbsp;·&nbsp;
+  <a href="docs/ARCHITECTURE.md"><b>Architecture</b></a> &nbsp;·&nbsp;
+  <a href="CONTRIBUTING.md"><b>Contributing</b></a> &nbsp;·&nbsp;
+  <a href="CHANGELOG.md"><b>Changelog</b></a>
+</p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/lens-ask-dark.png">
+  <img alt="pansoph lens: ask across every source, grounded only in what you are permitted to read" src="docs/assets/lens-ask-light.png" width="860">
+</picture>
+
+</div>
+
+## Why pansoph
+
+Independent guidance is consistent that the feature which decides adoption of an internal knowledge tool is permission enforcement, not retrieval accuracy and not latency. The incumbents paywall exactly that. pansoph gives it away under Apache 2.0 and makes it a swappable plugin.
+
+The single promise: a user can only ever retrieve what they are already allowed to see, across every connected source, and an operator can run the whole thing on their own hardware with their own models and replace any part of it. Self host first. No required cloud. No paywalled security. Bring your own model.
+
+pansoph (from pansophy, universal knowledge, always lower case) is the platform that keeps that promise.
+
+## Contents
+
+- [Why pansoph](#why-pansoph)
+- [The one principle: everything is replaceable](#the-one-principle-everything-is-replaceable)
+- [Monorepo layout](#monorepo-layout)
+- [The named services and apps](#the-named-services-and-apps)
+- [The stack, in one line each](#the-stack-in-one-line-each)
+- [Quick start](#quick-start)
+- [Screenshots](#screenshots)
+- [Status](#status)
+- [Contributing and license](#contributing-and-license)
 
 ## The one principle: everything is replaceable
 
@@ -29,7 +74,7 @@ pansoph/
     lens/                    "lens", the React 19 + Vite reference UI (will be split to its own repo)
     scout/                   "scout", the WXT MV3 browser grabber (will be split to its own repo)
   connectors/                community connectors (will be split to its own repo: pansoph-connectors)
-  deploy/                    Helm chart and ops
+  deploy/                    Dockerfiles, compose helpers, and ops (Helm chart planned, see deploy/README.md)
   docs/                      architecture, pointers to the ADRs
   compose.yaml               the self host stack, profiles: core, workers, models, observability, secrets
 ```
@@ -80,6 +125,23 @@ docker compose --profile core --profile workers --profile models up
 
 For how access is decided and what you configure (identity, group aliases, and the current
 limits), see [`docs/operating/identity-and-access.md`](docs/operating/identity-and-access.md).
+
+## Screenshots
+
+lens is the reference UI: verification first, so you can see through every answer to its source. It only ever shows what the signed in user is permitted to open. Light and dark themes are both first class.
+
+<table>
+  <tr>
+    <td width="50%">
+      <img alt="Connectors: each source's documents inherit its ACL, enforced at retrieval" src="docs/assets/lens-connectors-dark.png">
+      <p align="center"><em>Connectors. Every source inherits its ACL, shown per instance.</em></p>
+    </td>
+    <td width="50%">
+      <img alt="Permission aware chat, light theme" src="docs/assets/lens-ask-light.png">
+      <p align="center"><em>Ask, light theme. Answers are grounded only in permitted sources.</em></p>
+    </td>
+  </tr>
+</table>
 
 ## Status
 
@@ -142,3 +204,14 @@ We say this plainly so you can trust the line above:
 
 Do not claim a feature works without an evidence trail. Every line above points at a test,
 a run, or a file.
+
+## Contributing and license
+
+Contributions are welcome, especially new connectors and new port adapters, which plug in through Python entry points without touching the core.
+
+- Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and the local quality gates.
+- Adding a connector or an adapter: read the connector implementation rule in [`CLAUDE.md`](CLAUDE.md), implement the contract or write a manifest, pass the shared conformance suite, and map the source ACL faithfully.
+- Security reports: see [`SECURITY.md`](SECURITY.md). Please do not open a public issue for a vulnerability.
+- Before a PR: `uv run ruff check . && uv run ruff format --check . && uv run pytest -q`, or install the hooks with `uv run pre-commit install`.
+
+pansoph is licensed under the [Apache License 2.0](LICENSE).
