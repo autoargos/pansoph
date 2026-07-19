@@ -122,7 +122,12 @@ def membership_tuples(user_id: str, groups: list[str], ns: str) -> list[Tuple]:
             subject=Principal(type="user", id=user_id, ns=ns),
             relation="member",
             object_type="group",
-            object_id=f"{ns}_{group}",
+            # The group object carries its namespace separately (not pre-combined), so each
+            # adapter encodes (object_ns, object_id) exactly as it encodes a group subject.
+            # Pre-combining as `f"{ns}_{group}"` here would diverge from the adapter's
+            # subject encoding once that encoding escapes the separator inside a component.
+            object_id=group,
+            object_ns=ns,
         )
         for group in groups
     ]
@@ -152,5 +157,13 @@ def _reader(subject: Principal, object_id: str) -> Tuple:
     return Tuple(subject=subject, relation=READER, object_type="document", object_id=object_id)
 
 
-def _key(t: Tuple) -> tuple[str, str, str, str, str, str]:
-    return (t.subject.type, t.subject.id, t.subject.ns, t.relation, t.object_type, t.object_id)
+def _key(t: Tuple) -> tuple[str, str, str, str, str, str, str]:
+    return (
+        t.subject.type,
+        t.subject.id,
+        t.subject.ns,
+        t.relation,
+        t.object_type,
+        t.object_id,
+        t.object_ns,
+    )

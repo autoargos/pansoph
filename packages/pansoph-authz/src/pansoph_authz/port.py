@@ -42,6 +42,12 @@ class Tuple(BaseModel):
     relation: str
     object_type: str
     object_id: str
+    # Namespace for the object, used when the object is itself a namespaced principal (a
+    # group in a membership tuple). Each adapter combines (object_ns, object_id) with the
+    # SAME encoding it uses for a namespaced subject, so a group referenced as a subject
+    # (in a reader tuple) and as an object (in a membership tuple) resolve to one entity.
+    # Empty for plain resources like documents.
+    object_ns: str = ""
 
 
 @runtime_checkable

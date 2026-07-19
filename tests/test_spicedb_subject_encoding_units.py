@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 
 from pansoph_authz import Principal
-from pansoph_authz.adapters.spicedb import _safe_ns_id
+from pansoph_authz.adapters.spicedb import _safe_ns_id, _safe_ns_pair
 
 # The exact object id pattern SpiceDB validates against (from its schema grammar).
 _SPICEDB_OBJECT_ID = re.compile(r"^(([a-zA-Z0-9/_|\-=+]{1,})|\*)$")
@@ -54,3 +54,43 @@ def test_wildcard_and_plain_ids_are_unchanged() -> None:
     # plain namespaced id with no special characters keeps the readable ns_id shape.
     assert _safe_ns_id(Principal(type="user", id="*")) == "*"
     assert _safe_ns_id(Principal(type="user", id="alice", ns="default")) == "default_alice"
+
+
+def test_group_subject_and_group_object_encode_to_the_same_spicedb_object() -> None:
+    """Regression for the encoding split introduced with component escaping: a group
+    GRANTED read on a document (the group is a reader-tuple subject) and the SAME group a
+    user is a MEMBER of (the group is a membership-tuple object) must encode to one SpiceDB
+    object. When the subject went through the component-escaping _safe_ns_id but the object
+    went through the raw _safe_obj, the two diverged, so the document -> group -> user chain
+    never resolved and every group and public grant silently denied. The live enforcement
+    suite caught this against a real engine; this locks it hermetically, since the fake
+    authz used by the permission suite encodes ids raw and cannot see the divergence.
+    """
+    from pansoph_authz.mappers import TENANT_EVERYONE, membership_tuples, tuples_for_acl
+    from pansoph_types import AccessControl
+
+    def group_ids(doc_acl: AccessControl, group: str, member: str) -> tuple[str, str]:
+        reader = next(
+            t
+            for t in tuples_for_acl("doc:x", "inst", doc_acl, tenant_id="t1")
+            if t.subject.type == "group"
+        )
+        membership = membership_tuples(member, [group], "t1")[0]
+        # Exactly how the SpiceDB adapter encodes each side (see spicedb._relationship):
+        # a group subject via _safe_ns_id, a namespaced group object via _safe_ns_pair.
+        # Kept as the pure functions so this stays a hermetic unit test with no engine
+        # client dependency.
+        subject_id = _safe_ns_id(reader.subject)
+        object_id = _safe_ns_pair(membership.object_ns, membership.object_id)
+        return subject_id, object_id
+
+    # Public grants to the tenant everyone group.
+    subj, obj = group_ids(AccessControl(public=True, principal_ns="inst"), TENANT_EVERYONE, "alice")
+    assert subj == obj, "the public everyone group must encode the same as a subject and an object"
+
+    # A named group whose id carries the separator underscore, the exact case the raw join
+    # got wrong (component escaping must apply on both sides).
+    subj, obj = group_ids(
+        AccessControl(allow_groups=["eng_team"], principal_ns="inst"), "eng_team", "bob"
+    )
+    assert subj == obj, "a named group must encode the same as a subject and an object"
