@@ -1,0 +1,54 @@
+{{- $name := printf "%s-scribe" (include "pansoph.fullname" .) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scribe
+spec:
+  replicas: {{ .Values.scribe.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "pansoph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scribe
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+      labels:
+        {{- include "pansoph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: scribe
+    spec:
+      serviceAccountName: {{ include "pansoph.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: scribe
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}/pansoph-scribe:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "pansoph.configMapName" . }}
+            - secretRef:
+                name: {{ include "pansoph.secretName" . }}
+          resources:
+            {{- toYaml .Values.scribe.resources | nindent 12 }}
+      {{- with .Values.scribe.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scribe.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scribe.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

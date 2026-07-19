@@ -1,0 +1,42 @@
+pansoph is installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+Components:
+  agora   (API, MCP, SSE)   {{ include "pansoph.fullname" . }}-agora
+  lens    (web UI)          {{ include "pansoph.fullname" . }}-lens
+  scribe  (ingestion)       {{ include "pansoph.fullname" . }}-scribe
+{{- if .Values.postgres.enabled }}
+  postgres (pgvector)       {{ include "pansoph.fullname" . }}-postgres
+{{- end }}
+{{- if .Values.spicedb.enabled }}
+  spicedb  (authz)          {{ include "pansoph.fullname" . }}-spicedb
+{{- end }}
+{{- if .Values.valkey.enabled }}
+  valkey   (cache)          {{ include "pansoph.fullname" . }}-valkey
+{{- end }}
+{{- if .Values.objectstore.enabled }}
+  objectstore (S3)          {{ include "pansoph.fullname" . }}-objectstore
+{{- end }}
+
+Open lens:
+{{- if .Values.ingress.enabled }}
+  http://{{ .Values.ingress.host }}/
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "pansoph.fullname" . }}-lens 3000:{{ .Values.lens.service.port }}
+  then browse http://localhost:3000/
+{{- end }}
+
+Before this is production ready:
+{{- if not .Values.config.oidc.issuerUrl }}
+  - Identity is bring your own. Set config.identityAdapter=oidc and config.oidc.issuerUrl
+    to your IdP, or keep the builtin store for a single tenant.
+{{- end }}
+{{- if eq .Values.secret.postgresPassword "change-me" }}
+  - Change the default credentials. secret.postgresPassword, secret.spicedbPresharedKey,
+    secret.s3AccessKey, and secret.s3SecretKey are all still "change-me". In production set
+    secret.existingSecret to a Secret you manage instead.
+{{- end }}
+  - Models are bring your own. Point config.llm, config.embedder, and config.reranker at
+    your OpenAI compatible endpoints. Nothing here runs a model server for you.
+
+Permission enforcement is on by default (authz adapter: {{ .Values.config.authzAdapter }}).
+A user can only ever retrieve what they are already allowed to see.

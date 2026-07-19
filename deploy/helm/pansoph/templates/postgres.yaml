@@ -1,0 +1,146 @@
+{{- if .Values.postgres.enabled }}
+{{- $name := printf "%s-postgres" (include "pansoph.fullname" .) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-initdb
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+data:
+  01-extensions.sql: |
+    -- Enable the Postgres extensions pansoph uses. pgvector and pgvectorscale ship
+    -- in the timescaledb-ha image. Missing optional extensions must not abort startup.
+    CREATE EXTENSION IF NOT EXISTS vector;
+    DO $$
+    BEGIN
+        CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'vectorscale not available; using exact pgvector search.';
+    END $$;
+    DO $$
+    BEGIN
+        CREATE EXTENSION IF NOT EXISTS pgmq;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'pgmq not available; the durable queue will use DBOS native tables.';
+    END $$;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  clusterIP: None
+  selector:
+    {{- include "pansoph.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "pansoph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "pansoph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+      # The timescaledb-ha image runs initdb as uid 1000, which must own the data
+      # directory to chmod it 0700. A freshly provisioned PVC is owned by root and
+      # fsGroup only sets the group, not the owner, so chown the mount to 1000:1000
+      # first. Runs as root; the pod does not force runAsNonRoot.
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "chown -R 1000:1000 /home/postgres/pgdata/data"]
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - name: data
+              mountPath: /home/postgres/pgdata/data
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pansoph.secretName" . }}
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /home/postgres/pgdata/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.username | quote }}, "-d", {{ .Values.postgres.database | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.username | quote }}, "-d", {{ .Values.postgres.database | quote }}]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+      volumes:
+        - name: initdb
+          configMap:
+            name: {{ $name }}-initdb
+        {{- if not .Values.postgres.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.postgres.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.postgres.persistence.storageClass }}
+        storageClassName: {{ .Values.postgres.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size | quote }}
+  {{- end }}
+{{- end }}

@@ -75,7 +75,7 @@ pansoph/
     lens/                    "lens", the React 19 + Vite reference UI (will be split to its own repo)
     scout/                   "scout", the WXT MV3 browser grabber (will be split to its own repo)
   connectors/                community connectors (will be split to its own repo: pansoph-connectors)
-  deploy/                    Dockerfiles, compose helpers, and ops (Helm chart planned, see deploy/README.md)
+  deploy/                    Dockerfiles, compose helpers, ops, and the Helm chart (deploy/helm/pansoph)
   docs/                      architecture, pointers to the ADRs
   compose.yaml               the self host stack, profiles: core, workers, models, observability, secrets
 ```
@@ -123,6 +123,15 @@ docker compose --profile core --profile workers --profile models up
 > full self-hosted stack, not a five-minute taste. A single-command, single-connector
 > demo behind a much smaller footprint is on the roadmap. Until then, see `DEMO.md` for
 > the guided walkthrough.
+
+On Kubernetes, a Helm chart deploys the same stack:
+
+```bash
+helm install pansoph deploy/helm/pansoph --namespace pansoph --create-namespace
+```
+
+See [`deploy/helm/pansoph`](deploy/helm/pansoph/README.md) for configuration (bring your own
+identity and models, or disable any bundled data service for a managed one).
 
 For how access is decided and what you configure (identity, group aliases, and the current
 limits), see [`docs/operating/identity-and-access.md`](docs/operating/identity-and-access.md).

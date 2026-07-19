@@ -39,9 +39,17 @@ docker compose pull
 docker compose --profile core --profile workers --profile models up
 ```
 
-## Scale: Helm (planned, task #18)
+## Kubernetes: Helm
 
-A Helm chart for Kubernetes will split the services, scale scribe workers horizontally with an HPA, run Qdrant and a SpiceDB cluster, use OpenBao for secrets, and enforce egress allowlists with network policies. Postgres HA via Patroni.
+A Helm chart lives in [`deploy/helm/pansoph`](helm/pansoph/README.md). It deploys the core application tier (agora, scribe, lens) and its backing data services (Postgres with pgvector and pgvectorscale, Valkey, an S3 object store, and SpiceDB), at a single node scale. Identity and models are bring your own, and any bundled data service can be disabled in favor of an external managed one.
+
+```bash
+helm install pansoph deploy/helm/pansoph --namespace pansoph --create-namespace
+```
+
+The chart is validated with `helm lint`, `kubeconform --strict` over the rendered manifests, and a live kind install where all seven workloads reach Ready and the lens to agora proxy answers end to end. See the chart README for configuration.
+
+Still ahead for the scale tier (not claimed by the chart yet): Postgres HA via Patroni, a Qdrant and a SpiceDB cluster, horizontal scribe autoscaling with an HPA, OpenBao for secrets, and egress allowlists enforced with network policies.
 
 ## Hardening (planned, task #20)
 

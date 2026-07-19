@@ -1,0 +1,256 @@
+# Default values for the pansoph chart.
+#
+# This chart deploys the core application tier and its backing data services on a
+# single node scale (one replica each). It is a real, deployable starting point,
+# not a high availability topology: Postgres HA (Patroni), a SpiceDB cluster, and
+# a Qdrant cluster are on the roadmap and are not claimed here.
+#
+# Identity and models are bring your own. Point the config at your OIDC issuer and
+# your OpenAI compatible model endpoints; the chart does not run Keycloak, Ollama,
+# or a TEI server for you.
+
+# -- Override the chart name in resource names.
+nameOverride: ""
+# -- Override the full resource name prefix.
+fullnameOverride: ""
+
+# Images for the three pansoph services. Datastore images are set per component below.
+image:
+  registry: docker.io
+  # -- Docker Hub namespace that holds pansoph-agora, pansoph-scribe, pansoph-lens.
+  repository: cyproto
+  # -- Image tag for all three app images. "dev" is the rolling build; pin a release
+  # like "0.1.0" in production.
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# -- Names of image pull secrets, if the images are in a private registry.
+imagePullSecrets: []
+
+serviceAccount:
+  # -- Create a service account for the pansoph pods.
+  create: true
+  # -- Name to use. Generated from the release name when empty.
+  name: ""
+  annotations: {}
+
+# Pod level security context defaults. The images already run as non root.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+# Non secret configuration, rendered into a ConfigMap and consumed by agora and
+# scribe via envFrom. Anything secret goes in the secret block below instead.
+config:
+  env: local
+  logLevel: info
+
+  # Vector store: pgvectorscale (bundled Postgres) or qdrant (external).
+  vectorAdapter: pgvectorscale
+
+  # Authz: spicedb (bundled) or openfga (external). Enforcement is always on.
+  authzAdapter: spicedb
+
+  # Identity. "builtin" uses the built in store; "oidc" federates to your IdP.
+  identityAdapter: builtin
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    # clientSecret goes in the secret block.
+
+  # Object store, S3 compatible. Points at the bundled objectstore by default.
+  objectAdapter: s3
+  s3:
+    bucket: pansoph
+
+  # Secret adapter for sealing connector credentials. "envelope" uses Postgres
+  # envelope encryption; the root key goes in the secret block.
+  secretAdapter: envelope
+
+  # Public URLs the browser and OAuth redirects use. Set these to your ingress host.
+  publicBaseUrl: "http://localhost:8080"
+  publicAppUrl: "http://localhost:3000"
+
+  # Models are bring your own: any OpenAI compatible endpoint. These defaults point
+  # at services you run yourself (for example an in cluster Ollama or a TEI server).
+  llm:
+    adapter: openai_compatible
+    baseUrl: "http://ollama:11434/v1"
+    model: "llama3.1:8b"
+  embedder:
+    adapter: openai_compatible
+    url: "http://tei-embed:80/v1"
+    model: "bge-m3"
+    dim: "1024"
+  reranker:
+    adapter: tei
+    url: "http://tei-rerank:80"
+    model: "BAAI/bge-reranker-v2-m3"
+
+  parserAdapter: docling
+
+  # Extra plain environment variables merged into the ConfigMap.
+  extraEnv: {}
+
+# Secret values. In production set existingSecret to a Secret you manage (for
+# example via External Secrets or Sealed Secrets) and leave the values below empty.
+# When existingSecret is empty the chart creates a Secret from these values.
+secret:
+  existingSecret: ""
+  postgresPassword: "change-me"
+  spicedbPresharedKey: "change-me"
+  s3AccessKey: "change-me"
+  s3SecretKey: "change-me"
+  # Base64 32 byte key for envelope encryption. Generate with:
+  #   openssl rand -base64 32
+  envelopeRootKey: ""
+  oidcClientSecret: ""
+  llmApiKey: "ollama"
+  embedderApiKey: ""
+  # OAuth client credentials for connectors. Leave empty for connectors you do not use.
+  oauth:
+    googleClientId: ""
+    googleClientSecret: ""
+    slackClientId: ""
+    slackClientSecret: ""
+    atlassianClientId: ""
+    atlassianClientSecret: ""
+    githubClientId: ""
+    githubClientSecret: ""
+
+# ----------------------------------------------------------------------------
+# Application tier
+# ----------------------------------------------------------------------------
+agora:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+lens:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+scribe:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ----------------------------------------------------------------------------
+# Bundled data services. Disable any of these and point at an external managed
+# equivalent via the matching external* block.
+# ----------------------------------------------------------------------------
+postgres:
+  enabled: true
+  image: timescale/timescaledb-ha:pg17
+  database: pansoph
+  username: pansoph
+  service:
+    port: 5432
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+externalPostgres:
+  host: ""
+  port: 5432
+
+valkey:
+  enabled: true
+  image: valkey/valkey:8-alpine
+  service:
+    port: 6379
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+externalValkey:
+  host: ""
+  port: 6379
+
+objectstore:
+  enabled: true
+  image: chrislusf/seaweedfs:3.80
+  service:
+    s3Port: 3900
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+externalObjectstore:
+  host: ""
+  port: 3900
+
+spicedb:
+  enabled: true
+  image: authzed/spicedb:latest
+  service:
+    grpcPort: 50051
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+externalSpicedb:
+  host: ""
+  port: 50051
+
+# ----------------------------------------------------------------------------
+# Ingress for agora (the API) and lens (the UI). Off by default.
+# ----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Host for the lens UI. agora is exposed under the same host at /api and /healthz.
+  host: pansoph.local
+  tls: []

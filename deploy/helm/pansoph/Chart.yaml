@@ -1,0 +1,32 @@
+apiVersion: v2
+name: pansoph
+description: >-
+  Self hostable, modular knowledge platform with document level access control
+  enforced at retrieval. This chart deploys the core application tier (agora,
+  scribe, lens) and its backing data services (Postgres with pgvector, Valkey,
+  an S3 object store, and SpiceDB). Identity and models are bring your own,
+  pointed at over configuration.
+type: application
+
+# Chart version. Bump on any chart change (SemVer for the chart itself).
+version: 0.1.0
+
+# The pansoph application version the defaults target. The app images default to
+# the rolling :dev tag; override image.tag for a pinned release.
+appVersion: "dev"
+
+keywords:
+  - rag
+  - retrieval
+  - access-control
+  - rebac
+  - knowledge-base
+  - self-hosted
+
+home: https://github.com/autoargos/pansoph
+sources:
+  - https://github.com/autoargos/pansoph
+
+maintainers:
+  - name: pansoph
+    url: https://github.com/autoargos/pansoph

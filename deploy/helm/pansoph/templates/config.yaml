@@ -1,0 +1,92 @@
+{{- $pgHost := include "pansoph.postgresHost" . -}}
+{{- $pgPort := .Values.postgres.enabled | ternary (.Values.postgres.service.port | int) (.Values.externalPostgres.port | int) -}}
+{{- $valkeyHost := include "pansoph.valkeyHost" . -}}
+{{- $valkeyPort := .Values.valkey.enabled | ternary (.Values.valkey.service.port | int) (.Values.externalValkey.port | int) -}}
+{{- $spicedbHost := include "pansoph.spicedbHost" . -}}
+{{- $spicedbPort := .Values.spicedb.enabled | ternary (.Values.spicedb.service.grpcPort | int) (.Values.externalSpicedb.port | int) -}}
+{{- $objHost := include "pansoph.objectstoreHost" . -}}
+{{- $objPort := .Values.objectstore.enabled | ternary (.Values.objectstore.service.s3Port | int) (.Values.externalObjectstore.port | int) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pansoph.configMapName" . }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+data:
+  PANSOPH_ENV: {{ .Values.config.env | quote }}
+  PANSOPH_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  PANSOPH_API_HOST: "0.0.0.0"
+  PANSOPH_API_PORT: "8080"
+
+  POSTGRES_HOST: {{ $pgHost | quote }}
+  POSTGRES_PORT: {{ $pgPort | quote }}
+  POSTGRES_DB: {{ .Values.postgres.database | quote }}
+  POSTGRES_USER: {{ .Values.postgres.username | quote }}
+
+  PANSOPH_VECTOR_ADAPTER: {{ .Values.config.vectorAdapter | quote }}
+
+  PANSOPH_AUTHZ_ADAPTER: {{ .Values.config.authzAdapter | quote }}
+  SPICEDB_ENDPOINT: {{ printf "%s:%d" $spicedbHost ($spicedbPort | int) | quote }}
+
+  PANSOPH_IDENTITY_ADAPTER: {{ .Values.config.identityAdapter | quote }}
+  OIDC_ISSUER_URL: {{ .Values.config.oidc.issuerUrl | quote }}
+  OIDC_CLIENT_ID: {{ .Values.config.oidc.clientId | quote }}
+
+  PANSOPH_LLM_ADAPTER: {{ .Values.config.llm.adapter | quote }}
+  PANSOPH_LLM_BASE_URL: {{ .Values.config.llm.baseUrl | quote }}
+  PANSOPH_LLM_MODEL: {{ .Values.config.llm.model | quote }}
+
+  PANSOPH_EMBEDDER_ADAPTER: {{ .Values.config.embedder.adapter | quote }}
+  PANSOPH_EMBEDDER_URL: {{ .Values.config.embedder.url | quote }}
+  PANSOPH_EMBEDDER_MODEL: {{ .Values.config.embedder.model | quote }}
+  PANSOPH_EMBEDDER_DIM: {{ .Values.config.embedder.dim | quote }}
+
+  PANSOPH_RERANKER_ADAPTER: {{ .Values.config.reranker.adapter | quote }}
+  PANSOPH_RERANKER_URL: {{ .Values.config.reranker.url | quote }}
+  PANSOPH_RERANKER_MODEL: {{ .Values.config.reranker.model | quote }}
+
+  PANSOPH_PARSER_ADAPTER: {{ .Values.config.parserAdapter | quote }}
+
+  PANSOPH_OBJECT_ADAPTER: {{ .Values.config.objectAdapter | quote }}
+  S3_ENDPOINT: {{ printf "http://%s:%d" $objHost ($objPort | int) | quote }}
+  S3_BUCKET: {{ .Values.config.s3.bucket | quote }}
+
+  PANSOPH_SECRET_ADAPTER: {{ .Values.config.secretAdapter | quote }}
+
+  VALKEY_URL: {{ printf "redis://%s:%d/0" $valkeyHost ($valkeyPort | int) | quote }}
+
+  PANSOPH_PUBLIC_BASE_URL: {{ .Values.config.publicBaseUrl | quote }}
+  PANSOPH_PUBLIC_APP_URL: {{ .Values.config.publicAppUrl | quote }}
+  {{- range $k, $v := .Values.config.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- if not .Values.secret.existingSecret }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "pansoph.secretName" . }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: {{ .Values.secret.postgresPassword | quote }}
+  SPICEDB_PRESHARED_KEY: {{ .Values.secret.spicedbPresharedKey | quote }}
+  # Full datastore URI for SpiceDB (its image is distroless, so it cannot assemble
+  # the URI from parts in a shell). Password is embedded here inside the Secret.
+  SPICEDB_DATASTORE_CONN_URI: {{ printf "postgres://%s:%s@%s:%d/%s?sslmode=disable" .Values.postgres.username .Values.secret.postgresPassword $pgHost ($pgPort | int) .Values.postgres.database | quote }}
+  S3_ACCESS_KEY: {{ .Values.secret.s3AccessKey | quote }}
+  S3_SECRET_KEY: {{ .Values.secret.s3SecretKey | quote }}
+  PANSOPH_ENVELOPE_ROOT_KEY: {{ .Values.secret.envelopeRootKey | quote }}
+  OIDC_CLIENT_SECRET: {{ .Values.secret.oidcClientSecret | quote }}
+  PANSOPH_LLM_API_KEY: {{ .Values.secret.llmApiKey | quote }}
+  PANSOPH_EMBEDDER_API_KEY: {{ .Values.secret.embedderApiKey | quote }}
+  PANSOPH_OAUTH_GOOGLE_CLIENT_ID: {{ .Values.secret.oauth.googleClientId | quote }}
+  PANSOPH_OAUTH_GOOGLE_CLIENT_SECRET: {{ .Values.secret.oauth.googleClientSecret | quote }}
+  PANSOPH_OAUTH_SLACK_CLIENT_ID: {{ .Values.secret.oauth.slackClientId | quote }}
+  PANSOPH_OAUTH_SLACK_CLIENT_SECRET: {{ .Values.secret.oauth.slackClientSecret | quote }}
+  PANSOPH_OAUTH_ATLASSIAN_CLIENT_ID: {{ .Values.secret.oauth.atlassianClientId | quote }}
+  PANSOPH_OAUTH_ATLASSIAN_CLIENT_SECRET: {{ .Values.secret.oauth.atlassianClientSecret | quote }}
+  PANSOPH_OAUTH_GITHUB_CLIENT_ID: {{ .Values.secret.oauth.githubClientId | quote }}
+  PANSOPH_OAUTH_GITHUB_CLIENT_SECRET: {{ .Values.secret.oauth.githubClientSecret | quote }}
+{{- end }}

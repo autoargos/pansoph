@@ -1,0 +1,100 @@
+{{- if .Values.spicedb.enabled }}
+{{- $name := printf "%s-spicedb" (include "pansoph.fullname" .) -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spicedb
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "pansoph.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: spicedb
+  ports:
+    - name: grpc
+      port: {{ .Values.spicedb.service.grpcPort }}
+      targetPort: grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spicedb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "pansoph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: spicedb
+  template:
+    metadata:
+      labels:
+        {{- include "pansoph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: spicedb
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # Bring the SpiceDB schema to head before serving. The init container exits
+      # non zero until Postgres is reachable, and the kubelet retries it, so this
+      # converges without a separate wait step.
+      initContainers:
+        - name: migrate
+          image: {{ .Values.spicedb.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["spicedb", "datastore", "migrate", "head"]
+          env:
+            - name: SPICEDB_DATASTORE_ENGINE
+              value: postgres
+            - name: SPICEDB_DATASTORE_CONN_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pansoph.secretName" . }}
+                  key: SPICEDB_DATASTORE_CONN_URI
+      containers:
+        - name: spicedb
+          image: {{ .Values.spicedb.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["spicedb", "serve"]
+          env:
+            - name: SPICEDB_DATASTORE_ENGINE
+              value: postgres
+            - name: SPICEDB_DATASTORE_CONN_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pansoph.secretName" . }}
+                  key: SPICEDB_DATASTORE_CONN_URI
+            - name: SPICEDB_GRPC_PRESHARED_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pansoph.secretName" . }}
+                  key: SPICEDB_PRESHARED_KEY
+          ports:
+            - name: grpc
+              containerPort: 50051
+          readinessProbe:
+            exec:
+              command: ["grpc_health_probe", "-addr=127.0.0.1:50051"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 10
+          livenessProbe:
+            exec:
+              command: ["grpc_health_probe", "-addr=127.0.0.1:50051"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.spicedb.resources | nindent 12 }}
+{{- end }}

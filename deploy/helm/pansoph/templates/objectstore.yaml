@@ -1,0 +1,82 @@
+{{- if .Values.objectstore.enabled }}
+{{- $name := printf "%s-objectstore" (include "pansoph.fullname" .) -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: objectstore
+spec:
+  clusterIP: None
+  selector:
+    {{- include "pansoph.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: objectstore
+  ports:
+    - name: s3
+      port: {{ .Values.objectstore.service.s3Port }}
+      targetPort: s3
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pansoph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: objectstore
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "pansoph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: objectstore
+  template:
+    metadata:
+      labels:
+        {{- include "pansoph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: objectstore
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: seaweedfs
+          image: {{ .Values.objectstore.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["server", "-s3", "-dir=/data", "-s3.port={{ .Values.objectstore.service.s3Port }}"]
+          ports:
+            - name: s3
+              containerPort: {{ .Values.objectstore.service.s3Port }}
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.objectstore.resources | nindent 12 }}
+      {{- if not .Values.objectstore.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.objectstore.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.objectstore.persistence.storageClass }}
+        storageClassName: {{ .Values.objectstore.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.objectstore.persistence.size | quote }}
+  {{- end }}
+{{- end }}
