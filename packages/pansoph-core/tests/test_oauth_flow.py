@@ -172,6 +172,10 @@ async def test_authorize_requests_only_the_connectors_scopes_not_the_provider_un
     # intersects. Both must be requested or Confluence connects but cannot sync.
     assert "search:confluence" in scopes, "the CQL search scope must be requested"
     assert "read:space.permission:confluence" in scopes, "the space-permission scope is required"
+    # Once granular scopes are present, Atlassian evaluates content reads in granular mode,
+    # so the classic read:confluence-content.all no longer satisfies GET /content/{id} and it
+    # 401s with "scope does not match". read:page:confluence is the granular page-content read.
+    assert "read:page:confluence" in scopes, "the granular page-content scope must be requested"
     assert "read:project-role:jira" not in scopes, (
         "a Jira scope must NOT leak into a Confluence connect"
     )

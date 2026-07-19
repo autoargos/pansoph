@@ -67,9 +67,12 @@ DEFAULT_SCOPES: tuple[str, ...] = (
     "read:jira-work",
     "read:jira-user",
     "read:project-role:jira",
-    # Confluence: CQL search feed, page bodies, space summaries, content restrictions,
-    # space discovery, and the space-wide View audience the ACL intersects with.
+    # Confluence: CQL search feed, page content (granular read:page:confluence, which the
+    # gateway requires for content reads once any granular scope is present, plus the classic
+    # read:confluence-content.all for a classic-only app), space summaries, content
+    # restrictions, space discovery, and the space-wide View audience the ACL intersects.
     "search:confluence",
+    "read:page:confluence",
     "read:confluence-content.all",
     "read:confluence-space.summary",
     "read:content.restriction:confluence",

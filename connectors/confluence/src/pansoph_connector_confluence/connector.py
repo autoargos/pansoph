@@ -34,10 +34,11 @@ Auth
   (1) OAuth 2.0 (3LO): the in-app Connect flow (provider "atlassian") mints a Bearer
       access token sealed into config key "oauth_token". When present, the connector
       sends "Authorization: Bearer <token>". Read scopes: search:confluence (CQL change
-      feed), read:confluence-content.all (page bodies), read:confluence-space.summary,
-      read:content.restriction:confluence (page restrictions), read:space:confluence
-      (space discovery), read:space.permission:confluence (space-wide View audience),
-      plus offline_access for refresh. See _OAUTH_SCOPES for the endpoint mapping.
+      feed), read:page:confluence (page content, granular) plus read:confluence-content.all
+      (its classic equivalent), read:confluence-space.summary, read:content.restriction:confluence
+      (page restrictions), read:space:confluence (space discovery),
+      read:space.permission:confluence (space-wide View audience), plus offline_access for
+      refresh. See _OAUTH_SCOPES for the endpoint mapping and the granular/classic story.
   (2) HTTP Basic (manual paste): base64("{email}:{api_token}") sent as
       "Authorization: Basic <b64>". The API token is minted at id.atlassian.com.
   A configured instance carries its own credential and its own ACL namespace
@@ -172,14 +173,23 @@ from pansoph_types import (
 
 # Read-only OAuth 2.0 (3LO) scopes for the in-app Connect flow (provider
 # "atlassian"). Verified 2026-07-19 against the Confluence scope reference
-# (https://developer.atlassian.com/cloud/confluence/scopes-for-oauth-2-3LO-and-forge-apps/).
-# Each scope is pinned to the exact endpoint the connector calls:
-#   search:confluence                     -> GET /wiki/rest/api/content/search (CQL, the
-#                                            incremental change feed). This is a distinct
-#                                            scope from read:confluence-content.all; the
-#                                            search endpoint 401s without it.
-#   read:confluence-content.all           -> GET /wiki/rest/api/content/{id} page body
-#                                            (body.storage) and the trashed-content sweep.
+# (https://developer.atlassian.com/cloud/confluence/scopes-for-oauth-2-3LO-and-forge-apps/)
+# AND against a live token: with granular scopes present, Atlassian's gateway evaluates
+# content reads in granular mode, so a classic read:confluence-content.all no longer
+# "matches" GET /wiki/rest/api/content/{id} and it 401s with "scope does not match". The
+# granular read:page:confluence is what authorizes page-content reads then. We request
+# BOTH the classic and the granular content scope so the connector works against a
+# classic-only app (read:confluence-content.all) and a granular app (read:page:confluence)
+# alike; Atlassian grants whichever the app has enabled. Each scope maps to an endpoint:
+#   search:confluence                     -> GET /wiki/rest/api/content/search (CQL change
+#                                            feed). Distinct from the content-read scopes;
+#                                            the search endpoint 401s without it.
+#   read:page:confluence                  -> GET /wiki/rest/api/content/{id} and
+#                                            GET /wiki/api/v2/pages/{id} page-content reads
+#                                            (granular). The classic scope below does not
+#                                            satisfy these once granular scopes are present.
+#   read:confluence-content.all           -> the classic equivalent of the page-content read,
+#                                            for a classic-only app; also the trashed sweep.
 #   read:confluence-space.summary         -> space info.
 #   read:content.restriction:confluence   -> a page's read restrictions (the ACL).
 #   read:space:confluence                 -> GET /wiki/api/v2/spaces (space discovery).
@@ -189,6 +199,7 @@ from pansoph_types import (
 #   offline_access                        -> a rotating refresh token.
 _OAUTH_SCOPES: tuple[str, ...] = (
     "search:confluence",
+    "read:page:confluence",
     "read:confluence-content.all",
     "read:confluence-space.summary",
     "read:content.restriction:confluence",
