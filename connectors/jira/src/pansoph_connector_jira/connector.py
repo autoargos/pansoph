@@ -168,14 +168,31 @@ _BROWSE = "BROWSE_PROJECTS"
 _LICENSED_USERS_GROUP = "__jira_licensed_users"
 
 # Read-only OAuth 2.0 (3LO) scopes for the in-app Connect flow (provider "atlassian").
-# Verified 2026-07-05 against the Jira scope reference. Classic read:jira-work covers
-# issue search, issue reads, and the project permission scheme of a permitted project;
-# read:jira-user covers user and role lookups; read:project-role:jira covers the
-# project-role actors the ACL resolves; offline_access yields a rotating refresh token.
+# Verified 2026-07-19 against the Jira scope reference
+# (https://developer.atlassian.com/cloud/jira/platform/scopes-for-oauth-2-3LO-and-forge-apps/).
+# GRANULAR scopes, not classic: a modern Atlassian app enables granular scopes, and
+# requesting the classic read:jira-work / read:jira-user then fails the consent with
+# "Something went wrong" because they are not on the app. Each granular scope maps to an
+# endpoint the connector calls:
+#   read:jql:jira                 -> POST /rest/api/3/search/jql (the JQL change feed)
+#   read:issue:jira               -> the issue keys the search returns, and issue reads
+#   read:issue-details:jira       -> the issue fields (summary, description)
+#   read:issue-security-level:jira-> the issue's security field (drives the ACL)
+#   read:issue-security-scheme:jira-> GET issuesecurityschemes/level/member (level members)
+#   read:permission-scheme:jira   -> GET project/{key}/permissionscheme (browse audience)
+#   read:project-role:jira        -> GET project/{key}/role/{id} (project-role actors)
+#   read:user:jira, read:group:jira-> resolve the user and group principals in the above
+#   offline_access                -> a rotating refresh token
 _OAUTH_SCOPES: tuple[str, ...] = (
-    "read:jira-work",
-    "read:jira-user",
+    "read:jql:jira",
+    "read:issue:jira",
+    "read:issue-details:jira",
+    "read:issue-security-level:jira",
+    "read:issue-security-scheme:jira",
+    "read:permission-scheme:jira",
     "read:project-role:jira",
+    "read:user:jira",
+    "read:group:jira",
     "offline_access",
 )
 

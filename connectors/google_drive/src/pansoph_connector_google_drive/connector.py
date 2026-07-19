@@ -19,11 +19,15 @@ Implemented against the Google Drive API v3.
                https://developers.google.com/identity/protocols/oauth2/web-server
                https://developers.google.com/workspace/drive/api/guides/api-specific-auth
                A service account with domain delegation remains a valid alternative.
-  Incremental: the changes feed. A None cursor takes a fresh startPageToken from
-               changes.getStartPageToken (with driveId + supportsAllDrives for a
-               shared drive) and pages changes.list from it; that token is a durable,
-               non-expiring high-water mark, so the very first sync already yields a
-               real resume point rather than an empty string. Each page is fetched
+  Incremental: an initial backfill, then the changes feed. The changes feed only
+               reports changes AFTER its start token, so it never returns pre-existing
+               files; a None cursor therefore first takes the go-forward startPageToken
+               and then lists every existing file (files.list, recursing the folder
+               subtree when folder_id is set) so the first sync actually indexes the
+               corpus instead of reporting zero documents. Each backfilled ref carries
+               that startPageToken as its durable, non-expiring resume point, so the
+               next sync runs incrementally from it. Incremental polls page changes.list
+               (with driveId + supportsAllDrives for a shared drive). Each page is fetched
                with includeRemoved=true, includeItemsFromAllDrives=true, and
                supportsAllDrives=true. Intra-listing paging threads nextPageToken;
                the durable checkpoint surfaced to the runtime is newStartPageToken,
@@ -36,15 +40,15 @@ Implemented against the Google Drive API v3.
   Deletions:  a change with removed==true (deletion or loss of access) or
                file.trashed==true is yielded as a DocRef with deleted=True (a
                tombstone). includeRemoved=true is required for removed changes to
-               appear. Note that the changes feed is account/drive wide and has no
-               folder filter, so folder_id narrows the initial full listing and
-               fetch/ACL reads but does not filter the incremental change stream;
-               tombstones for files outside the folder are harmless (the runtime only
-               purges documents it already indexed).
-  Scope:       an instance is confined to one folder with the `folder_id` config
-               (query operator "'<id>' in parents") and, for a shared drive, the
-               `drive_id` config (corpora=drive, driveId, includeItemsFromAllDrives,
-               supportsAllDrives). The deprecated teamDrive*/corpus params are not used.
+               appear. The changes feed is account/drive wide and has no folder filter,
+               so an incremental live change is kept only when the file sits under the
+               configured folder subtree (its parent chain is walked); a deletion is
+               always surfaced (the runtime only purges what it already indexed).
+  Scope:       an instance is confined to one folder subtree with the `folder_id`
+               config: the backfill recurses it and the incremental feed filters to it.
+               For a shared drive, the `drive_id` config adds corpora=drive, driveId,
+               includeItemsFromAllDrives, and supportsAllDrives. The deprecated
+               teamDrive*/corpus params are not used.
   ACL model:   a file's permissions map to the ACL, read via permissions.list and
                paginated on nextPageToken so a heavily shared file is never truncated
                (permissions.list returns at most 100 permissions per page for
@@ -119,11 +123,10 @@ class GoogleDriveConnector:
         self.instance_id = instance_id
         self._token: str = cfg.get("token", "")
         self._drive_id: str = cfg.get("drive_id", "")
-        base_q: str = cfg.get("query", "trashed=false")
-        folder_id: str = cfg.get("folder_id", "")
-        # Confine the instance to one folder when folder_id is set, by ANDing the
-        # parents operator onto the base query.
-        self._query: str = f"'{folder_id}' in parents and ({base_q})" if folder_id else base_q
+        self._base_q: str = cfg.get("query", "trashed = false")
+        # Confine the instance to one folder subtree when folder_id is set. The initial
+        # backfill walks the tree rooted here; the incremental feed filters to it.
+        self._folder_id: str = cfg.get("folder_id", "")
         self.meta = ConnectorMeta(
             name="google_drive",
             auth=AuthScheme.oauth2,
@@ -245,18 +248,25 @@ class GoogleDriveConnector:
         return token
 
     async def list_changes(self, cursor: str | None) -> AsyncIterator[tuple[DocRef, str]]:
-        """Page the Drive changes feed, yielding one DocRef per change.
+        """Backfill the corpus on the first sync, then page the changes feed.
 
-        A None cursor takes a fresh startPageToken (the initial sync); otherwise the
-        saved cursor is the durable resume point. Within a poll, nextPageToken threads
-        intra-listing pages; the cursor yielded with every DocRef is the durable
-        checkpoint (newStartPageToken once the end of the change list is reached, else
-        the page token still being consumed) so the runtime always persists a
-        non-empty, resumable high-water mark. removed==true or file.trashed==true maps
-        to a deleted DocRef (a tombstone).
+        The Drive changes feed only reports changes AFTER its start token, so it never
+        returns pre-existing files: a first sync that relied on it alone would index
+        nothing (the reported "0 documents" on a folder full of files). So a None cursor
+        first takes the go-forward startPageToken (nothing between here and the walk is
+        lost), then lists every existing file so the initial sync actually indexes the
+        corpus, pairing each ref with that token as the durable resume point. A saved
+        cursor means incremental: the changes feed, filtered to the configured folder.
+        removed==true or file.trashed==true maps to a deleted DocRef (a tombstone).
         """
         async with self._client() as client:
-            page: str = cursor if cursor else await self._start_page_token(client)
+            if cursor is None:
+                start = await self._start_page_token(client)
+                async for ref in self._backfill(client):
+                    yield ref, start
+                return
+
+            page: str = cursor
             # The durable checkpoint carried alongside each yielded ref. It advances
             # to newStartPageToken when the source signals the change list is drained,
             # so a crash resumes from the last persisted checkpoint, never from zero.
@@ -269,7 +279,7 @@ class GoogleDriveConnector:
                         "pageSize": 100,
                         "fields": (
                             "nextPageToken, newStartPageToken, "
-                            "changes(changeType, removed, fileId, file(trashed))"
+                            "changes(changeType, removed, fileId, file(trashed, parents))"
                         ),
                         **self._changes_params(),
                     },
@@ -288,6 +298,12 @@ class GoogleDriveConnector:
                         continue
                     file_obj = change.get("file") or {}
                     deleted = bool(change.get("removed")) or bool(file_obj.get("trashed"))
+                    # Confine an incremental change to the folder subtree. A deletion is
+                    # always surfaced (purge whatever was indexed); a live file is skipped
+                    # unless it sits under the configured folder, so a change elsewhere in
+                    # the drive never leaks a file the instance was scoped to exclude.
+                    if not deleted and not await self._within_folder(client, file_obj, file_id):
+                        continue
                     yield (
                         DocRef(
                             source_doc_id=file_id,
@@ -299,6 +315,97 @@ class GoogleDriveConnector:
                 if not next_page:
                     break
                 page = next_page
+
+    async def _backfill(self, client: httpx.AsyncClient) -> AsyncIterator[DocRef]:
+        """Yield every existing non-folder file the instance is scoped to.
+
+        With a folder configured, walk that folder's subtree (Drive has no single query
+        for all descendants, so subfolders are recursed); otherwise list the whole corpus
+        the base query allows. Folders themselves are traversed, never yielded as docs.
+        """
+        if self._folder_id:
+            stack = [self._folder_id]
+            seen: set[str] = set()
+            while stack:
+                fid = stack.pop()
+                if fid in seen:
+                    continue
+                seen.add(fid)
+                async for child in self._list_children(client, fid):
+                    if child.get("mimeType") == _FOLDER_MIME:
+                        stack.append(child["id"])
+                    else:
+                        yield DocRef(source_doc_id=child["id"], instance_id=self.instance_id)
+        else:
+            q = f"mimeType != '{_FOLDER_MIME}' and ({self._base_q})"
+            async for f in self._list_files(client, q, "nextPageToken, files(id)"):
+                if f.get("id"):
+                    yield DocRef(source_doc_id=f["id"], instance_id=self.instance_id)
+
+    async def _list_children(
+        self, client: httpx.AsyncClient, parent_id: str
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield the direct children (files and subfolders) of a folder, id + mimeType."""
+        q = f"'{parent_id}' in parents and ({self._base_q})"
+        async for f in self._list_files(client, q, "nextPageToken, files(id, mimeType)"):
+            if f.get("id"):
+                yield f
+
+    async def _list_files(
+        self, client: httpx.AsyncClient, q: str, fields: str
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Page files.list for a query, yielding each file object across all pages."""
+        page: str | None = None
+        while True:
+            params: dict[str, str] = {"q": q, "pageSize": "100", "fields": fields}
+            params.update(self._drive_params())
+            if page:
+                params["pageToken"] = page
+            resp = await client.get("/files", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            for f in data.get("files", []):
+                yield f
+            page = data.get("nextPageToken")
+            if not page:
+                break
+
+    async def _within_folder(
+        self, client: httpx.AsyncClient, file_obj: dict[str, Any], file_id: str
+    ) -> bool:
+        """True when a changed file sits anywhere under the configured folder subtree.
+
+        No folder configured means the whole corpus is in scope. Otherwise the file's
+        parent chain is walked up to the root; a match on the configured folder id at any
+        level keeps the file (so nested files are confined correctly, not just direct
+        children). The changes feed already carried the file's immediate parents, so the
+        common one-hop case costs no extra call.
+        """
+        if not self._folder_id:
+            return True
+        seen: set[str] = set()
+        frontier = list(file_obj.get("parents") or [])
+        if not frontier:
+            meta = (
+                await client.get(
+                    f"/files/{file_id}", params={"fields": "parents", **self._drive_params()}
+                )
+            ).json()
+            frontier = list(meta.get("parents") or [])
+        while frontier:
+            pid = frontier.pop()
+            if pid == self._folder_id:
+                return True
+            if pid in seen:
+                continue
+            seen.add(pid)
+            meta = (
+                await client.get(
+                    f"/files/{pid}", params={"fields": "parents", **self._drive_params()}
+                )
+            ).json()
+            frontier.extend(meta.get("parents") or [])
+        return False
 
     async def fetch(self, ref: DocRef) -> tuple[RawDoc, AccessControl]:
         async with self._client() as client:
