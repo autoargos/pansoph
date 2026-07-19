@@ -258,3 +258,32 @@ async def test_drive_acl_paginates_and_namespaces_domain() -> None:
     assert set(acl.allow_users) == {"alice@x.com"}
     assert set(acl.allow_groups) == {"eng@x.com", "domain:x.com"}
     assert acl.deny == []
+
+
+@pytest.mark.conformance
+async def test_multi_folder_backfill_walks_every_configured_folder() -> None:
+    """A multi-select folder config (a list) backfills each folder's subtree, so several
+    folders can feed one instance. A scalar folder_id is still accepted for back compat."""
+
+    @respx.mock(assert_all_called=False)
+    async def _run(respx_mock: respx.MockRouter) -> list[str]:
+        respx_mock.get(path="/drive/v3/changes/startPageToken").mock(
+            return_value=httpx.Response(200, json={"startPageToken": "S1"})
+        )
+
+        def _files(request: httpx.Request) -> httpx.Response:
+            q = request.url.params.get("q", "")
+            if "'taxes' in parents" in q:
+                return httpx.Response(200, json={"files": [{"id": "d1", "mimeType": "text/plain"}]})
+            if "'legal' in parents" in q:
+                return httpx.Response(200, json={"files": [{"id": "d2", "mimeType": "text/plain"}]})
+            return httpx.Response(200, json={"files": []})
+
+        respx_mock.get(path="/drive/v3/files").mock(side_effect=_files)
+        conn = GoogleDriveConnector(
+            instance_id="drive", config={"token": "x", "folder_id": ["taxes", "legal"]}
+        )
+        return [ref.source_doc_id async for ref, _ in conn.list_changes(None)]
+
+    ids = await _run()
+    assert sorted(ids) == ["d1", "d2"]

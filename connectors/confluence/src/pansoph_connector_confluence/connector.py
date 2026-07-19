@@ -270,6 +270,18 @@ def _read_restriction_by_operation(data: dict[str, Any]) -> tuple[list[str], lis
     return users, groups
 
 
+def _as_list(value: Any) -> list[str]:
+    """Normalize a config value that may be a scalar or a list into a list of keys.
+
+    The space field is multi-select (a list), but an older single-value config (or a
+    hand-typed key) is a scalar, so both are accepted and empty entries are dropped."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value if v]
+    return [str(value)]
+
+
 def _intersect(sets: list[set[str]]) -> set[str]:
     if not sets:
         return set()
@@ -287,7 +299,9 @@ class ConfluenceConnector:
         self._email = cfg.get("email", "")
         self._token = cfg.get("token", "")
         self._oauth_token = cfg.get("oauth_token", "")
-        self._space = cfg.get("space_key", "")
+        # One or more space keys to confine the instance to (a multi-select field, so a
+        # list; a legacy scalar is still accepted). Empty means every reachable space.
+        self._spaces = _as_list(cfg.get("space_key"))
         # Atlassian Cloud (OAuth) addresses the API through a gateway keyed by a cloud
         # id, not the site host. When only an OAuth token is sealed (no base_url), the
         # base is resolved from the token at run time (see _ensure_base). These two
@@ -360,12 +374,12 @@ class ConfluenceConnector:
                 ),
                 ConfigField(
                     key="space_key",
-                    label="Space key",
-                    kind=FieldKind.STRING,
+                    label="Spaces",
+                    kind=FieldKind.LIST,
                     required=False,
                     placeholder="ENG",
                     resource_kind="space",
-                    help="Limit ingestion to one space. Leave blank to list all reachable pages.",
+                    help="Limit ingestion to one or more spaces, or leave blank for all pages.",
                 ),
             ),
         )
@@ -452,8 +466,9 @@ class ConfluenceConnector:
     # --- change feed ---
     def _changes_cql(self, since: datetime | None) -> str:
         clauses = ["type=page"]
-        if self._space:
-            clauses.append(f'space="{self._space}"')
+        if self._spaces:
+            quoted = ", ".join(f'"{s}"' for s in self._spaces)
+            clauses.append(f"space in ({quoted})")
         if since is not None:
             clauses.append(f'lastmodified >= "{_cql_minute(since)}"')
         return " AND ".join(clauses) + " ORDER BY lastmodified ASC"
@@ -500,33 +515,37 @@ class ConfluenceConnector:
 
     async def _trashed(self, client: httpx.AsyncClient) -> AsyncIterator[DocRef]:
         # v2 pages with status=trashed is the removal signal. The v1 content list rejects
-        # a granular token (401 "scope does not match"), so this path is v2 only. When a
-        # space is configured the sweep is scoped to it by numeric space-id (the v2 filter);
-        # otherwise it lists every trashed page the credential can reach.
-        params_base: dict[str, Any] = {"status": "trashed", "limit": 100}
-        if self._space:
-            space_id = await self._space_id_for_key(client, self._space)
-            if space_id is None:
-                return
-            params_base["space-id"] = space_id
-        cursor: str | None = None
-        while True:
-            params = dict(params_base)
-            if cursor:
-                params["cursor"] = cursor
-            resp = await client.get("/wiki/api/v2/pages", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            for page in data.get("results", []):
-                if page.get("id"):
-                    yield DocRef(
-                        source_doc_id=str(page["id"]),
-                        instance_id=self.instance_id,
-                        deleted=True,
-                    )
-            cursor = self._next_cursor(data)
-            if not cursor:
-                break
+        # a granular token (401 "scope does not match"), so this path is v2 only. When
+        # spaces are configured the sweep is scoped to each by numeric space-id (the v2
+        # filter); otherwise it lists every trashed page the credential can reach. A space
+        # id it cannot resolve is skipped, not fatal.
+        space_ids: list[str | None] = [None]
+        if self._spaces:
+            space_ids = [await self._space_id_for_key(client, key) for key in self._spaces]
+        for space_id in space_ids:
+            if self._spaces and space_id is None:
+                continue
+            params_base: dict[str, Any] = {"status": "trashed", "limit": 100}
+            if space_id is not None:
+                params_base["space-id"] = space_id
+            cursor: str | None = None
+            while True:
+                params = dict(params_base)
+                if cursor:
+                    params["cursor"] = cursor
+                resp = await client.get("/wiki/api/v2/pages", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                for page in data.get("results", []):
+                    if page.get("id"):
+                        yield DocRef(
+                            source_doc_id=str(page["id"]),
+                            instance_id=self.instance_id,
+                            deleted=True,
+                        )
+                cursor = self._next_cursor(data)
+                if not cursor:
+                    break
 
     async def _space_id_for_key(self, client: httpx.AsyncClient, key: str) -> str | None:
         """Resolve a space key (e.g. "ENG" or a "~personal" key) to its numeric v2 id.
@@ -656,9 +675,7 @@ class ConfluenceConnector:
         groups = sorted(restriction_groups & set(space.allow_groups))
         return AccessControl(allow_users=users, allow_groups=groups, principal_ns=self.instance_id)
 
-    async def _ancestor_ids(
-        self, client: httpx.AsyncClient, first_parent_id: Any
-    ) -> list[str]:
+    async def _ancestor_ids(self, client: httpx.AsyncClient, first_parent_id: Any) -> list[str]:
         """Walk the parentId chain upward from a page, returning ancestor ids.
 
         Each v2 page carries only its immediate parentId, so the full chain is walked one
@@ -691,9 +708,7 @@ class ConfluenceConnector:
         non-2xx propagates and the ACL builder fails closed, so an unreadable restriction
         is never mistaken for unrestricted.
         """
-        resp = await client.get(
-            f"/wiki/rest/api/content/{content_id}/restriction/byOperation/read"
-        )
+        resp = await client.get(f"/wiki/rest/api/content/{content_id}/restriction/byOperation/read")
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
         return _read_restriction_by_operation(result)

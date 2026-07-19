@@ -491,3 +491,18 @@ def test_validate_accepts_oauth_without_base_url() -> None:
     assert not conn.validate({}).ok
     assert not conn.validate({"email": "e@x.com", "token": "x"}).ok
     assert conn.validate({"base_url": "https://x", "email": "e@x.com", "token": "x"}).ok
+
+
+def test_multi_space_cql_filters_on_every_configured_space() -> None:
+    # A multi-select space config (a list) confines the CQL change feed to all of them; a
+    # legacy scalar still works and yields a single-space clause.
+    multi = ConfluenceConnector(
+        instance_id="c",
+        config={"base_url": "https://x", "email": "e", "token": "t", "space_key": ["ENG", "OPS"]},
+    )
+    assert 'space in ("ENG", "OPS")' in multi._changes_cql(None)
+    scalar = ConfluenceConnector(
+        instance_id="c",
+        config={"base_url": "https://x", "email": "e", "token": "t", "space_key": "ENG"},
+    )
+    assert 'space in ("ENG")' in scalar._changes_cql(None)

@@ -117,6 +117,18 @@ _EXPORT = {
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
+def _as_list(value: Any) -> list[str]:
+    """Normalize a config value that may be a scalar or a list into a list of ids.
+
+    Multi-select fields store a list, but an older single-value config (or a hand-pasted
+    id) stores a scalar, so both are accepted and empty entries are dropped."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value if v]
+    return [str(value)]
+
+
 class GoogleDriveConnector:
     def __init__(self, instance_id: str, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
@@ -124,9 +136,10 @@ class GoogleDriveConnector:
         self._token: str = cfg.get("token", "")
         self._drive_id: str = cfg.get("drive_id", "")
         self._base_q: str = cfg.get("query", "trashed = false")
-        # Confine the instance to one folder subtree when folder_id is set. The initial
-        # backfill walks the tree rooted here; the incremental feed filters to it.
-        self._folder_id: str = cfg.get("folder_id", "")
+        # Confine the instance to one or more folder subtrees when folder_id is set (a
+        # multi-select field, so a list; a legacy scalar is still accepted). The initial
+        # backfill walks each tree; the incremental feed keeps a change under any of them.
+        self._folder_ids: list[str] = _as_list(cfg.get("folder_id"))
         self.meta = ConnectorMeta(
             name="google_drive",
             auth=AuthScheme.oauth2,
@@ -163,15 +176,16 @@ class GoogleDriveConnector:
                 ),
                 ConfigField(
                     key="folder_id",
-                    label="Folder ID",
-                    kind=FieldKind.STRING,
+                    label="Folders",
+                    kind=FieldKind.LIST,
                     required=False,
                     placeholder="0ABcdEFGhijKLMnoPQR",
                     resource_kind="folder",
                     help=(
-                        "Confine the instance to one folder. Pick one from the folder tree "
-                        "the connected credential can reach, or leave blank to ingest all "
-                        "reachable files. Free-text folder ids still work."
+                        "Confine the instance to one or more folders. Pick from the folder "
+                        "tree the connected credential can reach (each pick adds its whole "
+                        "subtree), or leave blank to ingest all reachable files. Free-text "
+                        "folder ids still work."
                     ),
                 ),
                 ConfigField(
@@ -319,12 +333,14 @@ class GoogleDriveConnector:
     async def _backfill(self, client: httpx.AsyncClient) -> AsyncIterator[DocRef]:
         """Yield every existing non-folder file the instance is scoped to.
 
-        With a folder configured, walk that folder's subtree (Drive has no single query
-        for all descendants, so subfolders are recursed); otherwise list the whole corpus
-        the base query allows. Folders themselves are traversed, never yielded as docs.
+        With one or more folders configured, walk each folder's subtree (Drive has no
+        single query for all descendants, so subfolders are recursed); otherwise list the
+        whole corpus the base query allows. Folders are traversed, never yielded as docs. A
+        shared seen-set spans all configured folders, so a file reachable from two of them
+        is indexed once.
         """
-        if self._folder_id:
-            stack = [self._folder_id]
+        if self._folder_ids:
+            stack = list(self._folder_ids)
             seen: set[str] = set()
             while stack:
                 fid = stack.pop()
@@ -373,16 +389,17 @@ class GoogleDriveConnector:
     async def _within_folder(
         self, client: httpx.AsyncClient, file_obj: dict[str, Any], file_id: str
     ) -> bool:
-        """True when a changed file sits anywhere under the configured folder subtree.
+        """True when a changed file sits anywhere under a configured folder subtree.
 
         No folder configured means the whole corpus is in scope. Otherwise the file's
-        parent chain is walked up to the root; a match on the configured folder id at any
+        parent chain is walked up to the root; a match on ANY configured folder id at any
         level keeps the file (so nested files are confined correctly, not just direct
         children). The changes feed already carried the file's immediate parents, so the
         common one-hop case costs no extra call.
         """
-        if not self._folder_id:
+        if not self._folder_ids:
             return True
+        wanted = set(self._folder_ids)
         seen: set[str] = set()
         frontier = list(file_obj.get("parents") or [])
         if not frontier:
@@ -394,7 +411,7 @@ class GoogleDriveConnector:
             frontier = list(meta.get("parents") or [])
         while frontier:
             pid = frontier.pop()
-            if pid == self._folder_id:
+            if pid in wanted:
                 return True
             if pid in seen:
                 continue
