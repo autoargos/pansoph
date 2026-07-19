@@ -17,6 +17,20 @@ from pansoph_types import RawDoc, Section
 from .ports import ParsedDoc
 
 
+# C0 control characters, except tab/newline/carriage-return, are stripped from all parsed
+# text. NUL (0x00) in particular is never meaningful document content (it shows up when a
+# binary or mis-decoded file is read as text), and a Postgres text column rejects it
+# outright ("text fields cannot contain NUL (0x00) bytes"), which would abort the whole
+# sync over one odd file. Removing the control range keeps such a file from poisoning the
+# run while leaving normal whitespace intact.
+_CONTROL_STRIP = {c: None for c in range(0x20) if c not in (0x09, 0x0A, 0x0D)}
+_CONTROL_STRIP[0x7F] = None
+
+
+def _sanitize(text: str) -> str:
+    return text.translate(_CONTROL_STRIP)
+
+
 class DoclingParser:
     async def parse(self, raw: RawDoc) -> ParsedDoc:
         # Fast path: the connector already gave us text.
@@ -27,7 +41,7 @@ class DoclingParser:
             # retrieval and the answer prompt. Strip it to readable text first.
             if _looks_like_html(raw):
                 text = _html_to_text(text)
-            sections = _split_markdown(text)
+            sections = _split_markdown(_sanitize(text))
             return ParsedDoc(title=raw.title, lang=raw.lang, sections=sections)
 
         if raw.content is None:
@@ -47,7 +61,9 @@ class DoclingParser:
         stream = DocumentStream(name=raw.source_doc_id, stream=io.BytesIO(raw.content))
         result = DocumentConverter().convert(stream)
         markdown = result.document.export_to_markdown()
-        return ParsedDoc(title=raw.title, lang=raw.lang, sections=_split_markdown(markdown))
+        return ParsedDoc(
+            title=raw.title, lang=raw.lang, sections=_split_markdown(_sanitize(markdown))
+        )
 
 
 def _split_markdown(text: str) -> list[Section]:

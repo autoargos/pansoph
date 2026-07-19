@@ -71,3 +71,21 @@ def test_parser_html_page_yields_bounded_clean_chunks() -> None:
     joined = "\n".join(chunks)
     assert "junk()" not in joined
     assert "A wiki is a website." in joined
+
+
+def test_parser_strips_nul_and_control_bytes() -> None:
+    # A file read as text can carry NUL (0x00) and other C0 control bytes. Postgres text
+    # columns reject NUL outright, so the parser must strip it (and its control siblings)
+    # while keeping tabs and newlines, or one odd file aborts the whole sync.
+    raw = RawDoc(
+        source_doc_id="u",
+        instance_id="i",
+        mime="text/plain",
+        text="clean\x00text\x07here\tand\nnewline",
+        title="t",
+    )
+    parsed = asyncio.run(DoclingParser().parse(raw))
+    joined = "\n".join(s.text for s in parsed.sections)
+    assert "\x00" not in joined and "\x07" not in joined
+    assert "cleantexthere" in joined  # NUL and BEL removed, characters around them kept
+    assert "\t" in joined and "newline" in joined  # tab and newline preserved
