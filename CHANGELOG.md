@@ -37,6 +37,9 @@ control enforced at retrieval, built in and fully removable.
   a system health view. Light and dark themes are both first class.
 - Background sync with a stop control and orphan run cleanup on boot.
 - Permission red team test suite as a standalone CI gate.
+- Packaging: a Docker Compose stack with profiles, and a Helm chart
+  (deploy/helm/pansoph) that deploys the core tier and its data services,
+  validated with helm lint, kubeconform, and a live kind install.
 
 ### Security
 
