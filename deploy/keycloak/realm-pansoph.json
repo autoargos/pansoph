@@ -4,6 +4,13 @@
   "sslRequired": "none",
   "registrationAllowed": false,
   "loginTheme": "keycloak",
+  "ssoSessionIdleTimeout": 2592000,
+  "ssoSessionMaxLifespan": 2592000,
+  "offlineSessionIdleTimeout": 5184000,
+  "offlineSessionMaxLifespanEnabled": false,
+  "accessTokenLifespan": 900,
+  "clientSessionIdleTimeout": 2592000,
+  "clientSessionMaxLifespan": 2592000,
   "groups": [
     { "name": "g1" },
     { "name": "g2" },

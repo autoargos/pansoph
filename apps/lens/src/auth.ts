@@ -27,19 +27,44 @@ const manager = new UserManager({
 // API kept sending the stale one. Registered once at module load.
 manager.events.addUserLoaded((user) => setAuthToken(user.access_token));
 manager.events.addUserUnloaded(() => setAuthToken(null));
-// If the token still expires (renewal disabled or failed), try one silent renew; on
-// failure the next API call surfaces the 401 and the user can re-login.
-manager.events.addAccessTokenExpired(() => {
-  void manager.signinSilent().catch(() => setAuthToken(null));
-});
-// When any API call sees a 401, silently renew (a fresh access token is usually one
-// refresh away) so the action can be retried instead of failing.
-setUnauthorizedHandler(() => {
-  void manager
-    .signinSilent()
-    .then((u) => u && setAuthToken(u.access_token))
-    .catch(() => setAuthToken(null));
-});
+
+// Guards against firing several redirects when a burst of API calls all 401 at once (three
+// sync retries, say): the first failed renewal starts the redirect, the rest are no-ops.
+let _reauthInFlight = false;
+
+// Renew the access token, and if that is impossible, re-establish the session.
+//
+// A short access token is normally one refresh away, so try a silent renew first. But when
+// the refresh token itself is gone (the SSO idle window elapsed while the tab was closed,
+// which is exactly what happens after several hours away) the silent renew fails, and the
+// old behavior just cleared the token and left every action 401ing with "session expired"
+// forever. Instead, fall back to a full redirect to the IdP: it resumes silently if the
+// Keycloak SSO cookie is still alive, or prompts a fresh login if not. Either way the user
+// ends up signed in again rather than stuck. Guarded so a burst of 401s redirects once.
+async function renewOrReauth(): Promise<void> {
+  try {
+    const user = await manager.signinSilent();
+    if (user) {
+      setAuthToken(user.access_token);
+      return;
+    }
+  } catch {
+    // fall through to the interactive redirect below
+  }
+  setAuthToken(null);
+  if (_reauthInFlight) return;
+  _reauthInFlight = true;
+  // Return to wherever the user was after the round trip, not always the home page.
+  void manager.signinRedirect({
+    state: { returnTo: window.location.pathname + window.location.search },
+  });
+}
+
+// If the access token expires while the app is open, renew (or re-auth) proactively.
+manager.events.addAccessTokenExpired(() => void renewOrReauth());
+// When any API call sees a 401, renew (or re-auth) so the action can be retried instead of
+// failing silently or leaving the session wedged.
+setUnauthorizedHandler(() => void renewOrReauth());
 
 // The identity provider's self-service account console for the signed-in user (manage
 // profile, password, sessions). Keycloak serves it at {issuer}/account; swapping the IdP
@@ -51,7 +76,10 @@ export function accountUrl(): string {
 async function bootstrap(): Promise<User | null> {
   if (window.location.search.includes("code=")) {
     const user = await manager.signinRedirectCallback();
-    window.history.replaceState({}, document.title, "/");
+    // Restore the page the user was on before a re-auth redirect (renewOrReauth stashes it
+    // in the OIDC state); default to home for a first sign-in that carries no returnTo.
+    const returnTo = (user.state as { returnTo?: string } | undefined)?.returnTo;
+    window.history.replaceState({}, document.title, returnTo || "/");
     return user;
   }
   return manager.getUser();

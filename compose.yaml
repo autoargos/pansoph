@@ -138,6 +138,10 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HOSTNAME: http://localhost:8090
       KC_HEALTH_ENABLED: "true"
+    # The realm sets long session lifetimes (ssoSessionIdleTimeout / MaxLifespan = 30 days)
+    # on purpose: Keycloak's 30 min idle default kills the refresh token whenever the tab is
+    # closed for a while, so a self-hosted knowledge tool 401s every action on return. JSON
+    # cannot carry a comment, hence this note lives here beside the mount.
     volumes:
       - ./deploy/keycloak/realm-pansoph.json:/opt/keycloak/data/import/realm-pansoph.json:ro
     ports:
