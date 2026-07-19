@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pansoph — aperture (mockup)</title>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@600,500&f[]=general-sans@400,500,600&f[]=cabinet-grotesk@700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     pansoph "aperture".
+     Owl's eye as the organizing motif. WARM palette (not the usual
+     cool blue-black), designed type (Clash Display + General Sans),
+     one teal signal. Both themes are first-class; the toggle is real.
+     ============================================================ */
+  :root {
+    --teal: #17B0A6;
+    --teal-deep: #0E8078;
+    --amber: #E0A33B;
+    --rose: #E0685F;
+    --sans: "General Sans", ui-sans-serif, system-ui, sans-serif;
+    --display: "Clash Display", "General Sans", sans-serif;
+    --grote: "Cabinet Grotesk", "Clash Display", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --radius: 18px;
+    --radius-sm: 12px;
+  }
+  /* --- DARK (warm ink) --- */
+  html[data-theme="dark"] {
+    --bg: #13110E;
+    --bg-2: #17140F;
+    --panel: #1E1A15;
+    --panel-2: #241F19;
+    --rail: #100E0B;
+    --line: rgba(240,230,215,0.08);
+    --line-2: rgba(240,230,215,0.14);
+    --text: #F2ECE1;
+    --muted: #A99E8C;
+    --faint: #6E6558;
+    --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 24px 60px -24px rgba(0,0,0,.75);
+    --iris: rgba(23,176,166,.16);
+  }
+  /* --- LIGHT (warm bone) --- */
+  html[data-theme="light"] {
+    --bg: #F1ECE2;
+    --bg-2: #F5F1E9;
+    --panel: #FBF9F3;
+    --panel-2: #F3EFE6;
+    --rail: #EFE9DD;
+    --line: rgba(30,24,16,0.09);
+    --line-2: rgba(30,24,16,0.15);
+    --text: #221D16;
+    --muted: #6A6256;
+    --faint: #9A9081;
+    --shadow: 0 1px 2px rgba(30,24,16,.05), 0 24px 50px -28px rgba(30,24,16,.28);
+    --iris: rgba(14,128,120,.12);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; }
+  body {
+    background:
+      radial-gradient(1100px 620px at 88% -12%, var(--iris), transparent 62%),
+      var(--bg);
+    color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased; transition: background .35s ease, color .35s ease;
+  }
+  ::selection { background: rgba(23,176,166,.28); }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 34px 24px 90px; }
+  .mono { font-family: var(--mono); }
+
+  /* ---------- aperture motif (owl iris / camera stop) ---------- */
+  .aperture { display:block; }
+
+  /* ---------- top brand row ---------- */
+  .topline { display:flex; align-items:center; gap: 16px; margin-bottom: 20px; }
+  .wordmark { display:flex; align-items:center; gap: 13px; }
+  .wordmark .pn { font-family: var(--grote); font-weight: 700; font-size: 26px; letter-spacing:-.5px; }
+  .topline .sp { flex: 1; }
+  .health { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); padding:8px 13px; border:1px solid var(--line); border-radius:999px; background:var(--panel); }
+  .dot { width:7px; height:7px; border-radius:50%; background: var(--teal); box-shadow: 0 0 0 3px rgba(23,176,166,.18); }
+  .dot.amber { background: var(--amber); box-shadow:0 0 0 3px rgba(224,163,59,.18); }
+  /* the theme toggle — an aperture that opens/closes */
+  .toggle {
+    display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 6px 0 14px;
+    border:1px solid var(--line); border-radius:999px; background: var(--panel); cursor:pointer; color:var(--muted);
+    font-family: var(--mono); font-size: 11px; letter-spacing:.6px; user-select:none;
+  }
+  .toggle:hover { border-color: var(--line-2); color: var(--text); }
+  .toggle .knob { width:26px; height:26px; border-radius:50%; display:grid; place-items:center; background: var(--panel-2); border:1px solid var(--line); }
+  html[data-theme="light"] .toggle .lbl-dark,
+  html[data-theme="dark"]  .toggle .lbl-light { display:none; }
+
+  /* ---------- app frame ---------- */
+  .app {
+    border-radius: 22px; overflow: hidden; border: 1px solid var(--line-2);
+    box-shadow: var(--shadow); background: var(--bg-2);
+    display: grid; grid-template-columns: 76px 1fr; min-height: 660px;
+  }
+  /* slim icon rail (not a fat sidebar) */
+  .rail { background: var(--rail); border-right: 1px solid var(--line); display:flex; flex-direction:column; align-items:center; padding: 18px 0; gap: 6px; }
+  .rail .mk { margin-bottom: 16px; }
+  .rail a { position:relative; width: 44px; height: 44px; border-radius: 13px; display:grid; place-items:center; color: var(--faint); }
+  .rail a .ic { width:20px; height:20px; }
+  .rail a:hover { color: var(--text); background: var(--panel); }
+  .rail a.active { color: var(--teal); background: var(--panel); box-shadow: inset 0 0 0 1px var(--line-2); }
+  .rail a.active::before { content:""; position:absolute; left:-18px; top:12px; bottom:12px; width:3px; border-radius:3px; background: var(--teal); }
+  .rail .sp { flex:1; }
+  .rail .me { width:34px; height:34px; border-radius:11px; background: linear-gradient(140deg, var(--teal), #3a63e0); display:grid; place-items:center; color:#04140f; font-weight:600; font-size:13px; }
+
+  .main { display:flex; flex-direction:column; }
+  .head { display:flex; align-items:flex-start; gap: 20px; padding: 30px 34px 18px; }
+  .head .crumb { font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px; color: var(--faint); text-transform: uppercase; }
+  .head h1 { font-family: var(--display); font-weight: 500; font-size: 34px; line-height:1.08; letter-spacing:-.6px; margin: 8px 0 0; max-width: 15ch; }
+  .head h1 em { font-style: normal; color: var(--teal); }
+  .head .omni {
+    margin-left:auto; align-self:center; display:flex; align-items:center; gap:10px; height:42px; padding:0 14px;
+    background: var(--panel); border:1px solid var(--line); border-radius: 12px; color: var(--faint); font-size:13px; min-width: 250px;
+  }
+  .head .omni .kbd { margin-left:auto; font-family:var(--mono); font-size:10.5px; border:1px solid var(--line); border-radius:6px; padding:2px 6px; }
+
+  .body { padding: 6px 34px 34px; }
+
+  /* ---------- chat / editorial answer ---------- */
+  .thread { max-width: 760px; }
+  .ask { display:flex; justify-content:flex-end; margin-bottom: 18px; }
+  .ask .b { background: var(--panel); border:1px solid var(--line-2); color: var(--text); padding: 12px 17px; border-radius: 15px 15px 5px 15px; font-size: 14.5px; max-width: 74%; }
+
+  .passage { position: relative; padding: 6px 4px 4px; }
+  .passage .lead {
+    font-family: var(--display); font-weight: 500; font-size: 22px; line-height: 1.5; letter-spacing:-.2px;
+    color: var(--text);
+  }
+  .passage .lead b { color: var(--teal); font-weight: 500; }
+  .cite { font-family: var(--mono); font-size: 11px; color: var(--teal); vertical-align: super; padding: 0 1px; }
+
+  .provenance { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
+  .provenance .ph { font-family: var(--mono); font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--faint); display:flex; align-items:center; gap:9px; }
+  .fn { display:flex; align-items:center; gap: 13px; margin-top: 12px; }
+  .fn .no { font-family: var(--mono); font-size: 12px; color: var(--teal); width: 20px; }
+  .fn .path { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .fn .ok { margin-left:auto; display:flex; align-items:center; gap:7px; font-size:11px; color: var(--teal); }
+  .fn .ok .iris { width:13px; height:13px; }
+
+  .composer { display:flex; align-items:center; gap: 12px; margin-top: 26px; padding: 7px 7px 7px 20px; border:1px solid var(--line-2); border-radius: 16px; background: var(--panel); }
+  .composer input { flex:1; background:transparent; border:0; outline:0; color: var(--text); font-family: var(--sans); font-size: 15px; }
+  .composer input::placeholder { color: var(--faint); }
+  .send { width: 42px; height: 42px; border-radius: 12px; background: var(--teal); display:grid; place-items:center; color:#04140f; box-shadow: 0 8px 24px -8px rgba(23,176,166,.5); }
+  .vow { display:flex; align-items:center; gap: 10px; margin-top: 16px; color: var(--faint); font-size: 12.5px; }
+  .vow b { color: var(--muted); font-weight: 500; }
+
+  /* ---------- connectors strip ---------- */
+  .section-h { display:flex; align-items:baseline; gap:12px; margin: 40px 2px 16px; }
+  .section-h .t { font-family: var(--display); font-weight: 500; font-size: 19px; letter-spacing:-.3px; }
+  .section-h .s { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing:.5px; }
+  .section-h .rule { flex:1; height:1px; background: var(--line); }
+  .grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .conn { border:1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 16px 16px 14px; box-shadow: var(--shadow); }
+  .conn .top { display:flex; align-items:center; gap:11px; }
+  .conn .badge { width:38px; height:38px; border-radius:11px; display:grid; place-items:center; border:1px solid var(--line); background:var(--panel-2); font-size:18px; }
+  .conn .nm { font-family: var(--display); font-weight:500; font-size: 15.5px; letter-spacing:-.2px; }
+  .conn .sc { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top:1px; }
+  .conn .st { margin-left:auto; }
+  .conn .big { font-family: var(--grote); font-weight:700; font-size: 30px; letter-spacing:-1px; margin: 14px 0 0; }
+  .conn .big small { font-family: var(--mono); font-weight:400; font-size: 11px; color: var(--faint); letter-spacing:0; margin-left:8px; }
+  .conn .ns { display:inline-flex; align-items:center; gap:7px; margin-top: 12px; font-family: var(--mono); font-size: 10.5px; color: var(--teal); border:1px solid rgba(23,176,166,.28); border-radius:999px; padding:3px 10px; }
+  .conn .act { display:flex; align-items:center; gap:8px; margin-top: 14px; }
+  .mini-btn { height:32px; padding:0 12px; border-radius:9px; border:1px solid var(--line); background: var(--panel-2); color: var(--muted); font-family: var(--sans); font-size:12px; font-weight:500; display:flex; align-items:center; gap:6px; }
+  .mini-btn.go { margin-left:auto; background: var(--teal); border-color:transparent; color:#04140f; }
+  .mini-btn.stop { margin-left:auto; color: var(--rose); border-color: rgba(224,104,95,.35); background:transparent; }
+
+  .foot { text-align:center; color:var(--faint); font-size:12px; margin-top: 36px; font-family:var(--mono); letter-spacing:.4px; }
+  .foot b { color: var(--muted); font-weight:500; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- brand row + theme toggle -->
+  <div class="topline">
+    <div class="wordmark">
+      <!-- owl aperture mark -->
+      <svg class="aperture" width="34" height="34" viewBox="0 0 128 128" aria-label="pansoph">
+        <g fill="none" stroke="var(--text)" stroke-width="5">
+          <path d="M64 16 C92 16 108 34 108 62 C108 92 90 112 64 112 C38 112 20 92 20 62 C20 34 36 16 64 16 Z" stroke-linejoin="round"/>
+          <path d="M30 52 C34 34 48 30 56 44 M98 52 C94 34 80 30 72 44" stroke-linecap="round"/>
+          <circle cx="47" cy="58" r="16"/><circle cx="81" cy="58" r="16"/>
+        </g>
+        <circle cx="47" cy="58" r="6.5" fill="var(--text)"/>
+        <circle cx="81" cy="58" r="6.5" fill="var(--teal)"/>
+        <path d="M58 74 L70 74 L64 88 Z" fill="var(--teal)"/>
+      </svg>
+      <div class="pn">pansoph</div>
+    </div>
+    <div class="sp"></div>
+    <div class="health"><span class="dot"></span> all systems healthy</div>
+    <!-- WORKING theme toggle -->
+    <button class="toggle" id="themeBtn" onclick="toggleTheme()" aria-label="Toggle theme">
+      <span class="lbl-dark">DARK</span><span class="lbl-light">LIGHT</span>
+      <span class="knob" id="knob">
+        <!-- aperture: many blades when dark (closed), few when light (open) -->
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="1.8">
+          <circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2" fill="var(--teal)" stroke="none"/>
+        </svg>
+      </span>
+    </button>
+  </div>
+
+  <!-- APP -->
+  <div class="app">
+    <!-- slim rail -->
+    <nav class="rail">
+      <svg class="aperture mk" width="30" height="30" viewBox="0 0 128 128" aria-label="pansoph">
+        <g fill="none" stroke="var(--text)" stroke-width="6">
+          <path d="M64 16 C92 16 108 34 108 62 C108 92 90 112 64 112 C38 112 20 92 20 62 C20 34 36 16 64 16 Z" stroke-linejoin="round"/>
+          <path d="M30 52 C34 34 48 30 56 44 M98 52 C94 34 80 30 72 44" stroke-linecap="round"/>
+          <circle cx="47" cy="58" r="15"/><circle cx="81" cy="58" r="15"/>
+        </g>
+        <circle cx="47" cy="58" r="6.5" fill="var(--text)"/><circle cx="81" cy="58" r="6.5" fill="var(--teal)"/>
+        <path d="M58 74 L70 74 L64 88 Z" fill="var(--teal)"/>
+      </svg>
+      <a class="active" title="Chat"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></a>
+      <a title="Search"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></a>
+      <a title="Connectors"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></a>
+      <a title="Access"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></a>
+      <a title="System"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/></svg></a>
+      <div class="sp"></div>
+      <div class="me">A</div>
+    </nav>
+
+    <!-- content -->
+    <section class="main">
+      <div class="head">
+        <div>
+          <div class="crumb">lens / ask</div>
+          <h1>Ask across <em>everything you can see.</em></h1>
+        </div>
+        <div class="omni">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          Actions &amp; pages <span class="kbd">⌘K</span>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="thread">
+          <div class="ask"><div class="b">What did we decide about the binding plane, and who can see it?</div></div>
+
+          <div class="passage">
+            <div class="lead">The <b>Binding Plane</b> makes per-instance injection structurally safe: capability-enforced isolation fused with a log-structured memory substrate, shipped as an open protocol.<span class="cite">1</span> The call was to <b>own binding, borrow storage</b> — append-only logs become quarantine-then-replay, content-addressing becomes signed mesh ops.<span class="cite">2</span></div>
+
+            <div class="provenance">
+              <div class="ph">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
+                Grounded in 2 sources you are allowed to read
+              </div>
+              <div class="fn"><span class="no">1</span><span class="path">confluence / ~yash / live doc 2026-07-19</span>
+                <span class="ok"><svg class="iris" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.6" fill="var(--teal)" stroke="none"/></svg> permitted</span></div>
+              <div class="fn"><span class="no">2</span><span class="path">gmail / thread / re: substrate &amp; binding</span>
+                <span class="ok"><svg class="iris" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.6" fill="var(--teal)" stroke="none"/></svg> permitted</span></div>
+            </div>
+          </div>
+
+          <div class="composer">
+            <input placeholder="Ask a question — answers are drawn only from what alice can read" />
+            <div class="send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          </div>
+          <div class="vow">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="1.8"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            <b>Bob asking this gets a different answer.</b> Nothing you can't see ever reaches the model.
+          </div>
+        </div>
+
+        <!-- connectors -->
+        <div class="section-h"><div class="t">Sources</div><div class="s">one access layer over every connector</div><div class="rule"></div></div>
+        <div class="grid">
+          <div class="conn">
+            <div class="top"><div class="badge">✉️</div><div><div class="nm">Gmail</div><div class="sc">individual · alice</div></div><div class="st"><span class="dot"></span></div></div>
+            <div class="big">1.2k<small>docs · 1.2k chunks</small></div>
+            <div class="ns"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> individual : alice</div>
+            <div class="act"><div class="mini-btn">Runs</div><div class="mini-btn go">Sync now</div></div>
+          </div>
+          <div class="conn">
+            <div class="top"><div class="badge">📁</div><div><div class="nm">Drive</div><div class="sc">folders · Tax, Legal</div></div><div class="st"><span class="dot"></span></div></div>
+            <div class="big">61<small>docs · 243 chunks</small></div>
+            <div class="ns"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> org</div>
+            <div class="act"><div class="mini-btn">Runs</div><div class="mini-btn stop"><span style="width:8px;height:8px;background:currentColor;border-radius:2px;display:inline-block"></span> Stop</div></div>
+          </div>
+          <div class="conn">
+            <div class="top"><div class="badge">🌐</div><div><div class="nm">Confluence</div><div class="sc">spaces · ENG</div></div><div class="st"><span class="dot"></span></div></div>
+            <div class="big">124<small>docs · 512 chunks</small></div>
+            <div class="ns"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> restriction × space-View</div>
+            <div class="act"><div class="mini-btn">Runs</div><div class="mini-btn go">Sync now</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot"><b>aperture</b> &middot; owl branding &middot; warm palette, Clash Display + General Sans &middot; toggle the theme, top right</div>
+</div>
+
+<script>
+  function toggleTheme(){
+    var h = document.documentElement;
+    h.setAttribute('data-theme', h.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  }
+</script>
+</body>
+</html>

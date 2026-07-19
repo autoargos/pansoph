@@ -71,6 +71,7 @@ from .base import OAuthProvider, TokenResult, token_result_from_standard_body
 SLACK_READ_SCOPES: tuple[str, ...] = (
     "channels:read",
     "channels:history",
+    "channels:join",
     "groups:read",
     "groups:history",
     "users:read",

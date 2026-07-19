@@ -222,6 +222,7 @@ class SlackConnector:
                     oauth_scopes=(
                         "channels:read",
                         "channels:history",
+                        "channels:join",
                         "groups:read",
                         "groups:history",
                         "users:read",

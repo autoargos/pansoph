@@ -29,6 +29,7 @@ from .connectors import (
     ConnectorManager,
     _build_connector,
     _connector_spec,
+    _refresh_oauth_token,
     _resolved_config,
 )
 from .secrets import secret_handle
@@ -132,7 +133,13 @@ async def list_instance_resources(
             status_code=400,
         )
 
-    resolved = {**instance, "config": await _resolved_config(instance)}
+    # Mint a fresh access token before discovery, mirroring run_instance. Without this the
+    # picker builds the connector with the STALE sealed access token, which 401s about an
+    # hour after connect and surfaces as a spurious "reconnect" in the edit/configure modal.
+    # google_drive is the only resource_discovery connector, so it is the one that hit this.
+    # A no-op when there is no sealed refresh token, so a hand-pasted static token is safe.
+    resolved_config = await _refresh_oauth_token(instance, await _resolved_config(instance))
+    resolved = {**instance, "config": resolved_config}
     connector = _build_connector(resolved)
     list_resources = getattr(connector, "list_resources", None)
     if list_resources is None:
