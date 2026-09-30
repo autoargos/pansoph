@@ -29,6 +29,9 @@ class OIDCIdentity:
         jwks_url: str = "",
         roles_claim: str = "roles",
         tenant_claim: str = "tenant",
+        userinfo_url: str = "",
+        groups_from_userinfo: bool = False,
+        require_verified_email: bool = False,
     ) -> None:
         self._issuer_url = issuer_url.rstrip("/")
         self._client_id = client_id
@@ -39,6 +42,18 @@ class OIDCIdentity:
         # tenant to this (never the request body), so a multi-tenant IdP must emit it. A
         # token with no such claim maps to the single "default" tenant.
         self._tenant_claim = tenant_claim
+        # Read groups from the IdP's userinfo endpoint on every authentication instead of
+        # the token. A token's groups claim is frozen until the token expires, so a user
+        # removed from a group kept it for the token's lifetime; userinfo reflects the
+        # directory now, so a revocation applies on the very next request. A failed
+        # userinfo call denies (fails closed), never falls back to the token claim.
+        if groups_from_userinfo and not userinfo_url:
+            raise ValueError("groups_from_userinfo requires userinfo_url (OIDC_USERINFO_URL)")
+        self._userinfo_url = userinfo_url
+        self._groups_from_userinfo = groups_from_userinfo
+        # Opt in: deny a token unless it carries an email the IdP marks verified. For
+        # deployments whose authorization subject is the email (CM-M3).
+        self._require_verified_email = require_verified_email
         self._jwks_client: Any = None
         self._cache: dict[str, User] = {}
 
@@ -71,19 +86,54 @@ class OIDCIdentity:
                 algorithms=["RS256", "ES256"],
                 audience=self._client_id,
                 issuer=self._issuer_url,
+                # A token without an expiry would be valid forever once leaked.
+                options={"require": ["exp", "iss", "aud", "sub"]},
             )
         except jwt.PyJWTError:
             return None
+        if self._require_verified_email and not (
+            isinstance(claims.get("email"), str)
+            and claims["email"].strip()
+            and claims.get("email_verified") is True
+        ):
+            return None
+        groups: list[str] = list(claims.get(self._groups_claim, []))
+        if self._groups_from_userinfo:
+            fresh = await self._userinfo_groups(token, str(claims["sub"]))
+            if fresh is None:
+                return None
+            groups = fresh
         user = User(
             id=claims.get("preferred_username") or claims["sub"],
-            email=claims.get("email"),
+            # The email is the authorization subject, so an address the IdP says is
+            # unverified is not trusted as one (CM-M3).
+            email=claims.get("email") if claims.get("email_verified") is not False else None,
             display_name=claims.get("name") or claims.get("preferred_username"),
             tenant_id=str(claims.get(self._tenant_claim) or "") or "default",
-            group_ids=list(claims.get(self._groups_claim, [])),
+            group_ids=groups,
             roles=list(claims.get(self._roles_claim, [])),
         )
         self._cache[user.id] = user
         return user
+
+    async def _userinfo_groups(self, token: str, sub: str) -> list[str] | None:
+        """Current groups from the userinfo endpoint, or None (deny) on any failure or
+        when userinfo describes a different subject than the validated token."""
+        import httpx
+
+        url = self._userinfo_url
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            return None
+        info = resp.json()
+        if not isinstance(info, dict) or info.get("sub") != sub:
+            return None
+        raw = info.get(self._groups_claim, [])
+        return [str(g) for g in raw] if isinstance(raw, list) else None
 
     async def get_user(self, user_id: str) -> User | None:
         return self._cache.get(user_id)
