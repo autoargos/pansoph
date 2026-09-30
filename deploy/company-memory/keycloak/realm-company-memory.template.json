@@ -1,0 +1,303 @@
+{
+  "_comment": "Company Memory LOCAL POC realm. Rendered by `company-memory init` into .secrets/ with generated passwords. Synthetic users only.",
+  "realm": "company-memory",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 36000,
+  "groups": [
+    {
+      "name": "everyone"
+    },
+    {
+      "name": "engineering"
+    },
+    {
+      "name": "leadership"
+    },
+    {
+      "name": "people-strategy"
+    },
+    {
+      "name": "project-atlas"
+    },
+    {
+      "name": "project-beacon"
+    },
+    {
+      "name": "project-atlas-publishers"
+    },
+    {
+      "name": "project-beacon-publishers"
+    },
+    {
+      "name": "engineering-publishers"
+    },
+    {
+      "name": "it-support-publishers"
+    },
+    {
+      "name": "cm-service-accounts"
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "connector_admin",
+        "description": "manage connector instances (the seeder)"
+      },
+      {
+        "name": "member",
+        "description": "search Company Memory"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "company-memory",
+      "name": "Company Memory resource (token audience)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "${CM_RESOURCE_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false
+    },
+    {
+      "clientId": "cm-cli",
+      "name": "Company Memory demo CLI (local POC)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "audience-company-memory",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "company-memory",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "claim.name": "groups",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "tenant",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant",
+            "claim.name": "tenant",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "cm-seeder",
+      "name": "Company Memory seeder (connector admin service account)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "${CM_SEEDER_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience-company-memory",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "company-memory",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "claim.name": "groups",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@company-memory.test",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Nguyen",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CM_PASSWORD_ALICE}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/everyone",
+        "/engineering",
+        "/project-atlas",
+        "/project-atlas-publishers"
+      ],
+      "realmRoles": [
+        "member"
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@company-memory.test",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Martins",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CM_PASSWORD_BOB}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/everyone",
+        "/engineering",
+        "/project-beacon",
+        "/project-beacon-publishers"
+      ],
+      "realmRoles": [
+        "member"
+      ]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@company-memory.test",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Diaz",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CM_PASSWORD_CAROL}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/everyone",
+        "/leadership"
+      ],
+      "realmRoles": [
+        "member"
+      ]
+    },
+    {
+      "username": "dave",
+      "enabled": true,
+      "email": "dave@company-memory.test",
+      "emailVerified": true,
+      "firstName": "Dave",
+      "lastName": "Okoro",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CM_PASSWORD_DAVE}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/everyone",
+        "/people-strategy"
+      ],
+      "realmRoles": [
+        "member"
+      ]
+    },
+    {
+      "username": "service-account-cm-seeder",
+      "enabled": true,
+      "serviceAccountClientId": "cm-seeder",
+      "realmRoles": [
+        "connector_admin"
+      ],
+      "email": "cm-seeder@service.company-memory.test",
+      "emailVerified": true,
+      "groups": [
+        "/cm-service-accounts"
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\": [{\"name\": \"username\", \"displayName\": \"Username\", \"validations\": {\"length\": {\"min\": 3, \"max\": 255}, \"username-prohibited-characters\": {}, \"up-username-not-idn-homograph\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"email\", \"displayName\": \"Email\", \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"firstName\", \"displayName\": \"First name\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"lastName\", \"displayName\": \"Last name\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"tenant\", \"displayName\": \"Company Memory tenant\", \"validations\": {\"pattern\": {\"pattern\": \"^[a-z0-9][a-z0-9-]{0,62}$\", \"error-message\": \"invalid tenant\"}}, \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}, \"multivalued\": false}], \"groups\": [{\"name\": \"user-metadata\", \"displayHeader\": \"User metadata\", \"displayDescription\": \"Attributes, which refer to user metadata\"}]}"
+          ]
+        }
+      }
+    ]
+  }
+}

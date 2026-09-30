@@ -1,0 +1,14 @@
+{
+  "_comment": "Who may publish manually added knowledge into which shared scope, and who reads it. Local POC policy. Reading a scope never grants publishing; see docs/company-memory/DEMO.md.",
+  "version": 1,
+  "tenants": {
+    "default": {
+      "project-atlas": {"publisher_groups": ["project-atlas-publishers"]},
+      "project-beacon": {"publisher_groups": ["project-beacon-publishers"]},
+      "engineering": {"publisher_groups": ["engineering-publishers"]}
+    },
+    "door3": {
+      "it-support": {"publisher_groups": ["it-support-publishers"], "read_groups": ["everyone"]}
+    }
+  }
+}

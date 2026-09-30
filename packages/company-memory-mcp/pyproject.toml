@@ -1,0 +1,33 @@
+[project]
+name = "company-memory-mcp"
+version = "0.0.1"
+description = "DOOR3 Company Memory fork: the authenticated Company Memory MCP server, the hardened agora app wrapper, and the local demo CLI. Built on pansoph, not part of upstream."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "pansoph-core[stack]>=0.0.1",
+  "pansoph-connector-cm-synthetic>=0.0.1",
+  "mcp>=1.2",
+  "httpx>=0.27",
+  "uvicorn>=0.30",
+]
+
+[project.scripts]
+company-memory-mcp = "company_memory_mcp.server:main"
+company-memory = "company_memory_mcp.cli:main"
+
+# The Company Memory identity adapter (verified email principal, configured users only).
+[project.entry-points."pansoph.identity"]
+company_memory = "company_memory_mcp.identity:ConfiguredUserIdentity"
+
+[tool.uv.sources]
+pansoph-core = { workspace = true }
+pansoph-connector-cm-synthetic = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/company_memory_mcp"]

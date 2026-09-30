@@ -1,0 +1,8 @@
+{
+  "_comment": "Real-user local POC profile. Copy to users.local.json (gitignored) and put real emails there, or use `company-memory user add`. No passwords here: the CLI generates them into .secrets/. Every user is put in `everyone`; publisher groups grant writes only.",
+  "tenant": "door3",
+  "users": [
+    {"email": "it-publisher@example.com", "groups": ["everyone", "it-support-publishers"]},
+    {"email": "reader@example.com", "groups": ["everyone"]}
+  ]
+}

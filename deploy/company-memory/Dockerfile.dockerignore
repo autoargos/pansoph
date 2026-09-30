@@ -1,0 +1,12 @@
+# Only what the image needs. Secrets, local state, tests, and node modules never enter
+# the build context.
+*
+!pyproject.toml
+!uv.lock
+!packages/
+!connectors/
+**/__pycache__
+**/.venv
+**/node_modules
+**/tests
+**/.pytest_cache
