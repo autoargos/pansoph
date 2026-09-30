@@ -26,6 +26,9 @@ class FakeVectorStore:
     def __init__(self) -> None:
         self.rows: list[SearchHit] = []
         self.last_limit: int | None = None
+        # When True, skip the group pre-filter (tenant only), so a test proves the authz
+        # bulk check alone keeps unauthorized documents out.
+        self.ignore_group_prefilter = False
 
     async def upsert(self, hits: list[SearchHit], vectors: list[list[float]]) -> None:
         # Replace-by-chunk so a re-upsert of a document does not duplicate its chunks,
@@ -38,6 +41,10 @@ class FakeVectorStore:
         # Purge every chunk of a document. Idempotent, like the real DELETE.
         self.rows = [r for r in self.rows if r.doc_id != doc_id]
 
+    async def get_document_chunks(self, doc_id: str, tenant_id: str) -> list[SearchHit]:
+        rows = [r for r in self.rows if r.doc_id == doc_id and r.tenant_id == tenant_id]
+        return sorted(rows, key=lambda r: int(r.chunk_id.rsplit("#", 1)[-1]))
+
     async def hybrid_search(
         self, query_vector: list[float], query_text: str, flt: VectorFilter, limit: int
     ) -> list[SearchHit]:
@@ -46,7 +53,11 @@ class FakeVectorStore:
             h
             for h in self.rows
             if h.tenant_id == flt.tenant_id
-            and (not h.allow_groups or set(h.allow_groups) & set(flt.any_groups))
+            and (
+                self.ignore_group_prefilter
+                or not h.allow_groups
+                or set(h.allow_groups) & set(flt.any_groups)
+            )
         ]
         return out[:limit]
 

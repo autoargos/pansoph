@@ -38,6 +38,9 @@ class _FakeVectorStore:
     async def upsert(self, hits: list[SearchHit], vectors: list[list[float]]) -> None:
         self.rows.extend(zip(hits, vectors, strict=True))
 
+    async def delete_by_doc_id(self, doc_id: str) -> None:
+        self.rows = [(h, v) for h, v in self.rows if h.doc_id != doc_id]
+
     async def hybrid_search(
         self, query_vector: list[float], query_text: str, flt: VectorFilter, limit: int
     ) -> list[SearchHit]:
