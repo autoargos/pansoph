@@ -19,7 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import RedirectResponse
-from pansoph_authz import TENANT_EVERYONE, Principal, membership_tuples, tuples_for_acl
+from pansoph_authz import TENANT_EVERYONE, Principal, tuples_for_acl
 from pansoph_ingestion.chunking import chunk_sections
 from pansoph_retrieval.pipeline import retrieve
 from pansoph_retrieval.ports import SearchHit
@@ -29,8 +29,15 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import assembly
 from .audit import audit
-from .connectors import ConnectorManager, health, start_sync, stop_sync
+from .connectors import (
+    ConnectorManager,
+    delete_instance_and_content,
+    health,
+    start_sync,
+    stop_sync,
+)
 from .group_aliases import expand_groups
+from .memberships import reconcile_memberships
 from .registry import list_adapters, load_adapter
 
 router = APIRouter(prefix="/api")
@@ -80,6 +87,15 @@ async def _identity_from_token(authorization: str | None) -> Any:
         return None
 
 
+def _auth_required() -> bool:
+    """True when the operator disabled the tokenless demo identity (fail closed).
+
+    Off by default so the demo switcher keeps working. A deployment holding real data sets
+    PANSOPH_REQUIRE_AUTH=true, and then a missing or invalid token is a 401, never a fall
+    back to the caller-supplied user, groups, and tenant in the request body."""
+    return os.environ.get("PANSOPH_REQUIRE_AUTH", "").strip().lower() in ("1", "true", "yes")
+
+
 async def _effective_identity(req: Query, authorization: str | None) -> tuple[str, list[str], str]:
     """Prefer the validated token identity; fall back to the request body (the demo
     switcher) when no bearer token is present. Returns (subject, groups, tenant_id).
@@ -99,6 +115,8 @@ async def _effective_identity(req: Query, authorization: str | None) -> tuple[st
         subject = getattr(user, "email", None) or user.id
         tenant = getattr(user, "tenant_id", "") or "default"
         return subject, list(user.group_ids), tenant
+    if _auth_required():
+        raise HTTPException(status_code=401, detail="authentication required")
     return req.user, req.groups, req.tenant_id
 
 
@@ -153,10 +171,17 @@ def require_role(*allowed: str) -> Any:
 _CONNECTOR_ADMIN = require_role(ROLE_CONNECTOR_ADMIN)
 
 
-async def _retrieve(
-    user: str, groups: list[str], tenant_id: str, query: str, final_k: int
-) -> list[Any]:
-    authz = assembly.build_authz()
+async def resolve_subject(
+    authz: Any, user: str, groups: list[str], tenant_id: str
+) -> tuple[list[str], Any]:
+    """Expand the subject's identity groups by the operator aliases and reconcile their
+    memberships in the authz graph. Returns (effective_groups, freshness token or None).
+
+    Shared by search, chat, and the MCP tools so every surface resolves a subject the
+    same way. The returned token is the membership write's, which the check must be at
+    least as fresh as. Every user is a member of its tenant's everyone group, so a public document
+    (granted to that group, not a global wildcard) is readable only within its tenant.
+    """
     # Expand the identity groups with any connector groups the operator aliased them to
     # (e.g. identity group "engineering" -> "slack:member:acme"), so a document a
     # connector granted only to its namespaced source group becomes reachable by the
@@ -164,15 +189,24 @@ async def _retrieve(
     # this never widens beyond the operator's declared edges.
     aliases = await assembly.build_group_alias_store().aliases_for_tenant(tenant_id)
     effective_groups = expand_groups(groups, aliases)
-    # Sync the subject's effective groups into the authz graph so the engine can resolve
-    # nested-group document access. Idempotent. In a full deployment this is done by the
-    # Identity port on login or SCIM sync; here it is per request. Every user is a member
-    # of its tenant's everyone group, so a public document (granted to that group, not a
-    # global wildcard) is readable only within its tenant. This enforces tenant isolation
-    # at the authz layer, defense in depth with the vector pre-filter.
-    await authz.write_tuples(
-        membership_tuples(user, [TENANT_EVERYONE, *effective_groups], tenant_id)
+    # Reconcile, not just write: memberships the subject no longer holds are deleted from
+    # the engine before the check, so leaving a group revokes at the source of truth and
+    # not only in the vector pre-filter (CM-H1).
+    fresh = await reconcile_memberships(
+        authz,
+        assembly.build_membership_store(),
+        subject=user,
+        groups={TENANT_EVERYONE, *effective_groups},
+        tenant_id=tenant_id,
     )
+    return effective_groups, fresh
+
+
+async def _retrieve(
+    user: str, groups: list[str], tenant_id: str, query: str, final_k: int
+) -> list[Any]:
+    authz = assembly.build_authz()
+    effective_groups, fresh = await resolve_subject(authz, user, groups, tenant_id)
     return await retrieve(
         query=query,
         subject=Principal(type="user", id=user, ns=tenant_id),
@@ -185,6 +219,7 @@ async def _retrieve(
         embedder=assembly.build_embedder(),
         authz=authz,
         reranker=assembly.build_reranker(),
+        at_least_as_fresh=fresh,
     )
 
 
@@ -492,9 +527,11 @@ async def create_instance(
 @router.delete("/connectors/instances/{instance_id}")
 async def delete_instance(
     instance_id: str, user: Any = Depends(_CONNECTOR_ADMIN)
-) -> dict[str, str]:
-    await _manager().delete_instance(instance_id)
-    return {"deleted": instance_id}
+) -> dict[str, Any]:
+    # Purge the instance's documents, tuples, ACL records, and secrets too (CM-H5).
+    purged = await delete_instance_and_content(_manager(), instance_id)
+    audit("connector_delete", actor=user.id, tenant="", instance=instance_id, purged=purged)
+    return {"deleted": instance_id, "purged_documents": purged}
 
 
 @router.post("/connectors/instances/{instance_id}/sync")

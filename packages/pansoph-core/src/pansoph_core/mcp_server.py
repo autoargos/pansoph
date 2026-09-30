@@ -8,43 +8,53 @@ subject may not read.
 Runs as its own process (`pansoph-mcp`) over streamable HTTP, which avoids the
 sub-app lifespan coupling of mounting it inside the FastAPI app. It can be mounted
 into agora later once the session-manager lifespan is wired.
+
+Authentication is at the transport (see mcp_auth.py): the caller's bearer token rides
+the HTTP Authorization header and is validated before any tool runs. No tool takes a
+credential argument.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from . import assembly
+from .mcp_auth import IdentityTokenVerifier, auth_settings_from_env, current_principal
 
 
-def build_mcp() -> Any:
+def build_mcp(auth: Any = None, token_verifier: Any = None) -> Any:
     from mcp.server.fastmcp import FastMCP
 
-    server = FastMCP("pansoph")
+    server = FastMCP(
+        "pansoph",
+        token_verifier=token_verifier or IdentityTokenVerifier(),
+        auth=auth or auth_settings_from_env(),
+    )
 
     @server.tool()
-    async def pansoph_search(query: str, token: str) -> str:
+    async def pansoph_search(query: str) -> str:
         """Search the operator's permitted knowledge. Returns cited chunks the caller may
         read.
 
-        SECURITY: `token` is the caller's bearer token (the same one the HTTP API takes).
-        Identity, tenant, and groups are derived from the VALIDATED token via the Identity
-        port, never from tool arguments, so an MCP client cannot impersonate a user or read
-        another tenant. An invalid or missing token returns nothing.
+        SECURITY: identity, tenant, and groups come from the caller's bearer token, which
+        the MCP transport validated before this tool ran, never from tool arguments, so an
+        MCP client cannot impersonate a user or read another tenant.
         """
         # Imported here to avoid a module-level dependency cycle with routes.
+        from .audit import audit
         from .routes import _retrieve
 
-        user = await assembly.build_identity().authenticate(token)
-        if user is None:
-            return "Authentication required: provide a valid bearer token."
-        subject = getattr(user, "email", None) or user.id
-        tenant = getattr(user, "tenant_id", "") or "default"
-        groups = list(getattr(user, "group_ids", []))
+        who = current_principal()
         # Runs the exact HTTP enforcement path: group-alias expansion, membership sync, the
         # overfetch plus bulk check, and the deny filter, so it never returns a document the
         # subject may not read.
-        hits = await _retrieve(subject, groups, tenant, query, 8)
+        hits = await _retrieve(who.principal, who.groups, who.tenant_id, query, 8)
+        audit(
+            "mcp_search",
+            actor=who.principal,
+            tenant=who.tenant_id,
+            results=len(hits),
+            doc_ids=sorted({h.doc_id for h in hits}),
+        )
         if not hits:
             return "No permitted results."
         return "\n\n".join(f"[{i + 1}] {h.doc_id}\n{h.text}" for i, h in enumerate(hits))

@@ -85,6 +85,10 @@ _IDENTITY_KWARGS: dict[str, Any] = {
         "groups_claim": _env("OIDC_GROUPS_CLAIM", "groups"),
         "jwks_url": _env("OIDC_JWKS_URL"),
         "roles_claim": _env("OIDC_ROLES_CLAIM", "roles"),
+        "userinfo_url": _env("OIDC_USERINFO_URL"),
+        "groups_from_userinfo": _env("OIDC_GROUPS_FROM_USERINFO").lower() in ("1", "true", "yes"),
+        "require_verified_email": _env("OIDC_REQUIRE_VERIFIED_EMAIL").lower()
+        in ("1", "true", "yes"),
     },
 }
 
@@ -151,6 +155,14 @@ def build_group_alias_store() -> Any:
     from .group_aliases import GroupAliasStore
 
     return GroupAliasStore(_postgres_dsn())
+
+
+def build_membership_store() -> Any:
+    """Build the per-subject membership record used to revoke stale group memberships in
+    the authz engine (CM-H1). Postgres-backed, one point read per query."""
+    from .memberships import PostgresMembershipStore
+
+    return PostgresMembershipStore(_postgres_dsn())
 
 
 def build_llm() -> Any:

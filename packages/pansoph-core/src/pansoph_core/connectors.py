@@ -456,6 +456,35 @@ async def stop_sync(manager: ConnectorManager, instance_id: str) -> dict[str, An
     return {"status": "stopped" if cleared else "not_running"}
 
 
+async def delete_instance_and_content(manager: ConnectorManager, instance_id: str) -> int:
+    """Delete an instance AND everything it put into pansoph: its chunks, its reader
+    tuples, its ACL records, and its sealed secrets. Returns the documents purged.
+
+    Deleting only the instance row left every indexed document retrievable and the
+    credential stored (CM-H5). Content is purged before the row, so a failed purge leaves
+    the instance in place for a retry rather than orphaning its documents.
+    """
+    from pansoph_ingestion.pipeline import purge_documents
+
+    instance = await manager.get_instance(instance_id)
+    if instance is None:
+        return 0
+    await stop_sync(manager, instance_id)
+    purged = await purge_documents(
+        prefix=f"{instance['connector']}:{instance_id}:",
+        vector_store=assembly.build_vector_store(),
+        authz=assembly.build_authz(),
+        acl_log=assembly.build_acl_log(),
+    )
+    handles = [h for v in (instance.get("config") or {}).values() if (h := secret_handle(v))]
+    if handles:
+        store = assembly.build_secret_store()
+        for name in handles:
+            await store.delete_secret(instance["tenant_id"], name)
+    await manager.delete_instance(instance_id)
+    return purged
+
+
 async def cleanup_orphan_runs(manager: ConnectorManager) -> int:
     """Close out runs left 'running' by a previous process. Called once at startup."""
     return await manager.mark_all_running_interrupted()
