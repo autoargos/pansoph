@@ -107,10 +107,14 @@ class IngestionPipeline:
         acl = narrow(acl, scope_type, scope_ref)
         parsed = await self._parser.parse(raw)
         chunks = chunk_sections(list(parsed.sections))
+        doc_id = Document.make_id(connector_name, ref.instance_id, ref.source_doc_id)
         if not chunks:
+            # Nothing retrievable remains (emptied, or no longer parseable). Purge the
+            # previous version and its grants rather than returning early, which kept the
+            # old chunks and silently dropped any revocation in this version (CM-H2).
+            await self.delete_one(connector_name=connector_name, ref=ref)
             return ConsistencyToken("")
 
-        doc_id = Document.make_id(connector_name, ref.instance_id, ref.source_doc_id)
         embed_texts = await self._embed_texts(parsed.title, chunks)
         vectors = await self._embedder.embed(embed_texts)
 
@@ -135,6 +139,9 @@ class IngestionPipeline:
             )
             for i, chunk in enumerate(chunks)
         ]
+        # Drop every previous chunk first: a shorter new version would otherwise leave its
+        # old trailing chunks (text removed at the source) retrievable (CM-H3).
+        await self._vector_store.delete_by_doc_id(doc_id)
         await self._vector_store.upsert(hits, vectors)
         return token
 
@@ -208,3 +215,36 @@ class IngestionPipeline:
             context = await self._llm.complete(prompt, cache=True)
             out.append(f"{context.strip()}\n\n{chunk}")
         return out
+
+
+async def purge_documents(
+    *,
+    prefix: str,
+    vector_store: VectorStore,
+    authz: AuthzPort,
+    acl_log: AclLog,
+) -> int:
+    """Purge every document whose id starts with `prefix` (a connector instance's
+    `{connector}:{instance_id}:`): its chunks, its reader tuples, and its ACL record.
+
+    Used when a connector instance is deleted, so its content stops being retrievable
+    instead of outliving the instance (CM-H5). The ACL log is the index of what was
+    written, so the exact tuples are reconstructed and removed. Returns the count purged.
+    """
+    list_ids = getattr(acl_log, "doc_ids_with_prefix", None)
+    if list_ids is None:
+        raise NotImplementedError("the configured AclLog cannot list documents by prefix")
+    parts = prefix.split(":")
+    if len(parts) < 3 or not parts[0] or not parts[1]:
+        raise ValueError(f"purge prefix must be '{{connector}}:{{instance}}:', got {prefix!r}")
+    instance_id = parts[1]
+    doc_ids: list[str] = await list_ids(prefix)
+    for doc_id in doc_ids:
+        await vector_store.delete_by_doc_id(doc_id)
+        prior = await acl_log.get(doc_id)
+        if prior is not None:
+            tuples = tuples_for_acl(doc_id, instance_id, prior.acl, tenant_id=prior.tenant_id)
+            if tuples:
+                await authz.delete_tuples(tuples)
+        await acl_log.delete(doc_id)
+    return len(doc_ids)

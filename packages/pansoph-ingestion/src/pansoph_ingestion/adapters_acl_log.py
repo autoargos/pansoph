@@ -78,6 +78,22 @@ class PostgresAclLog:
         finally:
             await conn.close()
 
+    async def doc_ids_with_prefix(self, prefix: str) -> list[str]:
+        """Every doc_id starting with `prefix` (a connector instance's `{connector}:{id}:`).
+        An ops read for purging a deleted instance (CM-H5), never on the retrieval path."""
+        pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        conn = await self._connect()
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT doc_id FROM pansoph_doc_acls WHERE doc_id LIKE %s ORDER BY doc_id",
+                    (pattern,),
+                )
+                rows = await cur.fetchall()
+        finally:
+            await conn.close()
+        return [str(r[0]) for r in rows]
+
     async def delete(self, doc_id: str) -> None:
         conn = await self._connect()
         try:

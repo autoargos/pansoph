@@ -75,3 +75,6 @@ class InMemoryAclLog:
 
     async def delete(self, doc_id: str) -> None:
         self._by_doc.pop(doc_id, None)
+
+    async def doc_ids_with_prefix(self, prefix: str) -> list[str]:
+        return sorted(d for d in self._by_doc if d.startswith(prefix))
