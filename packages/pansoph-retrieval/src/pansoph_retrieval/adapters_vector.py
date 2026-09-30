@@ -109,6 +109,42 @@ class PgVectorScaleStore:
         finally:
             await conn.close()
 
+    async def get_document_chunks(self, doc_id: str, tenant_id: str) -> list[SearchHit]:
+        """Every chunk of one document within a tenant, in chunk order.
+
+        Not part of the VectorStore port and NOT an authorization decision: a caller must
+        run the authz check for `doc_id` and return nothing unless it allows. Used to
+        serve a whole cited source after that check.
+        """
+        conn = await self._connect()
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT chunk_id, doc_id, tenant_id, allow_groups, acl_version, body, deny, "
+                    "consistency_token, acl_written_at FROM pansoph_chunks "
+                    "WHERE doc_id = %s AND tenant_id = %s",
+                    (doc_id, tenant_id),
+                )
+                rows = await cur.fetchall()
+        finally:
+            await conn.close()
+        hits = [
+            SearchHit(
+                chunk_id=r[0],
+                doc_id=r[1],
+                tenant_id=r[2],
+                allow_groups=list(r[3] or []),
+                acl_version=r[4],
+                text=r[5],
+                deny=list(r[6] or []),
+                consistency_token=r[7] or "",
+                acl_written_at=r[8] or 0.0,
+                score=0.0,
+            )
+            for r in rows
+        ]
+        return sorted(hits, key=lambda h: _chunk_index(h.chunk_id))
+
     async def hybrid_search(
         self, query_vector: list[float], query_text: str, flt: VectorFilter, limit: int
     ) -> list[SearchHit]:
@@ -174,6 +210,12 @@ class PgVectorScaleStore:
             ]
         finally:
             await conn.close()
+
+
+def _chunk_index(chunk_id: str) -> int:
+    """The numeric position in a `{doc_id}#{i}` chunk id, for ordering a document."""
+    tail = chunk_id.rsplit("#", 1)[-1]
+    return int(tail) if tail.isdigit() else 0
 
 
 def _vec_literal(vec: list[float]) -> str:

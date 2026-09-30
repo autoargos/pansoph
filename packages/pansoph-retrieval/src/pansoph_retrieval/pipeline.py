@@ -26,11 +26,13 @@ async def retrieve(
     embedder: Embedder,
     authz: AuthzPort,
     reranker: Reranker | None = None,
+    at_least_as_fresh: ConsistencyToken | None = None,
 ) -> list[SearchHit]:
     """Return permission correct, reranked hits for a query.
 
     Steps: embed, hybrid search with coarse pre filter, overfetch, bulk authz
-    check to the allowed subset, then optional rerank to final_k.
+    check to the allowed subset, then optional rerank to final_k. `at_least_as_fresh`
+    overrides the candidate derived consistency token when the caller holds a newer one.
     """
     query_vector = (await embedder.embed([query]))[0]
 
@@ -54,6 +56,11 @@ async def retrieve(
         if freshest and freshest.consistency_token
         else None
     )
+    # A caller that just wrote this subject's memberships (adding or revoking) passes that
+    # write's token, which is newer than every candidate's ACL write, so the check reads
+    # neither a stale revoked membership nor misses a just added one.
+    if at_least_as_fresh:
+        token = at_least_as_fresh
     allowed_ids = await authz.bulk_check(
         subject=subject,
         permission="read",
