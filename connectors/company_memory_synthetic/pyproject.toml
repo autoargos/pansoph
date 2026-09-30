@@ -1,0 +1,18 @@
+[project]
+name = "pansoph-connector-cm-synthetic"
+version = "0.0.1"
+description = "DOOR3 Company Memory fork: a local synthetic corpus connector for demos and permission tests. Never for real data."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = ["pansoph-types>=0.0.1", "pansoph-connector-sdk>=0.0.1"]
+
+[project.entry-points."pansoph.connectors"]
+cm_synthetic = "pansoph_connector_cm_synthetic.connector:SyntheticCorpusConnector"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pansoph_connector_cm_synthetic"]
